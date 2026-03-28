@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Inter, system-ui, sans-serif;
+  background: #F0F2F5;
+  color: #212121;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Scrollbar — ince ve sade */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: #F0F2F5; }
+::-webkit-scrollbar-thumb { background: #BDBDBD; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #9E9E9E; }
+
+/* PLU buton hover efekti */
+.plu-btn:hover { border-color: #1565C0 !important; background: #E3F2FD !important; }
+.plu-btn:active { transform: scale(0.97); }
+
+/* Grup sekme aktif */
+.group-tab-active { background: #1565C0 !important; color: white !important; }
+.group-tab { background: white; border: 1px solid #E0E0E0; color: #424242; cursor: pointer; }
+.group-tab:hover { background: #E3F2FD; border-color: #90CAF9; color: #1565C0; }

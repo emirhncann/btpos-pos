@@ -1,0 +1,26 @@
+# Bağımlılıklar — GitHub'a gönderilmemeli (LFS ile değil, tamamen ignore)
+node_modules/
+
+# Build / çıktı
+dist/
+out/
+release/
+*.local
+
+# Ortam / gizli
+.env
+.env.*
+
+# Loglar / geçici
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Electron / native derleme artıkları
+*.node
+dist-electron/
