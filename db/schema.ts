@@ -55,3 +55,51 @@ export const cashiers = sqliteTable('cashiers', {
   isActive:    integer('is_active', { mode: 'boolean' }).default(true),
   syncedAt:    text('synced_at'),
 })
+
+export const heldDocuments = sqliteTable('held_documents', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  label:       text('label'),
+  items:       text('items').notNull(),
+  totalAmount: real('total_amount').default(0),
+  createdAt:   text('created_at').notNull(),
+})
+
+// PLU grupları (Supabase / API cache)
+export const pluGroupsCache = sqliteTable('plu_groups_cache', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  workplaceId: text('workplace_id'),
+  name:        text('name').notNull(),
+  color:       text('color').notNull().default('#90CAF9'),
+  sortOrder:   integer('sort_order').default(0),
+  syncedAt:    text('synced_at').notNull(),
+})
+
+// PLU kalemleri (cache)
+export const pluItemsCache = sqliteTable('plu_items_cache', {
+  id:          text('id').primaryKey(),
+  groupId:     text('group_id').notNull(),
+  productCode: text('product_code').notNull(),
+  sortOrder:   integer('sort_order').default(0),
+})
+
+// POS ayarları (cache)
+export const posSettingsCache = sqliteTable('pos_settings_cache', {
+  id:          text('id').primaryKey(),
+  showPrice:   integer('show_price', { mode: 'boolean' }).default(true),
+  showCode:    integer('show_code', { mode: 'boolean' }).default(true),
+  showBarcode: integer('show_barcode', { mode: 'boolean' }).default(false),
+  source:      text('source').default('default'),
+  syncedAt:    text('synced_at'),
+})
+
+// Kasanın aldığı komutların lokal geçmişi
+export const commandHistory = sqliteTable('command_history', {
+  id:          text('id').primaryKey(),
+  command:     text('command').notNull(),
+  payload:     text('payload').default('{}'),
+  status:      text('status').notNull(),
+  receivedAt:  text('received_at').notNull(),
+  doneAt:      text('done_at'),
+})

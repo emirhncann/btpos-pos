@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import ActivationScreen   from './screens/ActivationScreen'
 import CashierLoginScreen from './screens/CashierLoginScreen'
 import DashboardScreen    from './screens/DashboardScreen'
 import POSScreen          from './screens/POSScreen'
+import { useCommandPoller } from './hooks/useCommandPoller'
+import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -12,18 +14,79 @@ export default function App() {
   const [terminalId, setTerminalId]     = useState<string | null>(null)
   const [cashier, setCashier]           = useState<CashierRow | null>(null)
   const [allProducts, setAllProducts]   = useState<ProductRow[]>([])
+  const [pluGroups, setPluGroups]       = useState<PluGroupCacheRow[]>([])
+  const [posSettings, setPosSettings]   = useState<PosSettingsRow>({
+    showPrice: true, showCode: true, showBarcode: false, source: 'default',
+  })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
+  const [terminalLocked, setTerminalLocked] = useState(false)
+  const [terminalLockReason, setTerminalLockReason] = useState<string | null>(null)
+  const [merkezToast, setMerkezToast]   = useState<string | null>(null)
+  const [commandSyncing, setCommandSyncing] = useState(false)
+  const [cmdPollTick, setCmdPollTick]   = useState(0)
+
+  const showMerkezToast = useCallback((msg: string) => {
+    setMerkezToast(msg)
+    setTimeout(() => setMerkezToast(null), 3000)
+  }, [])
+
+  const showPopupMessage = useCallback((text: string) => {
+    setPopupMessage(text)
+  }, [])
+
+  const loadPluFromCache = useCallback(async (cId: string) => {
+    const workplaceId = localStorage.getItem('workplace_id') || undefined
+    const cached = await window.electron.db.getPluGroups(cId, workplaceId)
+    setPluGroups(cached)
+  }, [])
+
+  const handleLogout = useCallback(() => {
+    setCashier(null)
+    setAllProducts([])
+    setPluGroups([])
+    setTerminalLocked(false)
+    setTerminalLockReason(null)
+    setMerkezToast(null)
+    setCommandSyncing(false)
+    setState('cashier_login')
+  }, [])
+
+  const merkezHandlers = useMemo(() => {
+    if (!companyId || !terminalId) return noopCommandHandlers
+    return buildMerkezCommandHandlers({
+      companyId,
+      terminalId,
+      setCommandSyncing,
+      onLogout: handleLogout,
+      onShowMessage: showPopupMessage,
+      onSettingsUpdated: setPosSettings,
+      onLock: (reason) => {
+        setTerminalLocked(true)
+        setTerminalLockReason(reason ?? null)
+      },
+      showToast: showMerkezToast,
+      onPluUpdated: setPluGroups,
+    })
+  }, [companyId, terminalId, handleLogout, showMerkezToast, showPopupMessage])
+
+  const pollTerminalId =
+    (state === 'dashboard' || state === 'pos') && terminalId && companyId ? terminalId : null
+
+  useCommandPoller(pollTerminalId, merkezHandlers, {
+    onCommandPersisted: () => setCmdPollTick(t => t + 1),
+  })
 
   useEffect(() => { checkActivation() }, [])
 
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
-    const storedCompanyId  = await window.electron.store.get('company_id')
-    const storedTerminalId = await window.electron.store.get('terminal_id')
+    const storedCompanyId  = await window.electron.store.get('company_id') as string | null
+    const storedTerminalId = await window.electron.store.get('terminal_id') as string | null
 
     if (activated && storedCompanyId) {
-      setCompanyId(storedCompanyId as string)
-      setTerminalId(storedTerminalId as string)
+      setCompanyId(storedCompanyId)
+      setTerminalId(storedTerminalId)
+      window.electron.db.getPosSettings().then(setPosSettings).catch(() => {})
       setState('cashier_login')
     } else {
       setState('activation')
@@ -38,6 +101,7 @@ export default function App() {
 
   function handleCashierLogin(c: CashierRow) {
     setCashier(c)
+    if (companyId) void loadPluFromCache(companyId)
     setState('dashboard')
   }
 
@@ -46,12 +110,6 @@ export default function App() {
       setAllProducts(p)
       setState('pos')
     })
-  }
-
-  function handleLogout() {
-    setCashier(null)
-    setAllProducts([])
-    setState('cashier_login')
   }
 
   if (state === 'loading') return (
@@ -66,6 +124,17 @@ export default function App() {
   if (state === 'cashier_login')
     return <CashierLoginScreen companyId={companyId!} onLogin={handleCashierLogin} />
 
+  if (terminalLocked && cashier && (state === 'dashboard' || state === 'pos')) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1A237E', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
+        <div style={{ fontSize: 64 }}>🔒</div>
+        <div style={{ color: 'white', fontSize: 24, fontWeight: 600 }}>Kasa Kilitli</div>
+        {terminalLockReason && <div style={{ color: '#90CAF9', fontSize: 15 }}>{terminalLockReason}</div>}
+        <div style={{ color: '#5C6BC0', fontSize: 13, marginTop: 8 }}>Yöneticinizle iletişime geçin</div>
+      </div>
+    )
+  }
+
   if (state === 'dashboard')
     return (
       <DashboardScreen
@@ -74,22 +143,27 @@ export default function App() {
         terminalId={terminalId!}
         onStartSale={handleStartSale}
         onLogout={handleLogout}
-        onShowMessage={(text) => setPopupMessage(text)}
+        onShowMessage={showPopupMessage}
+        onPluUpdated={setPluGroups}
+        onSettingsUpdated={setPosSettings}
+        commandSyncing={commandSyncing}
+        merkezToast={merkezToast}
+        cmdPollTick={cmdPollTick}
       />
     )
 
   return (
-    <>
-      <POSScreen
-        companyId={companyId!}
-        cashier={cashier!}
-        allProducts={allProducts}
-        onBack={() => setState('dashboard')}
-        onLogout={handleLogout}
-        pollIntervalSec={30}
-        pendingMessage={popupMessage ? { text: popupMessage } : null}
-        onMessageClose={() => setPopupMessage(null)}
-      />
-    </>
+    <POSScreen
+      companyId={companyId!}
+      cashier={cashier!}
+      allProducts={allProducts}
+      pluGroups={pluGroups}
+      posSettings={posSettings}
+      onBack={() => setState('dashboard')}
+      onLogout={handleLogout}
+      pendingMessage={popupMessage ? { text: popupMessage } : null}
+      onMessageClose={() => setPopupMessage(null)}
+      merkezToast={merkezToast}
+    />
   )
 }

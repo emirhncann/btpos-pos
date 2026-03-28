@@ -1,14 +1,46 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '../lib/api'
-import { useCommandPoller } from '../hooks/useCommandPoller'
+
+const CMD_LABELS: Record<string, string> = {
+  sync_all:       'Tüm veriler güncellendi',
+  sync_products:  'Ürünler güncellendi',
+  sync_prices:    'Fiyatlar güncellendi',
+  sync_plu:       'PLU grupları güncellendi',
+  sync_cashiers:  'Kasiyerler güncellendi',
+  sync_customers: 'Cariler güncellendi',
+  sync_settings:  'Ayarlar güncellendi',
+  logout:         'Kasiyer çıkışı yapıldı',
+  message:        'Yönetici mesajı alındı',
+  restart:        'Uygulama yeniden başlatıldı',
+  lock:           'Kasa kilitlendi',
+}
+
+const CMD_COLORS: Record<string, { bg: string; icon: string }> = {
+  sync_all:       { bg: '#E3F2FD', icon: '📦' },
+  sync_products:  { bg: '#E3F2FD', icon: '🔄' },
+  sync_prices:    { bg: '#E8F5E9', icon: '💰' },
+  sync_plu:       { bg: '#FFF8E1', icon: '🏷️' },
+  sync_cashiers:  { bg: '#F3E5F5', icon: '👤' },
+  sync_customers: { bg: '#FBE9E7', icon: '🏢' },
+  sync_settings:  { bg: '#F5F5F5', icon: '⚙️' },
+  logout:         { bg: '#FFF3E0', icon: '🚪' },
+  message:        { bg: '#E8F5E9', icon: '💬' },
+  restart:        { bg: '#FFF8E1', icon: '🔁' },
+  lock:           { bg: '#FFEBEE', icon: '🔒' },
+}
 
 interface Props {
-  companyId:     string
-  cashier:       CashierRow
-  terminalId:    string
-  onStartSale:   () => void
-  onLogout:      () => void
-  onShowMessage: (text: string) => void
+  companyId:          string
+  cashier:            CashierRow
+  terminalId:         string
+  onStartSale:        () => void
+  onLogout:           () => void
+  onShowMessage:      (text: string) => void
+  onPluUpdated:       (groups: PluGroupCacheRow[]) => void
+  onSettingsUpdated:  (s: PosSettingsRow) => void
+  commandSyncing?:    boolean
+  merkezToast?:       string | null
+  cmdPollTick?:       number
 }
 
 interface DailySummary {
@@ -19,20 +51,37 @@ interface DailySummary {
 }
 
 export default function DashboardScreen({
-  companyId, cashier, terminalId,
+  companyId, cashier,
   onStartSale, onLogout, onShowMessage,
+  commandSyncing = false,
+  merkezToast = null,
+  cmdPollTick = 0,
+  ..._sprint9Props
 }: Props) {
+  void _sprint9Props
   const [summary, setSummary]       = useState<DailySummary>({ saleCount: 0, totalSales: 0, totalCash: 0, totalCard: 0 })
   const [time, setTime]             = useState(new Date())
   const [syncing, setSyncing]       = useState(false)
-  const [locked, setLocked]         = useState(false)
-  const [lockReason, setLockReason] = useState<string | null>(null)
+  const [toast, setToast]           = useState<string | null>(null)
+  const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
+  const [heldCount, setHeldCount]   = useState(0)
+
+  const refreshCmdHistory = useCallback(() => {
+    window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
+  }, [])
 
   useEffect(() => {
     loadDailySummary()
     const tick = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(tick)
   }, [])
+
+  useEffect(() => {
+    refreshCmdHistory()
+    window.electron.db.getHeldDocuments(companyId)
+      .then(docs => setHeldCount(docs.length))
+      .catch(() => {})
+  }, [companyId, refreshCmdHistory, cmdPollTick])
 
   async function loadDailySummary() {
     try {
@@ -72,85 +121,7 @@ export default function DashboardScreen({
     finally { setSyncing(false) }
   }
 
-  useCommandPoller(terminalId, {
-    onSyncAll: async () => {
-      setSyncing(true)
-      try {
-        const data    = await api.getProducts(companyId)
-        const rawList = data?.data?.data ?? []
-        const items: ProductRow[] = rawList.map((p: Record<string, unknown>) => {
-          const cat = p.category as Record<string, unknown> | null
-          return {
-            id:       String(p.id ?? ''),
-            code:     String(p.code ?? ''),
-            name:     String(p.name ?? ''),
-            barcode:  String(p.barcode ?? ''),
-            price:    Number(p.salesPriceTaxIncluded ?? 0),
-            vatRate:  Number(p.vatRate ?? 20),
-            unit:     String(p.mainUnitName ?? 'Adet'),
-            stock:    Number(p.stock ?? 0),
-            category: String(cat?.name ?? 'Diğer'),
-          }
-        })
-        await window.electron.db.saveProducts(items)
-      } finally { setSyncing(false) }
-    },
-
-    onSyncPrices: async () => {
-      const data    = await api.getProducts(companyId)
-      const rawList = data?.data?.data ?? []
-      const local   = await window.electron.db.getProducts()
-      const localMap = new Map(local.map(p => [p.id, p]))
-      const changed = rawList
-        .filter((p: Record<string, unknown>) => {
-          const lp = localMap.get(String(p.id))
-          return lp && lp.price !== Number(p.salesPriceTaxIncluded ?? 0)
-        })
-        .map((p: Record<string, unknown>) => {
-          const cat = p.category as Record<string, unknown> | null
-          return {
-            id: String(p.id), code: String(p.code ?? ''), name: String(p.name ?? ''),
-            barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
-            vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
-            stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
-          }
-        })
-      if (changed.length > 0) {
-        const all = local.map(lp => changed.find((c: ProductRow) => c.id === lp.id) ?? lp)
-        await window.electron.db.saveProducts(all)
-      }
-    },
-
-    onSyncCashiers: async () => {
-      const cashiers = await api.getCashiers(companyId)
-      await window.electron.db.saveCashiers(cashiers)
-    },
-
-    onLogout: () => onLogout(),
-
-    onMessage: (text) => onShowMessage(text),
-
-    onRestart: () => window.electron.app.restart(),
-
-    onLock: (reason) => {
-      setLocked(true)
-      setLockReason(reason ?? null)
-    },
-  })
-
   const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  // Kilit ekranı
-  if (locked) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1A237E', alignItems: 'center', justifyContent: 'center', gap: 24 }}>
-        <div style={{ fontSize: 64 }}>🔒</div>
-        <div style={{ color: 'white', fontSize: 24, fontWeight: 600 }}>Kasa Kilitli</div>
-        {lockReason && <div style={{ color: '#90CAF9', fontSize: 15 }}>{lockReason}</div>}
-        <div style={{ color: '#5C6BC0', fontSize: 13, marginTop: 8 }}>Yöneticinizle iletişime geçin</div>
-      </div>
-    )
-  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#F0F2F5' }}>
@@ -170,8 +141,10 @@ export default function DashboardScreen({
         </span>
       </div>
 
-      {/* Ana içerik */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28, padding: 40 }}>
+      {/* Ana içerik — butonlar + feed yan yana */}
+      <div style={{ flex: 1, display: 'flex', gap: 32, alignItems: 'flex-start', justifyContent: 'center', padding: 40, flexWrap: 'wrap' }}>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, flex: '0 1 auto' }}>
 
         {/* Kasiyer kartı */}
         <div style={{ background: 'white', borderRadius: 16, padding: '24px 40px', textAlign: 'center', border: '1px solid #E0E0E0', minWidth: 320 }}>
@@ -212,11 +185,11 @@ export default function DashboardScreen({
 
           <button
             onClick={handleSync}
-            disabled={syncing}
-            style={{ background: 'white', color: '#424242', border: '1px solid #E0E0E0', borderRadius: 16, cursor: syncing ? 'default' : 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500, opacity: syncing ? 0.6 : 1 }}
+            disabled={syncing || commandSyncing}
+            style={{ background: 'white', color: '#424242', border: '1px solid #E0E0E0', borderRadius: 16, cursor: (syncing || commandSyncing) ? 'default' : 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500, opacity: (syncing || commandSyncing) ? 0.6 : 1 }}
           >
             <span style={{ fontSize: 28 }}>🔄</span>
-            <span>{syncing ? 'Güncelleniyor...' : 'Ürünleri Güncelle'}</span>
+            <span>{(syncing || commandSyncing) ? 'Güncelleniyor...' : 'Ürünleri Güncelle'}</span>
           </button>
 
           <button
@@ -227,7 +200,63 @@ export default function DashboardScreen({
             <span>Kasiyer Çıkışı</span>
           </button>
         </div>
+
+        </div>
+
+        {/* Sağ — aktivite feed */}
+        <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
+
+          {heldCount > 0 && (
+            <div style={{ background: '#F3E5F5', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 24 }}>⏸</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#6A1B9A' }}>{heldCount} Bekletilen Belge</div>
+                <div style={{ fontSize: 11, color: '#9C27B0' }}>Satış ekranından getirilebilir</div>
+              </div>
+            </div>
+          )}
+
+          <div style={{ background: 'white', borderRadius: 12, border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#212121' }}>Son Komutlar</span>
+              <span style={{ fontSize: 10, color: '#9E9E9E' }}>Son {cmdHistory.length} işlem</span>
+            </div>
+            {cmdHistory.length === 0 ? (
+              <div style={{ padding: '24px 16px', textAlign: 'center', color: '#BDBDBD', fontSize: 12 }}>
+                Henüz komut alınmadı
+              </div>
+            ) : (
+              cmdHistory.map(cmd => (
+                <div key={cmd.id} style={{ padding: '10px 16px', borderBottom: '1px solid #F9F9F9', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: CMD_COLORS[cmd.command]?.bg ?? '#F5F5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+                    {CMD_COLORS[cmd.command]?.icon ?? '📋'}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#212121' }}>
+                      {CMD_LABELS[cmd.command] ?? cmd.command}
+                      {cmd.command === 'message' && cmd.payload.text != null && String(cmd.payload.text).length > 0 && (
+                        <span style={{ fontWeight: 400, color: '#757575' }}>
+                          {` — "${String(cmd.payload.text).slice(0, 30)}${String(cmd.payload.text).length > 30 ? '...' : ''}"`}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9E9E9E', marginTop: 1 }}>
+                      {new Date(cmd.receivedAt).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
+                    </div>
+                  </div>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: cmd.status === 'done' ? '#4CAF50' : '#F44336', flexShrink: 0 }} />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
       </div>
+
+      {(toast || merkezToast) && (
+        <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#212121', color: 'white', padding: '10px 20px', borderRadius: 8, fontSize: 13, zIndex: 10000, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+          {toast ?? merkezToast}
+        </div>
+      )}
     </div>
   )
 }

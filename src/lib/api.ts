@@ -1,4 +1,4 @@
-const API_URL = 'https://api.btpos.com.tr'
+export const API_URL = 'https://api.btpos.com.tr'
 
 export const api = {
 
@@ -31,6 +31,21 @@ export const api = {
     return res.json()
   },
 
+  async getCustomers(companyId: string): Promise<CustomerRow[]> {
+    const res = await fetch(`${API_URL}/integration/customers/${companyId}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    const list = data?.data?.data ?? data?.data?.items ?? data?.items ?? data ?? []
+    return list.map((c: Record<string, unknown>) => ({
+      id:      String(c.id ?? ''),
+      code:    String(c.code ?? c.Code ?? ''),
+      name:    String(c.name ?? c.Name ?? c.title ?? ''),
+      phone:   String(c.phone ?? c.Phone ?? c.gsm ?? ''),
+      taxNo:   String(c.taxNo ?? c.vkn ?? ''),
+      balance: Number(c.balance ?? c.Balance ?? 0),
+    }))
+  },
+
   async getCashiers(companyId: string): Promise<CashierRow[]> {
     const res = await fetch(`${API_URL}/cashiers/${companyId}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -43,17 +58,6 @@ export const api = {
       role:        String(c.role ?? 'cashier'),
       isActive:    Boolean(c.is_active ?? true),
     }))
-  },
-
-  // PLU gruplarını getir — workplace öncelikli
-  async getPluGroups(companyId: string, workplaceId?: string | null): Promise<PluGroup[]> {
-    const url = workplaceId
-      ? `${API_URL}/workplaces/${workplaceId}/plu`
-      : `${API_URL}/plu/groups/${companyId}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    return Array.isArray(data) ? data : []
   },
 
   // Komutları dinle (poll)
@@ -92,4 +96,30 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.json()
   },
+
+  async getPosSettings(companyId: string, workplaceId?: string | null, terminalId?: string | null): Promise<PosSettingsRow> {
+    const params = new URLSearchParams({ company_id: companyId })
+    if (workplaceId) params.append('workplace_id', workplaceId)
+    if (terminalId)  params.append('terminal_id',  terminalId)
+    const res = await fetch(`${API_URL}/pos-settings/resolve?${params}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    return {
+      showPrice:   Boolean(data.show_price ?? true),
+      showCode:    Boolean(data.show_code ?? true),
+      showBarcode: Boolean(data.show_barcode ?? false),
+      source:      String(data.source ?? 'default'),
+    }
+  },
+}
+
+/** Sunucudan PLU listesi — yalnızca sync_plu (veya benzeri komut) işlenirken; POS doğrudan SQLite okur. */
+export async function fetchPluGroupsFromServer(companyId: string, workplaceId?: string | null): Promise<PluGroup[]> {
+  const url = workplaceId
+    ? `${API_URL}/workplaces/${workplaceId}/plu`
+    : `${API_URL}/plu/groups/${companyId}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
 }

@@ -70,6 +70,53 @@ export function initDB() {
       is_active    INTEGER DEFAULT 1,
       synced_at    TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS held_documents (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      label        TEXT,
+      items        TEXT NOT NULL,
+      total_amount REAL DEFAULT 0,
+      created_at   TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_groups_cache (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      workplace_id TEXT,
+      name         TEXT NOT NULL,
+      color        TEXT NOT NULL DEFAULT '#90CAF9',
+      sort_order   INTEGER DEFAULT 0,
+      synced_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_items_cache (
+      id           TEXT PRIMARY KEY,
+      group_id     TEXT NOT NULL,
+      product_code TEXT NOT NULL,
+      sort_order   INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS pos_settings_cache (
+      id           TEXT PRIMARY KEY DEFAULT 'local',
+      show_price   INTEGER DEFAULT 1,
+      show_code    INTEGER DEFAULT 1,
+      show_barcode INTEGER DEFAULT 0,
+      source       TEXT DEFAULT 'default',
+      synced_at    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS command_history (
+      id          TEXT PRIMARY KEY,
+      command     TEXT NOT NULL,
+      payload     TEXT DEFAULT '{}',
+      status      TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      done_at     TEXT
+    );
+
+    INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, source)
+    VALUES ('local', 1, 1, 0, 'default');
   `)
 
   return db

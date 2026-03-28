@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu } from 'electron'
+import { exec } from 'child_process'
 import { join } from 'path'
 import Store from 'electron-store'
 import { initDB } from '../db/index'
@@ -103,6 +104,60 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getCashiers', async () => {
     const { getAllCashiers } = await import('../db/operations')
     return getAllCashiers()
+  })
+
+  ipcMain.handle('app:openKeyboard', () => {
+    if (process.platform !== 'win32') return
+    exec('C:\\Windows\\System32\\osk.exe', err => {
+      if (err) {
+        exec('C:\\Program Files\\Common Files\\microsoft shared\\ink\\TabTip.exe')
+      }
+    })
+  })
+
+  ipcMain.handle('db:holdDocument', async (_e, doc) => {
+    const { holdDocument } = await import('../db/operations')
+    return holdDocument(doc)
+  })
+
+  ipcMain.handle('db:getHeldDocuments', async (_e, companyId: string) => {
+    const { getHeldDocuments } = await import('../db/operations')
+    return getHeldDocuments(companyId)
+  })
+
+  ipcMain.handle('db:deleteHeldDocument', async (_e, id: string) => {
+    const { deleteHeldDocument } = await import('../db/operations')
+    return deleteHeldDocument(id)
+  })
+
+  ipcMain.handle('db:savePluGroups', async (_e, groups: unknown) => {
+    const { savePluGroups } = await import('../db/operations')
+    savePluGroups(groups as import('../db/operations').PluGroupCacheRow[])
+  })
+
+  ipcMain.handle('db:getPluGroups', async (_e, companyId: string, wpId?: string | null) => {
+    const { getPluGroups } = await import('../db/operations')
+    return getPluGroups(companyId, wpId)
+  })
+
+  ipcMain.handle('db:savePosSettings', async (_e, settings: unknown) => {
+    const { savePosSettings } = await import('../db/operations')
+    savePosSettings(settings as import('../db/operations').PosSettingsRow)
+  })
+
+  ipcMain.handle('db:getPosSettings', async () => {
+    const { getPosSettings } = await import('../db/operations')
+    return getPosSettings()
+  })
+
+  ipcMain.handle('db:saveCommandHistory', async (_e, row: unknown) => {
+    const { saveCommandHistory } = await import('../db/operations')
+    saveCommandHistory(row as import('../db/operations').CommandHistoryRow)
+  })
+
+  ipcMain.handle('db:getCommandHistory', async (_e, limit?: number) => {
+    const { getCommandHistory } = await import('../db/operations')
+    return getCommandHistory(limit ?? 20)
   })
 })
 

@@ -12,23 +12,42 @@ declare global {
         info: () => Promise<DeviceInfo>
       }
       app: {
-        version: () => Promise<string>
-        restart: () => Promise<void>
+        version:      () => Promise<string>
+        restart:      () => Promise<void>
+        openKeyboard: () => Promise<void>
       }
       window: {
         isFullscreen:    () => Promise<boolean>
         toggleFullscreen: () => Promise<void>
       }
       db: {
-        saveProducts:  (products: unknown[]) => Promise<number>
-        getProducts:   () => Promise<ProductRow[]>
-        saveSale:      (sale: SaleRow, items: SaleItem[]) => Promise<string>
-        getSales:      (dateFrom?: string, dateTo?: string) => Promise<SaleRecord[]>
-        saveCashiers:  (cashiers: unknown[]) => Promise<number>
-        verifyCashier: (code: string, password: string) => Promise<CashierRow | null>
-        getCashiers:   () => Promise<CashierRow[]>
+        saveProducts:       (products: unknown[]) => Promise<number>
+        getProducts:        () => Promise<ProductRow[]>
+        saveSale:           (sale: SaleRow, items: SaleItem[]) => Promise<string>
+        getSales:           (dateFrom?: string, dateTo?: string) => Promise<SaleRecord[]>
+        saveCashiers:       (cashiers: unknown[]) => Promise<number>
+        verifyCashier:      (code: string, password: string) => Promise<CashierRow | null>
+        getCashiers:        () => Promise<CashierRow[]>
+        holdDocument:       (doc: unknown) => Promise<string>
+        getHeldDocuments:   (companyId: string) => Promise<HeldDocRow[]>
+        deleteHeldDocument: (id: string) => Promise<void>
+        savePluGroups:      (groups: unknown[]) => Promise<void>
+        getPluGroups:       (companyId: string, wpId?: string) => Promise<PluGroupCacheRow[]>
+        savePosSettings:    (settings: PosSettingsRow) => Promise<void>
+        getPosSettings:     () => Promise<PosSettingsRow>
+        saveCommandHistory: (row: CommandHistoryRow) => Promise<void>
+        getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
       }
     }
+  }
+
+  interface CommandHistoryRow {
+    id:         string
+    command:    string
+    payload:    Record<string, unknown>
+    status:     string
+    receivedAt: string
+    doneAt?:    string
   }
 
   interface DeviceInfo {
@@ -92,5 +111,52 @@ declare global {
     totalAmount: number
     paymentType: string
     createdAt:   string
+  }
+
+  interface CartItem {
+    id:        string
+    code:      string
+    name:      string
+    category:  string
+    price:     number
+    vatRate:   number
+    unit:      string
+    quantity:  number
+    lineTotal: number
+  }
+
+  interface HeldDocRow {
+    id:          string
+    companyId:   string
+    label?:      string
+    items:       CartItem[]
+    totalAmount: number
+    createdAt:   string
+  }
+
+  interface CustomerRow {
+    id:      string
+    code:    string
+    name:    string
+    phone:   string
+    taxNo:   string
+    balance: number
+  }
+
+  interface PluGroupCacheRow {
+    id:          string
+    companyId:   string
+    workplaceId?: string
+    name:        string
+    color:       string
+    sortOrder:   number
+    plu_items:   Array<{ id: string; product_code: string; sort_order: number }>
+  }
+
+  interface PosSettingsRow {
+    showPrice:   boolean
+    showCode:    boolean
+    showBarcode: boolean
+    source:      string
   }
 }

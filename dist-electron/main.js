@@ -1,5 +1,6 @@
 "use strict";
 require("electron");
+require("child_process");
 require("path");
 require("electron-store");
-require("./main-B2eRq-k1.js");
+require("./main-CtCNH8cX.js");
