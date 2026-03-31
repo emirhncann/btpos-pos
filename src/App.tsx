@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import ActivationScreen   from './screens/ActivationScreen'
 import CashierLoginScreen from './screens/CashierLoginScreen'
 import DashboardScreen    from './screens/DashboardScreen'
@@ -67,7 +67,15 @@ export default function App() {
       showToast: showMerkezToast,
       onPluUpdated: setPluGroups,
     })
-  }, [companyId, terminalId, handleLogout, showMerkezToast, showPopupMessage])
+  }, [
+    companyId,
+    terminalId,
+    handleLogout,
+    showMerkezToast,
+    showPopupMessage,
+    setPluGroups,
+    setPosSettings,
+  ])
 
   const pollTerminalId =
     (state === 'dashboard' || state === 'pos') && terminalId && companyId ? terminalId : null

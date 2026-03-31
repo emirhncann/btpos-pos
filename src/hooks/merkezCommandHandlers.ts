@@ -48,23 +48,45 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onSyncAll: async () => {
       d.setCommandSyncing(true)
       try {
-        const data    = await api.getProducts(d.companyId)
-        const rawList = data?.data?.data ?? []
-        const items: ProductRow[] = rawList.map((p: Record<string, unknown>) => {
-          const cat = p.category as Record<string, unknown> | null
-          return {
-            id:       String(p.id ?? ''),
-            code:     String(p.code ?? ''),
-            name:     String(p.name ?? ''),
-            barcode:  String(p.barcode ?? ''),
-            price:    Number(p.salesPriceTaxIncluded ?? 0),
-            vatRate:  Number(p.vatRate ?? 20),
-            unit:     String(p.mainUnitName ?? 'Adet'),
-            stock:    Number(p.stock ?? 0),
-            category: String(cat?.name ?? 'Diğer'),
-          }
-        })
-        await window.electron.db.saveProducts(items)
+        // Ürünleri çek — hata olursa devam et
+        try {
+          const data = await api.getProducts(d.companyId)
+          const rawList = data?.data?.data ?? []
+          const items: ProductRow[] = rawList.map((p: Record<string, unknown>) => {
+            const cat = p.category as Record<string, unknown> | null
+            return {
+              id: String(p.id ?? ''), code: String(p.code ?? ''), name: String(p.name ?? ''),
+              barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
+              vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
+              stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
+            }
+          })
+          await window.electron.db.saveProducts(items)
+        } catch (e) {
+          console.warn('[sync_all] Ürün sync hatası (devam ediliyor):', e)
+        }
+
+        // PLU sync — bağımsız çalış
+        try {
+          const workplaceId = localStorage.getItem('workplace_id') || null
+          const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
+          const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
+          await window.electron.db.savePluGroups(cacheRows)
+          const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+          d.onPluUpdated(cached)
+        } catch (e) {
+          console.warn('[sync_all] PLU sync hatası:', e)
+        }
+
+        // Kasiyer sync
+        try {
+          const cashiers = await api.getCashiers(d.companyId)
+          await window.electron.db.saveCashiers(cashiers)
+        } catch (e) {
+          console.warn('[sync_all] Kasiyer sync hatası:', e)
+        }
+
+        d.showToast('Güncelleme tamamlandı')
       } finally {
         d.setCommandSyncing(false)
       }
@@ -109,13 +131,22 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onLock: (reason) => d.onLock(reason),
 
     onSyncPlu: async () => {
-      const workplaceId = localStorage.getItem('workplace_id') || null
-      const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
-      const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
-      await window.electron.db.savePluGroups(cacheRows)
-      const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
-      d.onPluUpdated(cached)
-      d.showToast('PLU grupları güncellendi')
+      console.log('[onSyncPlu] başladı')
+      try {
+        const workplaceId = localStorage.getItem('workplace_id') || null
+        const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
+        console.log('[onSyncPlu] gruplar geldi:', groups.length)
+        const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
+        await window.electron.db.savePluGroups(cacheRows)
+        const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+        console.log('[onSyncPlu] cache güncellendi:', cached.map(g => g.name))
+        d.onPluUpdated(cached)
+        console.log('[onSyncPlu] state güncellendi')
+        d.showToast('PLU grupları güncellendi')
+      } catch (e) {
+        console.error('[onSyncPlu] HATA:', e)
+        throw e
+      }
     },
 
     onSyncCustomers: async () => {

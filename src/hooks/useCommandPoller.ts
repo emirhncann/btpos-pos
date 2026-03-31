@@ -36,8 +36,11 @@ export function useCommandPoller(
   const poll = useCallback(async () => {
     if (!terminalId || !activeRef.current) return
 
+    console.log('[POLL] çalışıyor', new Date().toLocaleTimeString())
+
     try {
       const res = await api.pollCommands(terminalId)
+      console.log('[POLL] komut sayısı:', res.commands?.length ?? 0)
 
       intervalRef.current = res.poll_interval ?? 30
 
