@@ -16,7 +16,14 @@ export default function App() {
   const [allProducts, setAllProducts]   = useState<ProductRow[]>([])
   const [pluGroups, setPluGroups]       = useState<PluGroupCacheRow[]>([])
   const [posSettings, setPosSettings]   = useState<PosSettingsRow>({
-    showPrice: true, showCode: true, showBarcode: false, source: 'default',
+    showPrice: true, showCode: true, showBarcode: false,
+    duplicateItemAction: 'increase_qty',
+    minQtyPerLine: 1,
+    allowLineDiscount: true,
+    allowDocDiscount: true,
+    maxLineDiscountPct: 100,
+    maxDocDiscountPct: 100,
+    source: 'default',
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
   const [terminalLocked, setTerminalLocked] = useState(false)
@@ -24,6 +31,7 @@ export default function App() {
   const [merkezToast, setMerkezToast]   = useState<string | null>(null)
   const [commandSyncing, setCommandSyncing] = useState(false)
   const [cmdPollTick, setCmdPollTick]   = useState(0)
+  const [cartActive, setCartActive]     = useState(false)
 
   const showMerkezToast = useCallback((msg: string) => {
     setMerkezToast(msg)
@@ -44,6 +52,7 @@ export default function App() {
     setCashier(null)
     setAllProducts([])
     setPluGroups([])
+    setCartActive(false)
     setTerminalLocked(false)
     setTerminalLockReason(null)
     setMerkezToast(null)
@@ -82,6 +91,7 @@ export default function App() {
 
   useCommandPoller(pollTerminalId, merkezHandlers, {
     onCommandPersisted: () => setCmdPollTick(t => t + 1),
+    isCartActive: () => cartActive,
   })
 
   useEffect(() => { checkActivation() }, [])
@@ -114,8 +124,14 @@ export default function App() {
   }
 
   function handleStartSale() {
-    window.electron.db.getProducts().then(p => {
+    window.electron.db.getProducts().then(async p => {
       setAllProducts(p)
+      try {
+        const fresh = await window.electron.db.getPosSettings()
+        setPosSettings(fresh)
+      } catch {
+        /* SQLite okunamazsa mevcut state kalır */
+      }
       setState('pos')
     })
   }
@@ -167,11 +183,15 @@ export default function App() {
       allProducts={allProducts}
       pluGroups={pluGroups}
       posSettings={posSettings}
-      onBack={() => setState('dashboard')}
+      onBack={() => {
+        setCartActive(false)
+        setState('dashboard')
+      }}
       onLogout={handleLogout}
       pendingMessage={popupMessage ? { text: popupMessage } : null}
       onMessageClose={() => setPopupMessage(null)}
       merkezToast={merkezToast}
+      onCartChange={setCartActive}
     />
   )
 }

@@ -34,6 +34,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
     savePosSettings: (settings) => electron.ipcRenderer.invoke("db:savePosSettings", settings),
     getPosSettings: () => electron.ipcRenderer.invoke("db:getPosSettings"),
     saveCommandHistory: (row) => electron.ipcRenderer.invoke("db:saveCommandHistory", row),
-    getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit)
+    getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
+    syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),
+    syncPluGroupsAcid: (groups, mode) => electron.ipcRenderer.invoke("db:syncPluGroupsAcid", groups, mode ?? "full"),
+    syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full")
   }
 });

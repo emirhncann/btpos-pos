@@ -159,6 +159,21 @@ app.whenReady().then(async () => {
     const { getCommandHistory } = await import('../db/operations')
     return getCommandHistory(limit ?? 20)
   })
+
+  ipcMain.handle('db:syncProductsAcid', async (_e, items, mode) => {
+    const { syncProductsAcid } = await import('../db/operations')
+    return syncProductsAcid(items as import('../db/operations').ProductRow[], (mode === 'diff' ? 'diff' : 'full'))
+  })
+
+  ipcMain.handle('db:syncPluGroupsAcid', async (_e, groups, mode) => {
+    const { syncPluGroupsAcid } = await import('../db/operations')
+    return syncPluGroupsAcid(groups as import('../db/operations').PluGroupCacheRow[], (mode === 'diff' ? 'diff' : 'full'))
+  })
+
+  ipcMain.handle('db:syncCashiersAcid', async (_e, cashierList, companyId, mode) => {
+    const { syncCashiersAcid } = await import('../db/operations')
+    return syncCashiersAcid(cashierList as import('../db/operations').CashierRow[], companyId, (mode === 'diff' ? 'diff' : 'full'))
+  })
 })
 
 app.on('window-all-closed', () => {

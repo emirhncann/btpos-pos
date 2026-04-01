@@ -103,12 +103,18 @@ export const api = {
     if (terminalId)  params.append('terminal_id',  terminalId)
     const res = await fetch(`${API_URL}/pos-settings/resolve?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const d = await res.json()
     return {
-      showPrice:   Boolean(data.show_price ?? true),
-      showCode:    Boolean(data.show_code ?? true),
-      showBarcode: Boolean(data.show_barcode ?? false),
-      source:      String(data.source ?? 'default'),
+      showPrice:           Boolean(d.show_price ?? true),
+      showCode:            Boolean(d.show_code ?? true),
+      showBarcode:         Boolean(d.show_barcode ?? false),
+      duplicateItemAction: d.duplicate_item_action === 'add_new' ? 'add_new' : 'increase_qty',
+      minQtyPerLine:       Number(d.min_qty_per_line ?? 1),
+      allowLineDiscount:   Boolean(d.allow_line_discount ?? true),
+      allowDocDiscount:    Boolean(d.allow_doc_discount ?? true),
+      maxLineDiscountPct:  Number(d.max_line_discount_pct ?? 100),
+      maxDocDiscountPct:   Number(d.max_doc_discount_pct ?? 100),
+      source:              String(d.source ?? 'default'),
     }
   },
 }

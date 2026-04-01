@@ -35,5 +35,8 @@ contextBridge.exposeInMainWorld('electron', {
     getPosSettings:     ()                                   => ipcRenderer.invoke('db:getPosSettings'),
     saveCommandHistory: (row: unknown)                        => ipcRenderer.invoke('db:saveCommandHistory', row),
     getCommandHistory:  (limit?: number)                     => ipcRenderer.invoke('db:getCommandHistory', limit),
+    syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),
+    syncPluGroupsAcid:  (groups: unknown[], mode?: string)                    => ipcRenderer.invoke('db:syncPluGroupsAcid', groups, mode ?? 'full'),
+    syncCashiersAcid:   (cashiers: unknown[], companyId: string, mode?: string) => ipcRenderer.invoke('db:syncCashiersAcid', cashiers, companyId, mode ?? 'full'),
   },
 })

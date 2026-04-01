@@ -5,16 +5,17 @@ import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { api } from '../lib/api'
 
-interface CartItem {
-  id:        string
-  code:      string
-  name:      string
-  category:  string
-  price:     number
-  vatRate:   number
-  unit:      string
-  quantity:  number
-  lineTotal: number
+function hexToSoft(hex: string): string {
+  try {
+    if (!hex?.startsWith('#') || hex.length < 7) return '#E3F2FD'
+    const r = parseInt(hex.slice(1, 3), 16)
+    const g = parseInt(hex.slice(3, 5), 16)
+    const b = parseInt(hex.slice(5, 7), 16)
+    if ([r, g, b].some(n => Number.isNaN(n))) return '#E3F2FD'
+    return `rgba(${r}, ${g}, ${b}, 0.12)`
+  } catch {
+    return '#E3F2FD'
+  }
 }
 
 interface Props {
@@ -28,6 +29,7 @@ interface Props {
   pendingMessage?: { text: string } | null
   onMessageClose?: () => void
   merkezToast?:    string | null
+  onCartChange?:   (hasItems: boolean) => void
 }
 
 const fmt = (n: number) =>
@@ -40,7 +42,22 @@ function nextReceiptNo(): string {
   return `FIS-${String(receiptCounter).padStart(5, '0')}`
 }
 
-const PLU_PER_PAGE = 9  // 3 × 3 fix
+const PLU_PER_PAGE = 15  // 3 × 5
+
+function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
+  let net = lineTotal
+  if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
+  if (amount > 0) net = parseFloat((net - amount).toFixed(2))
+  return Math.max(0, net)
+}
+
+function normalizeHeldCartItem(i: CartItem): CartItem {
+  const lineTotal = i.lineTotal
+  const discountRate = i.discountRate ?? 0
+  const discountAmount = i.discountAmount ?? 0
+  const netTotal = i.netTotal ?? calcLineDiscount(lineTotal, discountRate, discountAmount)
+  return { ...i, lineTotal, discountRate, discountAmount, netTotal }
+}
 
 export default function POSScreen({
   companyId, cashier, allProducts,
@@ -48,6 +65,7 @@ export default function POSScreen({
   onBack, onLogout,
   pendingMessage, onMessageClose,
   merkezToast = null,
+  onCartChange,
 }: Props) {
 
   /* ── State ── */
@@ -62,6 +80,13 @@ export default function POSScreen({
   const [saving, setSaving]               = useState(false)
   const [lastReceipt, setLastReceipt]     = useState<string | null>(null)
   const [cancelMode, setCancelMode]       = useState(false)
+  const [cancelWarning, setCancelWarning] = useState<string | null>(null)
+  const [docDiscountMode, setDocDiscountMode] = useState(false)
+  const [docDiscountRate, setDocDiscountRate] = useState(0)
+  const [docDiscountAmt, setDocDiscountAmt]   = useState(0)
+  const [lineDiscountTarget, setLineDiscountTarget] = useState<string | null>(null)
+  const [lineDiscRateIn, setLineDiscRateIn]   = useState('')
+  const [lineDiscAmtIn, setLineDiscAmtIn]     = useState('')
   const [menuOpen, setMenuOpen]           = useState(false)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
@@ -90,6 +115,16 @@ export default function POSScreen({
   useEffect(() => { loadHeld() }, [loadHeld])
   useEffect(() => { searchRef.current?.focus() }, [])
 
+  useEffect(() => {
+    onCartChange?.(cart.length > 0)
+  }, [cart.length, onCartChange])
+
+  useEffect(() => {
+    return () => {
+      onCartChange?.(false)
+    }
+  }, [onCartChange])
+
   /* ── Ürün listesi ── */
   const groupProducts = (() => {
     if (!activeGroup) return allProducts
@@ -115,33 +150,88 @@ export default function POSScreen({
 
   useEffect(() => { setPage(0) }, [activeGroup, searchQ])
 
+  function showCancelWarning(msg: string) {
+    setCancelWarning(msg)
+    setTimeout(() => setCancelWarning(null), 3000)
+  }
+
+  useEffect(() => {
+    if (!lineDiscountTarget) {
+      setLineDiscRateIn('')
+      setLineDiscAmtIn('')
+      return
+    }
+    const c = cart.find(x => x.id === lineDiscountTarget)
+    if (c) {
+      setLineDiscRateIn(c.discountRate ? String(c.discountRate) : '')
+      setLineDiscAmtIn(c.discountAmount ? String(c.discountAmount) : '')
+    }
+  }, [lineDiscountTarget])
+
   /* ── Barkod okuyucu ── */
   useEffect(() => {
     if (searchQ.length < 2) return
     const t = setTimeout(() => {
-      const p = allProducts.find(x => x.barcode === searchQ)
-      if (p) {
-        addToCartWithQty(p, numBuf ? Math.max(1, parseInt(numBuf)) : 1)
-        setNumBuf('')
-        setSearchQ('')
+      const byBarcode = allProducts.find(p => p.barcode === searchQ)
+      if (!byBarcode) return
+      const qty = numBuf ? Math.max(1, parseInt(numBuf, 10)) : 1
+      setNumBuf('')
+      setSearchQ('')
+
+      if (cancelMode) {
+        setCart(prev => {
+          const ex = prev.find(c => c.id === byBarcode.id)
+          if (!ex) {
+            showCancelWarning('Bu ürün sepette yok.')
+            return prev
+          }
+          if (ex.quantity < qty) {
+            showCancelWarning(`Sepette ${ex.quantity} adet var, ${qty} adet düşülemez.`)
+            return prev
+          }
+          if (ex.quantity === qty) {
+            const next = prev.filter(c => c.id !== byBarcode.id)
+            if (next.length === 0) setCancelMode(false)
+            return next
+          }
+          const newQty = ex.quantity - qty
+          const newTotal = parseFloat((newQty * ex.price).toFixed(2))
+          const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
+          return prev.map(c => c.id === byBarcode.id
+            ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
+            : c
+          )
+        })
+        return
       }
+      addToCartWithQty(byBarcode, qty)
     }, 300)
     return () => clearTimeout(t)
-  }, [searchQ])
+  }, [searchQ, cancelMode, numBuf, allProducts])
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
     setCart(prev => {
       const ex = prev.find(c => c.id === product.id)
-      if (ex) return prev.map(c => c.id === product.id
-        ? { ...c, quantity: c.quantity + qty, lineTotal: (c.quantity + qty) * c.price }
-        : c
-      )
+      const dup = posSettings.duplicateItemAction ?? 'increase_qty'
+
+      if (ex && dup === 'increase_qty') {
+        const newQty = ex.quantity + qty
+        const newTotal = parseFloat((newQty * ex.price).toFixed(2))
+        const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
+        return prev.map(c => c.id === product.id
+          ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
+          : c
+        )
+      }
+
+      const lineTotal = parseFloat((product.price * qty).toFixed(2))
       return [...prev, {
         id: product.id, code: product.code ?? '', name: product.name,
         category: product.category ?? '', price: product.price,
         vatRate: product.vatRate ?? 18, unit: product.unit ?? 'Adet',
-        quantity: qty, lineTotal: product.price * qty,
+        quantity: qty, lineTotal,
+        discountRate: 0, discountAmount: 0, netTotal: lineTotal,
       }]
     })
   }
@@ -154,12 +244,31 @@ export default function POSScreen({
   }
 
   function updateQty(id: string, delta: number) {
-    setCart(prev => prev
-      .map(c => c.id === id
-        ? { ...c, quantity: Math.max(1, c.quantity + delta), lineTotal: Math.max(1, c.quantity + delta) * c.price }
-        : c
-      )
-    )
+    const minQty = posSettings.minQtyPerLine ?? 1
+    setCart(prev => prev.map(c => {
+      if (c.id !== id) return c
+      const newQty = Math.max(minQty, c.quantity + delta)
+      const newTotal = parseFloat((newQty * c.price).toFixed(2))
+      const netTotal = calcLineDiscount(newTotal, c.discountRate, c.discountAmount)
+      return { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
+    }))
+  }
+
+  function applyLineDiscount() {
+    if (!lineDiscountTarget) return
+    const rate = parseFloat(lineDiscRateIn) || 0
+    const amt = parseFloat(lineDiscAmtIn) || 0
+    const maxPct = posSettings.maxLineDiscountPct ?? 100
+    if (rate > maxPct) {
+      alert(`Maksimum satır iskontosu %${maxPct}`)
+      return
+    }
+    setCart(prev => prev.map(c => {
+      if (c.id !== lineDiscountTarget) return c
+      const netTotal = calcLineDiscount(c.lineTotal, rate, amt)
+      return { ...c, discountRate: rate, discountAmount: amt, netTotal }
+    }))
+    setLineDiscountTarget(null)
   }
 
   function removeFromCart(id: string) {
@@ -177,6 +286,10 @@ export default function POSScreen({
     setPaymentType('cash')
     setNumBuf('')
     setCancelMode(false)
+    setDocDiscountMode(false)
+    setDocDiscountRate(0)
+    setDocDiscountAmt(0)
+    setLineDiscountTarget(null)
     setSelectedCustomer(null)
     setMenuOpen(false)
   }
@@ -195,9 +308,10 @@ export default function POSScreen({
     const label = selectedCustomer
       ? `Müşteri: ${selectedCustomer.name}`
       : `Bekletilen ${new Date().toLocaleTimeString('tr-TR')}`
+    const lineSub = cart.reduce((s, c) => s + c.netTotal, 0)
     await window.electron.db.holdDocument({
       companyId, label, items: cart,
-      totalAmount: cart.reduce((s, c) => s + c.lineTotal, 0),
+      totalAmount: lineSub,
     })
     clearCart()
     loadHeld()
@@ -205,7 +319,7 @@ export default function POSScreen({
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
-    setCart(doc.items)
+    setCart(doc.items.map(normalizeHeldCartItem))
     await window.electron.db.deleteHeldDocument(doc.id)
     loadHeld()
     setShowHeld(false)
@@ -219,9 +333,15 @@ export default function POSScreen({
     setCustomers(list)
   }
 
-  /* ── Ödeme ── */
-  const grandTotal = cart.reduce((s, c) => s + c.lineTotal, 0)
-  const vatTotal   = cart.reduce((s, c) => s + (c.lineTotal * c.vatRate / (100 + c.vatRate)), 0)
+  /* ── Ödeme — satır netleri + belge iskontosu ── */
+  const lineSubtotal = cart.reduce((s, c) => s + c.netTotal, 0)
+  const docDiscountCalc = docDiscountRate > 0
+    ? parseFloat((lineSubtotal * docDiscountRate / 100).toFixed(2))
+    : docDiscountAmt
+  const grandTotal = Math.max(0, parseFloat((lineSubtotal - docDiscountCalc).toFixed(2)))
+  const vatTotal   = cart.reduce((s, c) => s + (c.netTotal * c.vatRate / (100 + c.vatRate)), 0)
+  const discountFactor = lineSubtotal > 0 ? grandTotal / lineSubtotal : 1
+  const vatAdjusted = parseFloat((vatTotal * discountFactor).toFixed(2))
   const cashAmount = parseFloat(cashInput) || 0
   const change     = cashAmount - grandTotal
 
@@ -231,12 +351,24 @@ export default function POSScreen({
     try {
       const receiptNo = nextReceiptNo()
       await window.electron.db.saveSale({
-        receiptNo, totalAmount: grandTotal, paymentType,
+        receiptNo,
+        totalAmount: lineSubtotal,
+        discountRate: docDiscountRate,
+        discountAmount: docDiscountCalc,
+        netAmount: grandTotal,
+        paymentType,
         cashAmount: paymentType === 'card'  ? 0 : (paymentType === 'cash' ? cashAmount || grandTotal : cashAmount),
         cardAmount: paymentType === 'cash'  ? 0 : (paymentType === 'card' ? grandTotal : grandTotal - cashAmount),
       }, cart.map(c => ({
-        productId: c.id, productName: c.name, quantity: c.quantity,
-        unitPrice: c.price, vatRate: c.vatRate, lineTotal: c.lineTotal,
+        productId: c.id,
+        productName: c.name,
+        quantity: c.quantity,
+        unitPrice: c.price,
+        vatRate: c.vatRate,
+        discountRate: c.discountRate,
+        discountAmount: c.discountAmount,
+        lineTotal: c.netTotal,
+        appliedBy: cashier.id,
       })))
       setLastReceipt(receiptNo)
       clearCart()
@@ -250,7 +382,7 @@ export default function POSScreen({
 
   /* ── Renkler ── */
   const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? '#1565C0'
-  const activeSoft  = (pluGroups.find(g => g.id === activeGroup) as { soft?: string } | undefined)?.soft ?? '#E3F2FD'
+  const activeSoft  = hexToSoft(activeColor)
 
   /* ────────── RENDER ────────── */
   return (
@@ -260,7 +392,34 @@ export default function POSScreen({
       {license?.warning && <LicenseBanner daysLeft={license.daysLeft} planName={license.planName} />}
 
       {/* ── HEADER ── */}
-      <div style={{ background: '#1565C0', height: 44, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 14px', flexShrink: 0 }}>
+      <div style={{
+        background: cancelMode ? '#C62828' : '#1565C0',
+        height: 44,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 14px',
+        flexShrink: 0,
+        position: 'relative',
+        transition: 'background 0.3s',
+      }}>
+        {cancelMode && (
+          <div style={{
+            position: 'absolute',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(255,255,255,0.2)',
+            borderRadius: 6,
+            padding: '3px 16px',
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: 1,
+            color: 'white',
+            pointerEvents: 'none',
+          }}>
+            ✕ İPTAL MODU AKTİF
+          </div>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>
             BT<span style={{ color: '#90CAF9' }}>POS</span>
@@ -290,6 +449,54 @@ export default function POSScreen({
           </button>
         </div>
       </div>
+
+      {/* Satır iskontosu modal */}
+      {lineDiscountTarget && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 14, padding: 24, width: 360, maxWidth: '92vw' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Satır İskontosu</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, color: '#757575', display: 'block', marginBottom: 4 }}>Yüzde (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={posSettings.maxLineDiscountPct ?? 100}
+                placeholder="0"
+                value={lineDiscRateIn}
+                onChange={e => setLineDiscRateIn(e.target.value)}
+                style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 12, color: '#757575', display: 'block', marginBottom: 4 }}>Tutar (₺)</label>
+              <input
+                type="number"
+                min={0}
+                placeholder="0,00"
+                value={lineDiscAmtIn}
+                onChange={e => setLineDiscAmtIn(e.target.value)}
+                style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setLineDiscountTarget(null)}
+                style={{ flex: 1, background: '#F5F5F5', border: '1px solid #E0E0E0', borderRadius: 8, padding: 10, cursor: 'pointer', fontSize: 13 }}
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                onClick={() => applyLineDiscount()}
+                style={{ flex: 1, background: '#E65100', border: 'none', borderRadius: 8, padding: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'white' }}
+              >
+                Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODALLER ── */}
 
@@ -390,11 +597,11 @@ export default function POSScreen({
         </div>
       )}
 
-      {/* ── 4 PANEL ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* ── 4 PANEL — toplam %100 ── */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
 
-        {/* ① SEPET — flex:1, kalan alanı doldurur */}
-        <div style={{ flex: 1, minWidth: 320, background: 'white', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0' }}>
+        {/* ① SEPET — %42 */}
+        <div style={{ width: '42%', flexShrink: 0, boxSizing: 'border-box', background: cancelMode ? '#fff5f5' : 'white', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0', transition: 'background 0.25s' }}>
 
           {/* Başlık */}
           <div style={{ padding: '8px 14px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 40, flexShrink: 0, background: '#f8f9fa' }}>
@@ -404,7 +611,10 @@ export default function POSScreen({
               {cart.length > 0 && (
                 <>
                   <button
-                    onClick={() => { if (!cancelMode && !cart.length) return; setCancelMode(m => !m) }}
+                    onClick={() => {
+                      if (!cancelMode && cart.length === 0) return
+                      setCancelMode(m => !m)
+                    }}
                     style={{ background: cancelMode ? '#dc2626' : 'none', border: cancelMode ? 'none' : 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: cancelMode ? 'white' : '#9ca3af', padding: '2px 8px' }}
                   >
                     ✕ {cancelMode ? 'İptal Modunu Kapat' : 'İptal'}
@@ -417,17 +627,17 @@ export default function POSScreen({
             </div>
           </div>
 
-          {/* İptal banner */}
+          {/* İptal ipucu */}
           {cancelMode && (
-            <div style={{ background: '#dc2626', color: 'white', fontSize: 11, fontWeight: 600, textAlign: 'center', padding: 5, flexShrink: 0 }}>
-              ✕ İptal Modu — Kaldırmak istediğiniz satıra tıklayın
+            <div style={{ background: 'rgba(198,40,40,0.12)', color: '#b71c1c', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: 4, flexShrink: 0 }}>
+              Satıra veya ✕ ile kaldırın · barkod ile adet düşürün
             </div>
           )}
 
           {/* Sütun başlıkları */}
-          <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 100px 80px 90px 36px', padding: '5px 14px', background: '#f0f2f4', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-            {['İşlem', 'Ürün Adı', 'Miktar', 'Birim Fiyat', 'Tutar', ''].map((h, i) => (
-              <span key={i} style={{ fontSize: 10, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px', textAlign: i >= 2 ? 'center' : 'left' }}>{h}</span>
+          <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0,1fr) 96px 62px 52px 78px 28px', gap: '0 4px', padding: '5px 10px', background: '#f0f2f4', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
+            {['İşlem', 'Ürün', 'Miktar', 'B.Fiyat', 'İsk.', 'Tutar', ''].map((h, i) => (
+              <span key={i} style={{ fontSize: 9, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.2px', textAlign: i >= 2 && i <= 5 ? 'center' : 'left' }}>{h}</span>
             ))}
           </div>
 
@@ -441,10 +651,27 @@ export default function POSScreen({
             ) : cart.map(item => (
               <div
                 key={item.id}
-                onClick={() => cancelMode && removeFromCart(item.id)}
-                style={{ display: 'grid', gridTemplateColumns: '52px 1fr 100px 80px 90px 36px', padding: '8px 14px', alignItems: 'center', borderBottom: '1px solid #f5f5f5', cursor: cancelMode ? 'pointer' : 'default', background: cancelMode ? 'rgba(220,38,38,0.03)' : 'white', transition: 'background 0.1s' }}
-                onMouseEnter={e => cancelMode && ((e.currentTarget as HTMLDivElement).style.background = 'rgba(220,38,38,0.08)')}
-                onMouseLeave={e => cancelMode && ((e.currentTarget as HTMLDivElement).style.background = 'rgba(220,38,38,0.03)')}
+                onClick={() => {
+                  if (cancelMode) removeFromCart(item.id)
+                  else if (posSettings.allowLineDiscount) setLineDiscountTarget(item.id)
+                }}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '44px minmax(0,1fr) 96px 62px 52px 78px 28px',
+                  gap: '0 4px',
+                  padding: '8px 10px',
+                  alignItems: 'center',
+                  borderBottom: '1px solid #f5f5f5',
+                  cursor: cancelMode || posSettings.allowLineDiscount ? 'pointer' : 'default',
+                  background: cancelMode ? '#fff5f5' : 'white',
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => {
+                  if (cancelMode) (e.currentTarget as HTMLDivElement).style.background = '#ffebee'
+                }}
+                onMouseLeave={e => {
+                  if (cancelMode) (e.currentTarget as HTMLDivElement).style.background = '#fff5f5'
+                }}
               >
                 {/* İşlem tipi */}
                 <div style={{ fontSize: 10, color: cancelMode ? '#dc2626' : '#9ca3af', fontWeight: 500 }}>Satış</div>
@@ -469,18 +696,30 @@ export default function POSScreen({
                 </div>
 
                 {/* Birim fiyat */}
-                <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'center' }}>{fmt(item.price)}</div>
+                <div style={{ fontSize: 11, color: '#6b7280', textAlign: 'center' }}>{fmt(item.price)}</div>
 
-                {/* Tutar */}
-                <div style={{ fontSize: 13, fontWeight: 600, color: cancelMode ? '#dc2626' : '#111', textAlign: 'right' }}>{fmt(item.lineTotal)}</div>
+                {/* İskonto */}
+                <div style={{ fontSize: 10, color: '#E65100', textAlign: 'center', fontWeight: 600 }}>
+                  {item.discountRate > 0
+                    ? `%${item.discountRate}`
+                    : item.discountAmount > 0
+                      ? `-${fmt(item.discountAmount)}`
+                      : '—'}
+                </div>
 
-                {/* Sil */}
+                {/* Tutar (iskonto sonrası) */}
+                <div style={{ fontSize: 12, fontWeight: 600, color: cancelMode ? '#dc2626' : '#111', textAlign: 'right' }}>{fmt(item.netTotal)}</div>
+
+                {/* Sil — yalnız iptal modunda */}
                 <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  {cancelMode ? (
-                    <div style={{ width: 20, height: 20, background: '#dc2626', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'white' }}>✕</div>
-                  ) : (
-                    <button onClick={e => { e.stopPropagation(); removeFromCart(item.id) }}
-                      style={{ width: 22, height: 22, background: '#fff5f5', border: '1px solid #fecdd3', borderRadius: 4, cursor: 'pointer', fontSize: 10, color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                  {cancelMode && (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={e => { e.stopPropagation(); removeFromCart(item.id) }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); removeFromCart(item.id) } }}
+                      style={{ width: 20, height: 20, background: '#dc2626', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'white', cursor: 'pointer' }}
+                    >✕</div>
                   )}
                 </div>
               </div>
@@ -489,53 +728,71 @@ export default function POSScreen({
 
           {/* Özet + toplam */}
           <div style={{ borderTop: '1px solid #e5e7eb', flexShrink: 0 }}>
-            <div style={{ padding: '5px 14px 0' }}>
+            <div style={{ padding: '6px 14px 0' }}>
+              {(posSettings.allowDocDiscount ?? true) && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                    <button
+                      type="button"
+                      onClick={() => setDocDiscountMode(m => !m)}
+                      style={{ fontSize: 10, color: '#E65100', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+                    >
+                      {docDiscountMode ? 'İskonto Kapat' : '+ Belge İskontosu'}
+                    </button>
+                    {docDiscountCalc > 0 && (
+                      <span style={{ fontSize: 10, color: '#E65100', fontWeight: 600 }}>-{fmt(docDiscountCalc)}</span>
+                    )}
+                  </div>
+                  {docDiscountMode && (
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        min={0}
+                        max={posSettings.maxDocDiscountPct ?? 100}
+                        placeholder="% iskonto"
+                        value={docDiscountRate || ''}
+                        onChange={e => { setDocDiscountRate(parseFloat(e.target.value) || 0); setDocDiscountAmt(0) }}
+                        style={{ flex: 1, border: '1px solid #FFB74D', borderRadius: 6, padding: '4px 8px', fontSize: 12, outline: 'none', minWidth: 0 }}
+                      />
+                      <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>veya</span>
+                      <input
+                        type="number"
+                        min={0}
+                        placeholder="₺ iskonto"
+                        value={docDiscountAmt || ''}
+                        onChange={e => { setDocDiscountAmt(parseFloat(e.target.value) || 0); setDocDiscountRate(0) }}
+                        style={{ flex: 1, border: '1px solid #FFB74D', borderRadius: 6, padding: '4px 8px', fontSize: 12, outline: 'none', minWidth: 0 }}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                <span style={{ fontSize: 11, color: '#9ca3af' }}>KDV Hariç</span>
-                <span style={{ fontSize: 11, color: '#374151' }}>{fmt(grandTotal - vatTotal)}</span>
+                <span style={{ fontSize: 10, color: '#9ca3af' }}>Ara Toplam</span>
+                <span style={{ fontSize: 10, color: '#374151' }}>{fmt(lineSubtotal)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 11, color: '#9ca3af' }}>KDV</span>
-                <span style={{ fontSize: 11, color: '#374151' }}>{fmt(vatTotal)}</span>
+              {docDiscountCalc > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span style={{ fontSize: 10, color: '#E65100' }}>Belge İskontosu</span>
+                  <span style={{ fontSize: 10, color: '#E65100', fontWeight: 600 }}>-{fmt(docDiscountCalc)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                <span style={{ fontSize: 10, color: '#9ca3af' }}>KDV</span>
+                <span style={{ fontSize: 10, color: '#374151' }}>{fmt(vatAdjusted)}</span>
               </div>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '8px 14px 10px', borderTop: '1px solid #f0f0f0', marginTop: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', padding: '8px 14px 10px', borderTop: '1px solid #f0f0f0', marginTop: 3 }}>
               <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>Genel Toplam</span>
               <span style={{ fontSize: 28, fontWeight: 700, color: '#1565C0' }}>{fmt(grandTotal)}</span>
             </div>
           </div>
         </div>
 
-        {/* ② NUMPAD + MENÜ — FIX */}
-        <div style={{ width: 185, background: '#f8f9fa', flexShrink: 0, display: 'flex', flexDirection: 'column', padding: 8, gap: 5, borderRight: '1px solid #e0e0e0', overflow: 'hidden' }}>
+        {/* ② NUMPAD + MENÜ — %16 (PLU’dan pay) */}
+        <div style={{ width: '16%', flexShrink: 0, boxSizing: 'border-box', background: '#f8f9fa', display: 'flex', flexDirection: 'column', padding: 10, gap: 8, borderRight: '1px solid #e0e0e0', overflow: 'hidden' }}>
 
-          {/* Ekran */}
-          <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, padding: '5px 10px', textAlign: 'right', fontSize: 22, fontWeight: 700, color: '#1565C0', height: 40, letterSpacing: 2, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', flexShrink: 0 }}>
-            {numBuf || '—'}
-          </div>
-
-          {/* Numpad */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4, flexShrink: 0 }}>
-            {['7','8','9','4','5','6','1','2','3','C','0','⌫'].map(k => (
-              <button key={k} onClick={() => handleNumKey(k)}
-                style={{ height: 42, border: '1px solid', borderRadius: 7, cursor: 'pointer', fontSize: k === '⌫' ? 16 : 20, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', userSelect: 'none' as const,
-                  background: k === 'C' ? '#fff5f5' : k === '⌫' ? '#fffbeb' : 'white',
-                  color:      k === 'C' ? '#dc2626' : k === '⌫' ? '#d97706' : '#374151',
-                  borderColor: k === 'C' ? '#fecdd3' : k === '⌫' ? '#fde68a' : '#e5e7eb',
-                }}
-              >{k}</button>
-            ))}
-          </div>
-
-          {/* Miktar göstergesi */}
-          <div style={{ borderRadius: 8, padding: 6, textAlign: 'center', border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`, background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0 }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706', display: 'block', lineHeight: 1 }}>{numBuf || '—'}</span>
-            <span style={{ fontSize: 9, color: '#9ca3af', marginTop: 2, display: 'block' }}>adet seçili</span>
-          </div>
-
-          <div style={{ height: 1, background: '#e5e7eb', flexShrink: 0 }} />
-
-          {/* İşlemler menüsü */}
+          {/* İşlemler menüsü — üstte */}
           <button
             onClick={() => setMenuOpen(m => !m)}
             style={{ border: `1.5px solid ${selectedCustomer ? '#a5d6a7' : '#e5e7eb'}`, borderRadius: 8, background: selectedCustomer ? '#e8f5e9' : 'white', cursor: 'pointer', padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: selectedCustomer ? '#2e7d32' : '#374151', flexShrink: 0 }}
@@ -552,7 +809,7 @@ export default function POSScreen({
                 { label: `▶ Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`,
                   action: () => { setShowHeld(true); closeMenu() },  danger: false, disabled: false },
                 { label: cancelMode ? '✕ Modu Kapat' : '✕ İptal Modu',
-                  action: () => { if (!cancelMode && !cart.length) return; setCancelMode(m => !m); closeMenu() },
+                  action: () => { if (!cancelMode && cart.length === 0) return; setCancelMode(m => !m); closeMenu() },
                   danger: true,  disabled: false, active: cancelMode },
               ].map((item, i) => (
                 <div key={i}
@@ -566,10 +823,46 @@ export default function POSScreen({
               ))}
             </div>
           )}
+
+          <div style={{ height: 1, background: '#e5e7eb', flexShrink: 0 }} />
+
+          {/* Boşluk — seçili gösterge + numerik altta */}
+          <div style={{ flex: 1, minHeight: 0 }} />
+
+          {/* Miktar göstergesi (adet seçili) — tek gösterge */}
+          <div style={{ borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`, background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0 }}>
+            <span style={{ fontSize: 'clamp(22px, 1.8vw + 12px, 34px)', fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706', display: 'block', lineHeight: 1 }}>{numBuf || '—'}</span>
+            <span style={{ fontSize: 12, color: '#6b7280', marginTop: 4, display: 'block', fontWeight: 500 }}>adet seçili</span>
+          </div>
+
+          {/* Numpad — büyük dokunma alanı (yaşlı kullanıcı dostu, min ~52px) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, flexShrink: 0 }}>
+            {['7','8','9','4','5','6','1','2','3','C','0','⌫'].map(k => (
+              <button key={k} onClick={() => handleNumKey(k)}
+                type="button"
+                style={{
+                  minHeight: 52,
+                  height: 'clamp(52px, 5.5vw, 84px)',
+                  border: '2px solid',
+                  borderRadius: 10,
+                  cursor: 'pointer',
+                  fontSize: 'clamp(22px, 1.7vw + 12px, 36px)',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  userSelect: 'none' as const,
+                  background: k === 'C' ? '#fff5f5' : k === '⌫' ? '#fffbeb' : 'white',
+                  color:      k === 'C' ? '#dc2626' : k === '⌫' ? '#d97706' : '#1f2937',
+                  borderColor: k === 'C' ? '#fecdd3' : k === '⌫' ? '#fde68a' : '#d1d5db',
+                }}
+              >{k}</button>
+            ))}
+          </div>
         </div>
 
-        {/* ③ PLU — FIX 340px */}
-        <div style={{ width: 340, flexShrink: 0, background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0' }}>
+        {/* ③ PLU — %35 */}
+        <div style={{ width: '35%', flexShrink: 0, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0', minWidth: 0 }}>
 
           {/* PLU başlık */}
           <div style={{ padding: '7px 10px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 6, height: 36, flexShrink: 0, background: '#f8f9fa' }}>
@@ -626,20 +919,20 @@ export default function POSScreen({
               ))}
             </div>
           ) : (
-            // PLU grid
-            <div style={{ padding: 6, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: '90px', gap: 5, flex: 1, overflow: 'hidden', alignContent: 'start' }}>
+            // PLU grid — 3×5 satırlar kalan yüksekliği eşit böler
+            <div style={{ padding: 6, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(5, 1fr)', gap: 5, flex: 1, minHeight: 0, overflow: 'hidden' }}>
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
                 return (
                   <div key={p.id} onClick={() => handlePluClick(p)}
-                    style={{ borderRadius: 8, padding: '6px 4px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, border: '2px solid transparent', background: activeSoft, transition: 'all 0.15s', overflow: 'hidden', minHeight: 0 }}
+                    style={{ borderRadius: 8, padding: '6px 4px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, border: '2px solid transparent', background: activeSoft, transition: 'all 0.15s', overflow: 'hidden' }}
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}
                     onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
                     onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
                   >
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#374151', textAlign: 'center', lineHeight: 1.2 }}>{p.name}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', textAlign: 'center', lineHeight: 1.2 }}>{p.name}</div>
                     {posSettings.showCode && <div style={{ fontSize: 8, color: '#9ca3af', fontFamily: 'monospace' }}>{p.code}</div>}
                     {posSettings.showBarcode && p.barcode && <div style={{ fontSize: 8, color: '#b0b0b0', fontFamily: 'monospace' }}>{p.barcode}</div>}
                     {posSettings.showPrice && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor }}>{fmt(p.price)}</div>}
@@ -708,8 +1001,8 @@ export default function POSScreen({
           </div>
         </div>
 
-        {/* ④ GRUPLAR EN SAĞDA */}
-        <div style={{ width: 85, background: '#f3f4f6', flexShrink: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+        {/* ④ GRUPLAR — %7 */}
+        <div style={{ width: '7%', flexShrink: 0, boxSizing: 'border-box', background: '#f3f4f6', display: 'flex', flexDirection: 'column', overflowY: 'auto', minWidth: 0 }}>
           {pluGroups.map(g => (
             <button
               key={g.id}
@@ -732,6 +1025,27 @@ export default function POSScreen({
         </div>
 
       </div>
+
+      {cancelWarning && (
+        <div style={{
+          position: 'fixed',
+          bottom: merkezToast ? 72 : 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          background: '#C62828',
+          color: 'white',
+          borderRadius: 10,
+          padding: '12px 24px',
+          fontSize: 13,
+          fontWeight: 600,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          maxWidth: '90vw',
+          textAlign: 'center',
+        }}>
+          ⚠ {cancelWarning}
+        </div>
+      )}
 
       {merkezToast && (
         <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#212121', color: 'white', padding: '10px 20px', borderRadius: 8, fontSize: 13, zIndex: 10001, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>

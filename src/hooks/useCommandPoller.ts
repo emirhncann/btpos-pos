@@ -1,13 +1,20 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { api } from '../lib/api'
 
+export type SyncMode = 'full' | 'diff'
+
+export function syncModeFromPayload(payload: unknown): SyncMode {
+  const m = (payload as Record<string, unknown> | null | undefined)?.mode
+  return m === 'diff' ? 'diff' : 'full'
+}
+
 export interface CommandHandlers {
-  onSyncAll:        () => Promise<void>
+  onSyncAll:        (mode?: SyncMode) => Promise<void>
   onSyncPrices:     () => Promise<void>
-  onSyncCashiers:   () => Promise<void>
-  onSyncPlu:        () => Promise<void>
+  onSyncCashiers:   (mode?: SyncMode) => Promise<void>
+  onSyncPlu:        (mode?: SyncMode) => Promise<void>
   onSyncCustomers:  () => Promise<void>
-  onSyncProducts:   () => Promise<void>
+  onSyncProducts:   (mode?: SyncMode) => Promise<void>
   onSyncSettings:   () => Promise<void>
   onLogout:         () => void
   onMessage:        (text: string, duration?: number) => void
@@ -15,9 +22,21 @@ export interface CommandHandlers {
   onLock:           (reason?: string) => void
 }
 
+const SYNC_KINDS = new Set([
+  'sync_all',
+  'sync_products',
+  'sync_prices',
+  'sync_plu',
+  'sync_cashiers',
+  'sync_customers',
+  'sync_settings',
+])
+
 interface UseCommandPollerOptions {
   /** Komut geçmişi SQLite'a yazıldıktan sonra (feed yenileme vb.) */
   onCommandPersisted?: () => void
+  /** Sepette ürün varken sync komutlarını işleme (ack yok, sonraki poll'da tekrar dener) */
+  isCartActive?: () => boolean
 }
 
 export function useCommandPoller(
@@ -32,6 +51,8 @@ export function useCommandPoller(
   handlersRef.current = handlers
   const onPersistedRef = useRef(options?.onCommandPersisted)
   onPersistedRef.current = options?.onCommandPersisted
+  const isCartActiveRef = useRef(options?.isCartActive)
+  isCartActiveRef.current = options?.isCartActive
 
   const poll = useCallback(async () => {
     if (!terminalId || !activeRef.current) return
@@ -51,10 +72,17 @@ export function useCommandPoller(
 
       for (const cmd of res.commands ?? []) {
         const kind = String(cmd.command ?? '').toLowerCase().trim()
+        const mode = syncModeFromPayload(cmd.payload)
+
+        if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
+          console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
+          continue
+        }
+
         try {
           switch (kind) {
             case 'sync_all':
-              await h.onSyncAll()
+              await h.onSyncAll(mode)
               break
 
             case 'sync_prices':
@@ -62,11 +90,11 @@ export function useCommandPoller(
               break
 
             case 'sync_cashiers':
-              await h.onSyncCashiers()
+              await h.onSyncCashiers(mode)
               break
 
             case 'sync_plu':
-              await h.onSyncPlu()
+              await h.onSyncPlu(mode)
               break
 
             case 'sync_customers':
@@ -74,7 +102,7 @@ export function useCommandPoller(
               break
 
             case 'sync_products':
-              await h.onSyncProducts()
+              await h.onSyncProducts(mode)
               break
 
             case 'sync_settings':

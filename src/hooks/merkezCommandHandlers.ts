@@ -1,5 +1,5 @@
 import { api, fetchPluGroupsFromServer } from '../lib/api'
-import type { CommandHandlers } from './useCommandPoller'
+import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
 export const noopCommandHandlers: CommandHandlers = {
   onSyncAll:        async () => {},
@@ -43,12 +43,21 @@ export interface MerkezCommandHandlerDeps {
   onPluUpdated:         (groups: PluGroupCacheRow[]) => void
 }
 
+function failResult(msg: string): SyncResult {
+  return { success: false, inserted: 0, updated: 0, deleted: 0, error: msg }
+}
+
 export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): CommandHandlers {
   return {
-    onSyncAll: async () => {
+    onSyncAll: async (mode: SyncMode = 'full') => {
       d.setCommandSyncing(true)
       try {
-        // Ürünleri çek — hata olursa devam et
+        const results: Record<string, SyncResult> = {
+          products: failResult(''),
+          plu:      failResult(''),
+          cashiers: failResult(''),
+        }
+
         try {
           const data = await api.getProducts(d.companyId)
           const rawList = data?.data?.data ?? []
@@ -61,32 +70,37 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
               stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
             }
           })
-          await window.electron.db.saveProducts(items)
+          results.products = await window.electron.db.syncProductsAcid(items, mode)
         } catch (e) {
-          console.warn('[sync_all] Ürün sync hatası (devam ediliyor):', e)
+          console.warn('[sync_all] ürün hatası:', e)
+          results.products = failResult(String(e))
         }
 
-        // PLU sync — bağımsız çalış
         try {
           const workplaceId = localStorage.getItem('workplace_id') || null
           const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
           const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
-          await window.electron.db.savePluGroups(cacheRows)
-          const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
-          d.onPluUpdated(cached)
+          results.plu = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+          if (results.plu.success) {
+            const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+            d.onPluUpdated(cached)
+          }
         } catch (e) {
-          console.warn('[sync_all] PLU sync hatası:', e)
+          console.warn('[sync_all] PLU hatası:', e)
+          results.plu = failResult(String(e))
         }
 
-        // Kasiyer sync
         try {
           const cashiers = await api.getCashiers(d.companyId)
-          await window.electron.db.saveCashiers(cashiers)
+          results.cashiers = await window.electron.db.syncCashiersAcid(cashiers, d.companyId, mode)
         } catch (e) {
-          console.warn('[sync_all] Kasiyer sync hatası:', e)
+          console.warn('[sync_all] kasiyer hatası:', e)
+          results.cashiers = failResult(String(e))
         }
 
-        d.showToast('Güncelleme tamamlandı')
+        const vals = Object.values(results)
+        const successCount = vals.filter(r => r.success).length
+        d.showToast(`Güncelleme tamamlandı (${successCount}/${vals.length} başarılı)`)
       } finally {
         d.setCommandSyncing(false)
       }
@@ -117,9 +131,11 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       }
     },
 
-    onSyncCashiers: async () => {
+    onSyncCashiers: async (mode: SyncMode = 'full') => {
       const cashiers = await api.getCashiers(d.companyId)
-      await window.electron.db.saveCashiers(cashiers)
+      const result = await window.electron.db.syncCashiersAcid(cashiers, d.companyId, mode)
+      if (!result.success) throw new Error(result.error)
+      d.showToast(`${result.inserted} kasiyer güncellendi`)
     },
 
     onLogout: () => d.onLogout(),
@@ -130,23 +146,17 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
 
     onLock: (reason) => d.onLock(reason),
 
-    onSyncPlu: async () => {
-      console.log('[onSyncPlu] başladı')
-      try {
-        const workplaceId = localStorage.getItem('workplace_id') || null
-        const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
-        console.log('[onSyncPlu] gruplar geldi:', groups.length)
-        const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
-        await window.electron.db.savePluGroups(cacheRows)
-        const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
-        console.log('[onSyncPlu] cache güncellendi:', cached.map(g => g.name))
-        d.onPluUpdated(cached)
-        console.log('[onSyncPlu] state güncellendi')
-        d.showToast('PLU grupları güncellendi')
-      } catch (e) {
-        console.error('[onSyncPlu] HATA:', e)
-        throw e
-      }
+    onSyncPlu: async (mode: SyncMode = 'full') => {
+      const workplaceId = localStorage.getItem('workplace_id') || null
+      const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
+      const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
+
+      const result = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+      if (!result.success) throw new Error(result.error)
+
+      const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+      d.onPluUpdated(cached)
+      d.showToast(`PLU güncellendi (${mode === 'full' ? 'tam' : 'fark'})`)
     },
 
     onSyncCustomers: async () => {
@@ -154,7 +164,7 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       d.showToast(`${customers.length} cari güncellendi`)
     },
 
-    onSyncProducts: async () => {
+    onSyncProducts: async (mode: SyncMode = 'full') => {
       d.setCommandSyncing(true)
       try {
         const data    = await api.getProducts(d.companyId)
@@ -168,8 +178,9 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
             stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
           }
         })
-        await window.electron.db.saveProducts(items)
-        d.showToast(`${items.length} ürün güncellendi`)
+        const result = await window.electron.db.syncProductsAcid(items, mode)
+        if (!result.success) throw new Error(result.error)
+        d.showToast(`${result.inserted + result.updated} ürün güncellendi`)
       } finally {
         d.setCommandSyncing(false)
       }

@@ -37,6 +37,9 @@ declare global {
         getPosSettings:     () => Promise<PosSettingsRow>
         saveCommandHistory: (row: CommandHistoryRow) => Promise<void>
         getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
+        syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
+        syncPluGroupsAcid:  (groups: PluGroupCacheRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
+        syncCashiersAcid:   (cashiers: CashierRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
       }
     }
   }
@@ -66,8 +69,17 @@ declare global {
     plu_items:  Array<{ id: string; product_code: string; sort_order: number }>
   }
 
+  interface SyncResult {
+    success:  boolean
+    inserted: number
+    updated:  number
+    deleted:  number
+    error?:   string
+  }
+
   interface CashierRow {
     id:          string
+    companyId?:  string
     fullName:    string
     cashierCode: string
     password:    string
@@ -89,20 +101,26 @@ declare global {
   }
 
   interface SaleItem {
-    productId?:  string
-    productName: string
-    quantity:    number
-    unitPrice:   number
-    vatRate:     number
-    lineTotal:   number
+    productId?:      string
+    productName:     string
+    quantity:        number
+    unitPrice:       number
+    vatRate:         number
+    discountRate?:   number
+    discountAmount?: number
+    lineTotal:       number
+    appliedBy?:      string
   }
 
   interface SaleRow {
-    receiptNo:   string
-    totalAmount: number
-    paymentType: 'cash' | 'card' | 'mixed'
-    cashAmount:  number
-    cardAmount:  number
+    receiptNo:       string
+    totalAmount:     number
+    discountRate?:   number
+    discountAmount?: number
+    netAmount:       number
+    paymentType:     'cash' | 'card' | 'mixed'
+    cashAmount:      number
+    cardAmount:      number
   }
 
   interface SaleRecord {
@@ -114,15 +132,18 @@ declare global {
   }
 
   interface CartItem {
-    id:        string
-    code:      string
-    name:      string
-    category:  string
-    price:     number
-    vatRate:   number
-    unit:      string
-    quantity:  number
-    lineTotal: number
+    id:             string
+    code:           string
+    name:           string
+    category:       string
+    price:          number
+    vatRate:        number
+    unit:           string
+    quantity:       number
+    lineTotal:      number
+    discountRate:   number
+    discountAmount: number
+    netTotal:       number
   }
 
   interface HeldDocRow {
@@ -154,9 +175,15 @@ declare global {
   }
 
   interface PosSettingsRow {
-    showPrice:   boolean
-    showCode:    boolean
-    showBarcode: boolean
-    source:      string
+    showPrice:            boolean
+    showCode:             boolean
+    showBarcode:          boolean
+    duplicateItemAction:  'increase_qty' | 'add_new'
+    minQtyPerLine:        number
+    allowLineDiscount:    boolean
+    allowDocDiscount:     boolean
+    maxLineDiscountPct:   number
+    maxDocDiscountPct:    number
+    source:               string
   }
 }
