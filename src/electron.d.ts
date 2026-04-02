@@ -184,6 +184,11 @@ declare global {
     allowDocDiscount:     boolean
     maxLineDiscountPct:   number
     maxDocDiscountPct:    number
+    pluCols:              number
+    pluRows:              number
+    fontSizeName:         number
+    fontSizePrice:        number
+    fontSizeCode:         number
     source:               string
   }
 }

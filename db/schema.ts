@@ -103,6 +103,11 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   allowDocDiscount:     integer('allow_doc_discount', { mode: 'boolean' }).default(true),
   maxLineDiscountPct:   real('max_line_discount_pct').default(100),
   maxDocDiscountPct:    real('max_doc_discount_pct').default(100),
+  pluCols:              integer('plu_cols').default(4),
+  pluRows:              integer('plu_rows').default(3),
+  fontSizeName:         integer('font_size_name').default(12),
+  fontSizePrice:        integer('font_size_price').default(13),
+  fontSizeCode:         integer('font_size_code').default(9),
   source:               text('source').default('default'),
   syncedAt:             text('synced_at'),
 })

@@ -3,4 +3,4 @@ require("electron");
 require("child_process");
 require("path");
 require("electron-store");
-require("./main-BrOeCeBU.js");
+require("./main-DYhsRlr2.js");

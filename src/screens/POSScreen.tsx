@@ -42,8 +42,6 @@ function nextReceiptNo(): string {
   return `FIS-${String(receiptCounter).padStart(5, '0')}`
 }
 
-const PLU_PER_PAGE = 15  // 3 × 5
-
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
   let net = lineTotal
   if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
@@ -144,11 +142,18 @@ export default function POSScreen({
       )
     : groupProducts
 
+  const pluCols      = posSettings.pluCols ?? 4
+  const pluRows      = posSettings.pluRows ?? 3
+  const PLU_PER_PAGE = pluCols * pluRows
+  const fontSizeName  = posSettings.fontSizeName ?? 12
+  const fontSizePrice = posSettings.fontSizePrice ?? 13
+  const fontSizeCode  = posSettings.fontSizeCode ?? 9
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / PLU_PER_PAGE))
   const safePage   = Math.min(page, totalPages - 1)
   const slice      = filtered.slice(safePage * PLU_PER_PAGE, (safePage + 1) * PLU_PER_PAGE)
 
-  useEffect(() => { setPage(0) }, [activeGroup, searchQ])
+  useEffect(() => { setPage(0) }, [activeGroup, searchQ, pluCols, pluRows])
 
   function showCancelWarning(msg: string) {
     setCancelWarning(msg)
@@ -890,7 +895,7 @@ export default function POSScreen({
             />
           </div>
 
-          {/* PLU grid — 3 sütun fix, satır sayısı kalan alana göre */}
+          {/* PLU grid — sütun/satır sayısı posSettings'ten */}
           {searchQ ? (
             // Arama modu — liste
             <div style={{ flex: 1, overflowY: 'auto', padding: '5px 8px' }}>
@@ -903,9 +908,9 @@ export default function POSScreen({
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = '#F0F0F0'; el.style.background = 'white' }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    <div style={{ fontSize: fontSizeName, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                     {(posSettings.showCode || posSettings.showBarcode) && (
-                      <div style={{ fontSize: 9, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>
+                      <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>
                         {posSettings.showCode && p.code}
                         {posSettings.showCode && posSettings.showBarcode && p.barcode && ' · '}
                         {posSettings.showBarcode && p.barcode}
@@ -913,14 +918,22 @@ export default function POSScreen({
                     )}
                   </div>
                   {posSettings.showPrice && (
-                    <div style={{ fontSize: 12, fontWeight: 700, color: activeColor, flexShrink: 0, marginLeft: 8 }}>{fmt(p.price)}</div>
+                    <div style={{ fontSize: fontSizePrice, fontWeight: 700, color: activeColor, flexShrink: 0, marginLeft: 8 }}>{fmt(p.price)}</div>
                   )}
                 </div>
               ))}
             </div>
           ) : (
-            // PLU grid — 3×5 satırlar kalan yüksekliği eşit böler
-            <div style={{ padding: 6, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(5, 1fr)', gap: 5, flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            <div style={{
+              padding: 6,
+              display: 'grid',
+              gridTemplateColumns: `repeat(${pluCols}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${pluRows}, minmax(0, 1fr))`,
+              gap: 5,
+              flex: 1,
+              minHeight: 0,
+              overflow: 'hidden',
+            }}>
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
@@ -932,10 +945,10 @@ export default function POSScreen({
                     onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
                     onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', textAlign: 'center', lineHeight: 1.2 }}>{p.name}</div>
-                    {posSettings.showCode && <div style={{ fontSize: 8, color: '#9ca3af', fontFamily: 'monospace' }}>{p.code}</div>}
-                    {posSettings.showBarcode && p.barcode && <div style={{ fontSize: 8, color: '#b0b0b0', fontFamily: 'monospace' }}>{p.barcode}</div>}
-                    {posSettings.showPrice && <div style={{ fontSize: 12, fontWeight: 700, color: activeColor }}>{fmt(p.price)}</div>}
+                    <div style={{ fontSize: fontSizeName, fontWeight: 600, color: '#374151', textAlign: 'center', lineHeight: 1.2 }}>{p.name}</div>
+                    {posSettings.showCode && <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace' }}>{p.code}</div>}
+                    {posSettings.showBarcode && p.barcode && <div style={{ fontSize: fontSizeCode, color: '#b0b0b0', fontFamily: 'monospace' }}>{p.barcode}</div>}
+                    {posSettings.showPrice && <div style={{ fontSize: fontSizePrice, fontWeight: 700, color: activeColor }}>{fmt(p.price)}</div>}
                   </div>
                 )
               })}

@@ -148,6 +148,11 @@ export function initDB() {
       allow_doc_discount INTEGER DEFAULT 1,
       max_line_discount_pct REAL DEFAULT 100,
       max_doc_discount_pct REAL DEFAULT 100,
+      plu_cols INTEGER DEFAULT 4,
+      plu_rows INTEGER DEFAULT 3,
+      font_size_name INTEGER DEFAULT 12,
+      font_size_price INTEGER DEFAULT 13,
+      font_size_code INTEGER DEFAULT 9,
       source       TEXT DEFAULT 'default',
       synced_at    TEXT
     );
@@ -167,8 +172,8 @@ export function initDB() {
   migratePosDiscountAndSettings(sqlite)
 
   sqlite.exec(`
-    INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, duplicate_item_action, min_qty_per_line, allow_line_discount, allow_doc_discount, max_line_discount_pct, max_doc_discount_pct, source)
-    VALUES ('local', 1, 1, 0, 'increase_qty', 1, 1, 1, 100, 100, 'default');
+    INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, duplicate_item_action, min_qty_per_line, allow_line_discount, allow_doc_discount, max_line_discount_pct, max_doc_discount_pct, plu_cols, plu_rows, font_size_name, font_size_price, font_size_code, source)
+    VALUES ('local', 1, 1, 0, 'increase_qty', 1, 1, 1, 100, 100, 4, 3, 12, 13, 9, 'default');
   `)
 
   return db
@@ -204,6 +209,11 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_doc_discount', 'allow_doc_discount INTEGER DEFAULT 1')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'max_line_discount_pct', 'max_line_discount_pct REAL DEFAULT 100')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'max_doc_discount_pct', 'max_doc_discount_pct REAL DEFAULT 100')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_cols', 'plu_cols INTEGER DEFAULT 4')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_rows', 'plu_rows INTEGER DEFAULT 3')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_name', 'font_size_name INTEGER DEFAULT 12')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_price', 'font_size_price INTEGER DEFAULT 13')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_code', 'font_size_code INTEGER DEFAULT 9')
 
   addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')

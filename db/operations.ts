@@ -255,6 +255,11 @@ export interface PosSettingsRow {
   allowDocDiscount:     boolean
   maxLineDiscountPct:   number
   maxDocDiscountPct:    number
+  pluCols:              number
+  pluRows:              number
+  fontSizeName:         number
+  fontSizePrice:        number
+  fontSizeCode:         number
   source:               string
 }
 
@@ -353,6 +358,11 @@ export function savePosSettings(settings: PosSettingsRow): void {
     allowDocDiscount:     settings.allowDocDiscount,
     maxLineDiscountPct:   settings.maxLineDiscountPct,
     maxDocDiscountPct:    settings.maxDocDiscountPct,
+    pluCols:              settings.pluCols ?? 4,
+    pluRows:              settings.pluRows ?? 3,
+    fontSizeName:         settings.fontSizeName ?? 12,
+    fontSizePrice:        settings.fontSizePrice ?? 13,
+    fontSizeCode:         settings.fontSizeCode ?? 9,
     source:               settings.source,
     syncedAt:             now,
   }).onConflictDoUpdate({
@@ -367,6 +377,11 @@ export function savePosSettings(settings: PosSettingsRow): void {
       allowDocDiscount:     settings.allowDocDiscount,
       maxLineDiscountPct:   settings.maxLineDiscountPct,
       maxDocDiscountPct:    settings.maxDocDiscountPct,
+      pluCols:              settings.pluCols ?? 4,
+      pluRows:              settings.pluRows ?? 3,
+      fontSizeName:         settings.fontSizeName ?? 12,
+      fontSizePrice:        settings.fontSizePrice ?? 13,
+      fontSizeCode:         settings.fontSizeCode ?? 9,
       source:               settings.source,
       syncedAt:             now,
     },
@@ -392,6 +407,11 @@ export function getPosSettings(): PosSettingsRow {
     allowDocDiscount:     row?.allowDocDiscount     ?? true,
     maxLineDiscountPct:   row?.maxLineDiscountPct   ?? 100,
     maxDocDiscountPct:    row?.maxDocDiscountPct    ?? 100,
+    pluCols:              row?.pluCols              ?? 4,
+    pluRows:              row?.pluRows              ?? 3,
+    fontSizeName:         row?.fontSizeName         ?? 12,
+    fontSizePrice:        row?.fontSizePrice        ?? 13,
+    fontSizeCode:         row?.fontSizeCode         ?? 9,
     source:               row?.source               ?? 'default',
   }
 }

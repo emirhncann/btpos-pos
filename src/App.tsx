@@ -23,6 +23,11 @@ export default function App() {
     allowDocDiscount: true,
     maxLineDiscountPct: 100,
     maxDocDiscountPct: 100,
+    pluCols: 4,
+    pluRows: 3,
+    fontSizeName: 12,
+    fontSizePrice: 13,
+    fontSizeCode: 9,
     source: 'default',
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
