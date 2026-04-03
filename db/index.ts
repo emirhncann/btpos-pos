@@ -2,9 +2,10 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
 import { join } from 'path'
 import { app } from 'electron'
+import * as fs from 'fs'
 import * as schema from './schema'
 
-let db: ReturnType<typeof drizzle>
+let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
 export function getSqlite(): Database.Database {
@@ -12,9 +13,8 @@ export function getSqlite(): Database.Database {
   return rawSqlite
 }
 
-export function initDB() {
-  const dbPath = join(app.getPath('userData'), 'btpos.db')
-  const sqlite = new Database(dbPath)
+export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
+  const sqlite = new Database(dbFile)
   rawSqlite = sqlite
 
   sqlite.pragma('journal_mode = WAL')
@@ -167,7 +167,6 @@ export function initDB() {
     );
   `)
 
-  /* Eski btpos.db: tablolar CREATE IF NOT EXISTS ile genişlemez; önce sütun migrasyonu, sonra varsayılan satır */
   migrateCashiersCompanyId(sqlite)
   migratePosDiscountAndSettings(sqlite)
 
@@ -177,6 +176,28 @@ export function initDB() {
   `)
 
   return db
+}
+
+/** @deprecated Ana süreçte doğrudan {@link initDatabase} kullanın. */
+export function initDB(): ReturnType<typeof drizzle> {
+  return initDatabase(join(app.getPath('userData'), 'btpos.db'))
+}
+
+export function reinitDatabase(customPath?: string): void {
+  try {
+    rawSqlite?.close()
+  } catch {
+    /* yok say */
+  }
+  rawSqlite = null
+  db = undefined
+
+  const dbDir = customPath?.trim() ? customPath.trim() : app.getPath('userData')
+  const dbFile = join(dbDir, 'btpos.db')
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true })
+  }
+  initDatabase(dbFile)
 }
 
 function migrateCashiersCompanyId(sqlite: Database.Database) {

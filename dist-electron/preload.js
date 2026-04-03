@@ -3,7 +3,9 @@ const electron = require("electron");
 electron.contextBridge.exposeInMainWorld("electron", {
   store: {
     get: (key) => electron.ipcRenderer.invoke("store:get", key),
-    set: (key, value) => electron.ipcRenderer.invoke("store:set", key, value)
+    set: (key, value) => electron.ipcRenderer.invoke("store:set", key, value),
+    getCartSettings: () => electron.ipcRenderer.invoke("store:getCartSettings"),
+    setCartSettings: (s) => electron.ipcRenderer.invoke("store:setCartSettings", s)
   },
   device: {
     uid: () => electron.ipcRenderer.invoke("device:uid"),
@@ -12,7 +14,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
   app: {
     version: () => electron.ipcRenderer.invoke("app:version"),
     restart: () => electron.ipcRenderer.invoke("app:restart"),
-    openKeyboard: () => electron.ipcRenderer.invoke("app:openKeyboard")
+    openKeyboard: () => electron.ipcRenderer.invoke("app:openKeyboard"),
+    selectFolder: () => electron.ipcRenderer.invoke("app:selectFolder"),
+    reinitDb: (p) => electron.ipcRenderer.invoke("app:reinitDb", p)
   },
   window: {
     isFullscreen: () => electron.ipcRenderer.invoke("window:isFullscreen"),

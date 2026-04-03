@@ -1,12 +1,59 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog } from 'electron'
 import { exec } from 'child_process'
 import { join } from 'path'
 import Store from 'electron-store'
-import { initDB } from '../db/index'
 
 import { getDeviceUID, getDeviceInfo } from './device'
 
 const store = new Store()
+
+interface CartSettingsMain {
+  showBarkod: boolean
+  showKdv: boolean
+  showFiyat: boolean
+  showIskonto: boolean
+  showUrunKodu: boolean
+  fsUrunAdi: number
+  fsUrunKod: number
+  fsUrunKodu: number
+  fsMiktar: number
+  fsTutar: number
+  fsTutarSub: number
+  fsPill: number
+}
+
+const DEFAULT_CART_SETTINGS: CartSettingsMain = {
+  showBarkod: false,
+  showKdv: true,
+  showFiyat: true,
+  showIskonto: false,
+  showUrunKodu: true,
+  fsUrunAdi: 13,
+  fsUrunKod: 10,
+  fsUrunKodu: 10,
+  fsMiktar: 13,
+  fsTutar: 13,
+  fsTutarSub: 10,
+  fsPill: 10,
+}
+
+function mergeCartSettings(raw: unknown): CartSettingsMain {
+  const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  return {
+    showBarkod:  Boolean(o.showBarkod ?? DEFAULT_CART_SETTINGS.showBarkod),
+    showKdv:     Boolean(o.showKdv ?? DEFAULT_CART_SETTINGS.showKdv),
+    showFiyat:   Boolean(o.showFiyat ?? DEFAULT_CART_SETTINGS.showFiyat),
+    showIskonto: Boolean(o.showIskonto ?? DEFAULT_CART_SETTINGS.showIskonto),
+    showUrunKodu: Boolean(o.showUrunKodu ?? DEFAULT_CART_SETTINGS.showUrunKodu),
+    fsUrunAdi:   Math.max(11, Math.min(18, Number(o.fsUrunAdi) || DEFAULT_CART_SETTINGS.fsUrunAdi)),
+    fsUrunKod:   Math.max(9, Math.min(14, Number(o.fsUrunKod) || DEFAULT_CART_SETTINGS.fsUrunKod)),
+    fsUrunKodu:  Math.max(9, Math.min(14, Number(o.fsUrunKodu) || DEFAULT_CART_SETTINGS.fsUrunKodu)),
+    fsMiktar:    Math.max(11, Math.min(18, Number(o.fsMiktar) || DEFAULT_CART_SETTINGS.fsMiktar)),
+    fsTutar:     Math.max(11, Math.min(18, Number(o.fsTutar) || DEFAULT_CART_SETTINGS.fsTutar)),
+    fsTutarSub:  Math.max(9, Math.min(13, Number(o.fsTutarSub) || DEFAULT_CART_SETTINGS.fsTutarSub)),
+    fsPill:      Math.max(9, Math.min(12, Number(o.fsPill) || DEFAULT_CART_SETTINGS.fsPill)),
+  }
+}
 
 let mainWindow: BrowserWindow | null = null
 
@@ -47,9 +94,38 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  await initDB()
+  const savedDbDir = (store.get('db_path') as string | undefined)?.trim()
+  const dbDir = savedDbDir && savedDbDir.length > 0 ? savedDbDir : app.getPath('userData')
+  const { initDatabase } = await import('../db/index')
+  initDatabase(join(dbDir, 'btpos.db'))
 
   createWindow()
+
+  ipcMain.handle('app:selectFolder', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: 'Veritabanı Klasörü Seç',
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('app:reinitDb', async (_e, newPath: string) => {
+    try {
+      const { reinitDatabase } = await import('../db/index')
+      reinitDatabase(newPath?.trim() || undefined)
+      return { success: true as const }
+    } catch (e) {
+      return { success: false as const, error: String(e) }
+    }
+  })
+
+  ipcMain.handle('store:getCartSettings', () => mergeCartSettings(store.get('cart_settings')))
+
+  ipcMain.handle('store:setCartSettings', (_e, s: unknown) => {
+    const merged = mergeCartSettings(s)
+    store.set('cart_settings', merged)
+    return { success: true as const }
+  })
 
   ipcMain.handle('app:restart', () => {
     app.relaunch()

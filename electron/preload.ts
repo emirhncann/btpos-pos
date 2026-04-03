@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electron', {
   store: {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, value: unknown) => ipcRenderer.invoke('store:set', key, value),
+    getCartSettings: () => ipcRenderer.invoke('store:getCartSettings'),
+    setCartSettings: (s: unknown) => ipcRenderer.invoke('store:setCartSettings', s),
   },
   device: {
     uid:  () => ipcRenderer.invoke('device:uid'),
@@ -13,6 +15,8 @@ contextBridge.exposeInMainWorld('electron', {
     version:      () => ipcRenderer.invoke('app:version'),
     restart:      () => ipcRenderer.invoke('app:restart'),
     openKeyboard: () => ipcRenderer.invoke('app:openKeyboard'),
+    selectFolder: () => ipcRenderer.invoke('app:selectFolder'),
+    reinitDb:     (p: string) => ipcRenderer.invoke('app:reinitDb', p),
   },
   window: {
     isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),

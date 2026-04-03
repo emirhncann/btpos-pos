@@ -3,10 +3,26 @@ import ActivationScreen   from './screens/ActivationScreen'
 import CashierLoginScreen from './screens/CashierLoginScreen'
 import DashboardScreen    from './screens/DashboardScreen'
 import POSScreen          from './screens/POSScreen'
+import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
+
+const DEFAULT_CART_SETTINGS: CartSettings = {
+  showBarkod: false,
+  showKdv: true,
+  showFiyat: true,
+  showIskonto: false,
+  showUrunKodu: true,
+  fsUrunAdi: 13,
+  fsUrunKod: 10,
+  fsUrunKodu: 10,
+  fsMiktar: 13,
+  fsTutar: 13,
+  fsTutarSub: 10,
+  fsPill: 10,
+}
 
 export default function App() {
   const [state, setState]               = useState<AppState>('loading')
@@ -37,6 +53,8 @@ export default function App() {
   const [commandSyncing, setCommandSyncing] = useState(false)
   const [cmdPollTick, setCmdPollTick]   = useState(0)
   const [cartActive, setCartActive]     = useState(false)
+  const [cartSettings, setCartSettings] = useState<CartSettings>(DEFAULT_CART_SETTINGS)
+  const [showSplash, setShowSplash]     = useState(true)
 
   const showMerkezToast = useCallback((msg: string) => {
     setMerkezToast(msg)
@@ -101,6 +119,11 @@ export default function App() {
 
   useEffect(() => { checkActivation() }, [])
 
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 3500)
+    return () => clearTimeout(timer)
+  }, [])
+
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
     const storedCompanyId  = await window.electron.store.get('company_id') as string | null
@@ -110,6 +133,7 @@ export default function App() {
       setCompanyId(storedCompanyId)
       setTerminalId(storedTerminalId)
       window.electron.db.getPosSettings().then(setPosSettings).catch(() => {})
+      window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
       setState('cashier_login')
     } else {
       setState('activation')
@@ -119,6 +143,7 @@ export default function App() {
   function handleActivated(cId: string) {
     setCompanyId(cId)
     window.electron.store.get('terminal_id').then(id => setTerminalId(id as string))
+    window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
     setState('cashier_login')
   }
 
@@ -140,6 +165,8 @@ export default function App() {
       setState('pos')
     })
   }
+
+  if (showSplash) return <SplashScreen />
 
   if (state === 'loading') return (
     <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#F0F2F5' }}>
@@ -197,6 +224,11 @@ export default function App() {
       onMessageClose={() => setPopupMessage(null)}
       merkezToast={merkezToast}
       onCartChange={setCartActive}
+      cartSettings={cartSettings}
+      onCartSettingsChange={async s => {
+        setCartSettings(s)
+        await window.electron.store.setCartSettings(s)
+      }}
     />
   )
 }

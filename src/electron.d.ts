@@ -1,11 +1,28 @@
 export {}
 
 declare global {
+  interface CartSettings {
+    showBarkod: boolean
+    showKdv: boolean
+    showFiyat: boolean
+    showIskonto: boolean
+    showUrunKodu: boolean
+    fsUrunAdi: number
+    fsUrunKod: number
+    fsUrunKodu: number
+    fsMiktar: number
+    fsTutar: number
+    fsTutarSub: number
+    fsPill: number
+  }
+
   interface Window {
     electron: {
       store: {
         get: (key: string) => Promise<unknown>
         set: (key: string, value: unknown) => Promise<void>
+        getCartSettings: () => Promise<CartSettings>
+        setCartSettings: (s: CartSettings) => Promise<{ success: boolean }>
       }
       device: {
         uid:  () => Promise<string>
@@ -15,6 +32,8 @@ declare global {
         version:      () => Promise<string>
         restart:      () => Promise<void>
         openKeyboard: () => Promise<void>
+        selectFolder: () => Promise<string | null>
+        reinitDb:     (path: string) => Promise<{ success: boolean; error?: string }>
       }
       window: {
         isFullscreen:    () => Promise<boolean>
@@ -144,6 +163,7 @@ declare global {
     discountRate:   number
     discountAmount: number
     netTotal:       number
+    barcode?:       string
   }
 
   interface HeldDocRow {

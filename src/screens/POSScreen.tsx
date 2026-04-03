@@ -1,9 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { api } from '../lib/api'
+
+const CART_GRID = '24px 1fr 72px 82px'
 
 function hexToSoft(hex: string): string {
   try {
@@ -30,6 +32,8 @@ interface Props {
   onMessageClose?: () => void
   merkezToast?:    string | null
   onCartChange?:   (hasItems: boolean) => void
+  cartSettings:           CartSettings
+  onCartSettingsChange?:  (s: CartSettings) => void
 }
 
 const fmt = (n: number) =>
@@ -54,7 +58,7 @@ function normalizeHeldCartItem(i: CartItem): CartItem {
   const discountRate = i.discountRate ?? 0
   const discountAmount = i.discountAmount ?? 0
   const netTotal = i.netTotal ?? calcLineDiscount(lineTotal, discountRate, discountAmount)
-  return { ...i, lineTotal, discountRate, discountAmount, netTotal }
+  return { ...i, lineTotal, discountRate, discountAmount, netTotal, barcode: i.barcode ?? '' }
 }
 
 export default function POSScreen({
@@ -64,6 +68,8 @@ export default function POSScreen({
   pendingMessage, onMessageClose,
   merkezToast = null,
   onCartChange,
+  cartSettings,
+  onCartSettingsChange,
 }: Props) {
 
   /* ── State ── */
@@ -92,6 +98,7 @@ export default function POSScreen({
   const [customers, setCustomers]         = useState<CustomerRow[]>([])
   const [customerQ, setCustomerQ]         = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
+  const [showCartPanel, setShowCartPanel] = useState(false)
 
   const searchRef = useRef<HTMLInputElement>(null)
   const license   = useLicenseCheck(companyId)
@@ -237,6 +244,7 @@ export default function POSScreen({
         vatRate: product.vatRate ?? 18, unit: product.unit ?? 'Adet',
         quantity: qty, lineTotal,
         discountRate: 0, discountAmount: 0, netTotal: lineTotal,
+        barcode: product.barcode ?? '',
       }]
     })
   }
@@ -608,127 +616,304 @@ export default function POSScreen({
         {/* ① SEPET — %42 */}
         <div style={{ width: '42%', flexShrink: 0, boxSizing: 'border-box', background: cancelMode ? '#fff5f5' : 'white', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e0e0e0', transition: 'background 0.25s' }}>
 
-          {/* Başlık */}
-          <div style={{ padding: '8px 14px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 40, flexShrink: 0, background: '#f8f9fa' }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>Satış Belgesi</span>
+          {/* Sepet header */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 12px', height: 38, background: '#f8f9fa',
+            borderBottom: '0.5px solid #e5e7eb', flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>Satış Belgesi</span>
+              <button
+                type="button"
+                onClick={() => setShowCartPanel(p => !p)}
+                style={{
+                  width: 24, height: 24, borderRadius: 5, cursor: 'pointer',
+                  background: showCartPanel ? '#E3F2FD' : '#F3F4F6',
+                  border: `1px solid ${showCartPanel ? '#90CAF9' : '#E0E0E0'}`,
+                  color: showCartPanel ? '#1565C0' : '#6B7280',
+                  fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >⚙</button>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: '#9ca3af' }}>{cart.length > 0 ? `${cart.length} kalem` : 'Boş'}</span>
-              {cart.length > 0 && (
-                <>
-                  <button
-                    onClick={() => {
-                      if (!cancelMode && cart.length === 0) return
-                      setCancelMode(m => !m)
-                    }}
-                    style={{ background: cancelMode ? '#dc2626' : 'none', border: cancelMode ? 'none' : 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, color: cancelMode ? 'white' : '#9ca3af', padding: '2px 8px' }}
-                  >
-                    ✕ {cancelMode ? 'İptal Modunu Kapat' : 'İptal'}
-                  </button>
-                  <button onClick={clearCart} style={{ background: '#FFEBEE', border: '1px solid #FFCDD2', borderRadius: 5, cursor: 'pointer', fontSize: 10, color: '#C62828', padding: '2px 8px' }}>
-                    Temizle
-                  </button>
-                </>
-              )}
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>
+                {cart.length > 0 ? `${cart.length} kalem` : 'Boş'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCancelMode(p => !p)}
+                style={{
+                  fontSize: 11, color: cancelMode ? '#1565C0' : '#dc2626',
+                  background: 'none', border: 'none', cursor: 'pointer',
+                }}
+              >
+                {cancelMode ? '← Geri' : '✕ İptal'}
+              </button>
+              <button
+                type="button"
+                onClick={clearCart}
+                style={{
+                  fontSize: 11, background: '#dc2626', color: 'white',
+                  border: 'none', borderRadius: 5, padding: '3px 10px',
+                  cursor: 'pointer', fontWeight: 500,
+                }}
+              >Temizle</button>
             </div>
           </div>
+
+          {showCartPanel && (
+            <div style={{
+              padding: '10px 12px', background: '#f3f4f6',
+              borderBottom: '0.5px solid #e0e0e0', flexShrink: 0,
+            }}>
+              <div style={{
+                fontSize: 9, fontWeight: 600, color: '#9ca3af',
+                textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 7,
+              }}>
+                Meta Bilgiler
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
+                {([
+                  { key: 'showBarkod' as const, label: 'Barkod' },
+                  { key: 'showUrunKodu' as const, label: 'Ürün kodu' },
+                  { key: 'showKdv' as const, label: 'KDV%' },
+                  { key: 'showFiyat' as const, label: 'B.Fiyat' },
+                  { key: 'showIskonto' as const, label: 'İskonto' },
+                ] as const).map(t => (
+                  <button
+                    type="button"
+                    key={t.key}
+                    onClick={() => onCartSettingsChange?.({ ...cartSettings, [t.key]: !cartSettings[t.key] })}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
+                      fontSize: 11, fontWeight: 500, border: '1px solid',
+                      background: cartSettings[t.key] ? '#E3F2FD' : 'white',
+                      borderColor: cartSettings[t.key] ? '#90CAF9' : '#E0E0E0',
+                      color: cartSettings[t.key] ? '#1565C0' : '#9ca3af',
+                    }}
+                  >
+                    {cartSettings[t.key] ? '✓' : '○'} {t.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{
+                fontSize: 9, fontWeight: 600, color: '#9ca3af',
+                textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6,
+              }}>
+                Font Boyutları
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+                {([
+                  { key: 'fsUrunAdi' as const, label: 'Ürün adı', min: 11, max: 18 },
+                  { key: 'fsUrunKod' as const, label: 'Barkod satırı', min: 9, max: 14 },
+                  { key: 'fsUrunKodu' as const, label: 'Ürün kodu', min: 9, max: 14 },
+                  { key: 'fsMiktar' as const, label: 'Miktar', min: 11, max: 18 },
+                  { key: 'fsTutar' as const, label: 'Tutar', min: 11, max: 18 },
+                  { key: 'fsTutarSub' as const, label: 'Tutar alt', min: 9, max: 13 },
+                  { key: 'fsPill' as const, label: 'Pill metin', min: 9, max: 12 },
+                ] as const).map(f => (
+                  <div key={f.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    background: 'white', border: '0.5px solid #e5e7eb',
+                    borderRadius: 6, padding: '5px 8px',
+                  }}>
+                    <label style={{ fontSize: 11, color: '#6b7280', minWidth: 68, flexShrink: 0 }}>
+                      {f.label}
+                    </label>
+                    <input
+                      type="range"
+                      min={f.min}
+                      max={f.max}
+                      step={1}
+                      value={cartSettings[f.key]}
+                      onChange={e => onCartSettingsChange?.({
+                        ...cartSettings,
+                        [f.key]: Number(e.target.value),
+                      })}
+                      style={{ flex: 1, accentColor: '#1565C0' }}
+                    />
+                    <span style={{ fontSize: 11, fontWeight: 500, color: '#374151', minWidth: 26, textAlign: 'right' }}>
+                      {cartSettings[f.key]}px
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* İptal ipucu */}
           {cancelMode && (
             <div style={{ background: 'rgba(198,40,40,0.12)', color: '#b71c1c', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: 4, flexShrink: 0 }}>
-              Satıra veya ✕ ile kaldırın · barkod ile adet düşürün
+              Satıra tıklayarak kaldırın · barkod ile adet düşürün
             </div>
           )}
 
-          {/* Sütun başlıkları */}
-          <div style={{ display: 'grid', gridTemplateColumns: '44px minmax(0,1fr) 96px 62px 52px 78px 28px', gap: '0 4px', padding: '5px 10px', background: '#f0f2f4', borderBottom: '1px solid #e0e0e0', flexShrink: 0 }}>
-            {['İşlem', 'Ürün', 'Miktar', 'B.Fiyat', 'İsk.', 'Tutar', ''].map((h, i) => (
-              <span key={i} style={{ fontSize: 9, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.2px', textAlign: i >= 2 && i <= 5 ? 'center' : 'left' }}>{h}</span>
-            ))}
+          <div style={{
+            display: 'grid', gridTemplateColumns: CART_GRID,
+            padding: '4px 12px', background: '#f0f2f4',
+            borderBottom: '0.5px solid #e0e0e0', flexShrink: 0,
+          }}>
+            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }} />
+            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px' }}>Ürün Adı</span>
+            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'center' }}>Miktar</span>
+            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Tutar</span>
           </div>
 
-          {/* Satır listesi */}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
             {cart.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#d1d5db', fontSize: 13, flexDirection: 'column', gap: 8 }}>
                 <span style={{ fontSize: 32 }}>🛒</span>
                 <span>Sepet boş — ürün seçin veya barkod okutun</span>
               </div>
-            ) : cart.map(item => (
-              <div
-                key={item.id}
-                onClick={() => {
-                  if (cancelMode) removeFromCart(item.id)
-                  else if (posSettings.allowLineDiscount) setLineDiscountTarget(item.id)
-                }}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '44px minmax(0,1fr) 96px 62px 52px 78px 28px',
-                  gap: '0 4px',
-                  padding: '8px 10px',
-                  alignItems: 'center',
-                  borderBottom: '1px solid #f5f5f5',
-                  cursor: cancelMode || posSettings.allowLineDiscount ? 'pointer' : 'default',
-                  background: cancelMode ? '#fff5f5' : 'white',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={e => {
-                  if (cancelMode) (e.currentTarget as HTMLDivElement).style.background = '#ffebee'
-                }}
-                onMouseLeave={e => {
-                  if (cancelMode) (e.currentTarget as HTMLDivElement).style.background = '#fff5f5'
-                }}
-              >
-                {/* İşlem tipi */}
-                <div style={{ fontSize: 10, color: cancelMode ? '#dc2626' : '#9ca3af', fontWeight: 500 }}>Satış</div>
+            ) : cart.map(item => {
+              const dr = item.discountRate ?? 0
+              const da = item.discountAmount ?? 0
+              const pills: ReactNode[] = []
+              if (cartSettings.showKdv) pills.push(
+                <span key="kdv" style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '0 5px', height: 16, borderRadius: 3,
+                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
+                  background: '#FFF3E0', color: '#BF360C', border: '1px solid #FFCCBC',
+                }}>
+                  KDV %{item.vatRate}
+                </span>,
+              )
+              if (cartSettings.showIskonto && (dr > 0 || da > 0)) pills.push(
+                <span key="dis" style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '0 5px', height: 16, borderRadius: 3,
+                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
+                  background: '#FCE4EC', color: '#880E4F', border: '1px solid #F8BBD0',
+                }}>
+                  {dr > 0 ? `-%${dr}` : `-${fmt(da)}`}
+                </span>,
+              )
+              if (cartSettings.showFiyat) pills.push(
+                <span key="fp" style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '0 5px', height: 16, borderRadius: 3,
+                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
+                  background: '#E3F2FD', color: '#0D47A1', border: '1px solid #BBDEFB',
+                }}>
+                  {fmt(item.price)}
+                </span>,
+              )
 
-                {/* Ürün adı + kod */}
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: cancelMode ? '#dc2626' : '#111', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.name}</div>
-                  <div style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>{item.code}</div>
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => {
+                    if (cancelMode) removeFromCart(item.id)
+                    else if (posSettings.allowLineDiscount) setLineDiscountTarget(item.id)
+                  }}
+                  style={{
+                    display: 'grid', gridTemplateColumns: CART_GRID,
+                    padding: '7px 12px', borderBottom: '0.5px solid #f5f5f5',
+                    alignItems: 'start',
+                    cursor: cancelMode || posSettings.allowLineDiscount ? 'pointer' : 'default',
+                    background: cancelMode ? 'rgba(220,38,38,0.03)' : 'white',
+                  }}
+                  onMouseEnter={e => {
+                    if (!cancelMode) (e.currentTarget as HTMLDivElement).style.background = '#fafbfc'
+                  }}
+                  onMouseLeave={e => {
+                    if (!cancelMode) (e.currentTarget as HTMLDivElement).style.background = 'white'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                    {cancelMode ? (
+                      <div style={{
+                        width: 20, height: 20, borderRadius: 3,
+                        background: '#FFEBEE', border: '1.5px solid #EF9A9A',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 9, fontWeight: 700, color: '#C62828', marginTop: 2,
+                      }}>İ</div>
+                    ) : (
+                      <div style={{
+                        width: 20, height: 20, borderRadius: 3,
+                        background: '#E8F5E9', border: '1.5px solid #A5D6A7',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 9, fontWeight: 700, color: '#2E7D32', marginTop: 2,
+                      }}>S</div>
+                    )}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{
+                      fontSize: cartSettings.fsUrunAdi, fontWeight: 500,
+                      color: cancelMode ? '#dc2626' : '#111',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      lineHeight: 1.3,
+                    }}>{item.name}</div>
+                    {cartSettings.showBarkod && (
+                      <div style={{
+                        fontSize: cartSettings.fsUrunKod, color: '#9ca3af',
+                        fontFamily: 'monospace', marginTop: 1,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{item.barcode?.trim() ? item.barcode : '—'}</div>
+                    )}
+                    {(cartSettings.showUrunKodu || pills.length > 0) && (
+                      <div style={{
+                        display: 'flex', gap: 3, marginTop: 3, overflow: 'hidden', flexWrap: 'nowrap',
+                      }}>
+                        {cartSettings.showUrunKodu && (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center',
+                            padding: '0 5px', height: 16, borderRadius: 3,
+                            fontSize: cartSettings.fsUrunKodu, whiteSpace: 'nowrap', flexShrink: 0,
+                            background: '#EDE7F6', color: '#4527A0', border: '1px solid #B39DDB',
+                            fontFamily: 'monospace', fontWeight: 600,
+                          }}>{item.code}</span>
+                        )}
+                        {pills}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
+                    {!cancelMode && (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
+                        style={{
+                          width: 17, height: 17, border: '1px solid #e0e0e0',
+                          background: '#f5f5f5', borderRadius: 3, cursor: 'pointer',
+                          fontSize: 11, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', color: '#374151',
+                        }}
+                      >−</button>
+                    )}
+                    <span style={{
+                      fontSize: cartSettings.fsMiktar, fontWeight: 600,
+                      color: cancelMode ? '#dc2626' : '#374151',
+                      minWidth: 16, textAlign: 'center',
+                    }}>{item.quantity}</span>
+                    {!cancelMode && (
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
+                        style={{
+                          width: 17, height: 17, border: '1px solid #e0e0e0',
+                          background: '#f5f5f5', borderRadius: 3, cursor: 'pointer',
+                          fontSize: 11, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', color: '#374151',
+                        }}
+                      >+</button>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{
+                      fontSize: cartSettings.fsTutar, fontWeight: 600,
+                      color: cancelMode ? '#dc2626' : '#111',
+                    }}>{fmt(item.netTotal)}</div>
+                    <div style={{
+                      fontSize: cartSettings.fsTutarSub, color: '#9ca3af', marginTop: 1,
+                    }}>{fmt(item.price)}×{item.quantity}</div>
+                  </div>
                 </div>
-
-                {/* Miktar +/− */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  {!cancelMode && (
-                    <button onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
-                      style={{ width: 22, height: 22, border: '1px solid #e5e7eb', background: '#f3f4f6', borderRadius: 4, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151' }}>−</button>
-                  )}
-                  <span style={{ fontSize: 13, fontWeight: 600, color: cancelMode ? '#dc2626' : '#374151', minWidth: 24, textAlign: 'center' }}>{item.quantity}</span>
-                  {!cancelMode && (
-                    <button onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
-                      style={{ width: 22, height: 22, border: '1px solid #e5e7eb', background: '#f3f4f6', borderRadius: 4, cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151' }}>+</button>
-                  )}
-                </div>
-
-                {/* Birim fiyat */}
-                <div style={{ fontSize: 11, color: '#6b7280', textAlign: 'center' }}>{fmt(item.price)}</div>
-
-                {/* İskonto */}
-                <div style={{ fontSize: 10, color: '#E65100', textAlign: 'center', fontWeight: 600 }}>
-                  {item.discountRate > 0
-                    ? `%${item.discountRate}`
-                    : item.discountAmount > 0
-                      ? `-${fmt(item.discountAmount)}`
-                      : '—'}
-                </div>
-
-                {/* Tutar (iskonto sonrası) */}
-                <div style={{ fontSize: 12, fontWeight: 600, color: cancelMode ? '#dc2626' : '#111', textAlign: 'right' }}>{fmt(item.netTotal)}</div>
-
-                {/* Sil — yalnız iptal modunda */}
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
-                  {cancelMode && (
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={e => { e.stopPropagation(); removeFromCart(item.id) }}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); removeFromCart(item.id) } }}
-                      style={{ width: 20, height: 20, background: '#dc2626', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'white', cursor: 'pointer' }}
-                    >✕</div>
-                  )}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* Özet + toplam */}
