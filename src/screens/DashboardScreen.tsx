@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import AppLogo from '../components/AppLogo'
 import { api } from '../lib/api'
 
 const CMD_LABELS: Record<string, string> = {
@@ -30,17 +31,19 @@ const CMD_COLORS: Record<string, { bg: string; icon: string }> = {
 }
 
 interface Props {
-  companyId:          string
-  cashier:            CashierRow
-  terminalId:         string
-  onStartSale:        () => void
-  onLogout:           () => void
-  onShowMessage:      (text: string) => void
-  onPluUpdated:       (groups: PluGroupCacheRow[]) => void
-  onSettingsUpdated:  (s: PosSettingsRow) => void
-  commandSyncing?:    boolean
-  merkezToast?:       string | null
-  cmdPollTick?:       number
+  companyId:              string
+  cashier:                CashierRow
+  terminalId:             string
+  onStartSale:            () => void
+  onLogout:               () => void
+  onShowMessage:          (text: string) => void
+  onPluUpdated:           (groups: PluGroupCacheRow[]) => void
+  onSettingsUpdated:      (s: PosSettingsRow) => void
+  commandSyncing?:        boolean
+  merkezToast?:           string | null
+  cmdPollTick?:           number
+  cartSettings:           CartSettings
+  onCartSettingsChange?:  (s: CartSettings) => void | Promise<void>
 }
 
 interface DailySummary {
@@ -53,18 +56,23 @@ interface DailySummary {
 export default function DashboardScreen({
   companyId, cashier,
   onStartSale, onLogout, onShowMessage,
+  onPluUpdated: _onPluUpdated,
+  onSettingsUpdated: _onSettingsUpdated,
   commandSyncing = false,
   merkezToast = null,
   cmdPollTick = 0,
-  ..._sprint9Props
+  cartSettings,
+  onCartSettingsChange,
 }: Props) {
-  void _sprint9Props
+  void _onPluUpdated
+  void _onSettingsUpdated
   const [summary, setSummary]       = useState<DailySummary>({ saleCount: 0, totalSales: 0, totalCash: 0, totalCard: 0 })
   const [time, setTime]             = useState(new Date())
   const [syncing, setSyncing]       = useState(false)
   const [toast, setToast]           = useState<string | null>(null)
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
+  const [showSettings, setShowSettings] = useState(false)
 
   const refreshCmdHistory = useCallback(() => {
     window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
@@ -126,16 +134,25 @@ export default function DashboardScreen({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#F0F2F5' }}>
 
-      {/* Header */}
-      <div style={{ background: '#1565C0', padding: '0 24px', height: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+      {/* Header — kasiyer girişi ile aynı koyu tema */}
+      <div style={{
+        background: '#030712',
+        borderBottom: '1px solid #1f2937',
+        padding: '0 24px',
+        height: 52,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexShrink: 0,
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ color: 'white', fontWeight: 700, fontSize: 18 }}>BT<span style={{ color: '#90CAF9' }}>POS</span></span>
-          <span style={{ color: '#90CAF9', fontSize: 13 }}>Hoş geldiniz</span>
+          <AppLogo height={30} />
+          <span style={{ color: '#9ca3af', fontSize: 13 }}>Hoş geldiniz</span>
         </div>
-        <span style={{ color: '#BBDEFB', fontSize: 13 }}>
+        <span style={{ color: '#9ca3af', fontSize: 13 }}>
           {time.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}
           {' — '}
-          <span style={{ fontWeight: 600, fontSize: 15 }}>
+          <span style={{ fontWeight: 600, fontSize: 15, color: '#e5e7eb' }}>
             {time.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>
         </span>
@@ -174,8 +191,21 @@ export default function DashboardScreen({
         </div>
 
         {/* Butonlar */}
-        <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
+              background: '#F3F4F6', border: '1px solid #E0E0E0',
+              fontSize: 13, fontWeight: 500, color: '#374151',
+            }}
+          >
+            ⚙ Ekran Ayarları
+          </button>
+          <button
+            type="button"
             onClick={onStartSale}
             style={{ background: '#1565C0', color: 'white', border: 'none', borderRadius: 16, cursor: 'pointer', width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22, fontWeight: 600 }}
           >
@@ -184,6 +214,7 @@ export default function DashboardScreen({
           </button>
 
           <button
+            type="button"
             onClick={handleSync}
             disabled={syncing || commandSyncing}
             style={{ background: 'white', color: '#424242', border: '1px solid #E0E0E0', borderRadius: 16, cursor: (syncing || commandSyncing) ? 'default' : 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500, opacity: (syncing || commandSyncing) ? 0.6 : 1 }}
@@ -193,6 +224,7 @@ export default function DashboardScreen({
           </button>
 
           <button
+            type="button"
             onClick={onLogout}
             style={{ background: 'white', color: '#C62828', border: '1px solid #FFCDD2', borderRadius: 16, cursor: 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500 }}
           >
@@ -251,6 +283,149 @@ export default function DashboardScreen({
           </div>
         </div>
       </div>
+
+      {showSettings && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 14, width: 480,
+            maxHeight: '85vh', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '16px 20px', borderBottom: '1px solid #F0F0F0',
+            }}>
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>Ekran Ayarları</div>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 20, color: '#9E9E9E', lineHeight: 1,
+                }}
+              >✕</button>
+            </div>
+            <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: '#9ca3af',
+                textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10,
+              }}>
+                Sepet Meta Bilgileri
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+                {([
+                  { key: 'showBarkod' as const, label: 'Barkod' },
+                  { key: 'showBirim' as const, label: 'Birim' },
+                  { key: 'showFiyat' as const, label: 'B.Fiyat' },
+                  { key: 'showIskonto' as const, label: 'İndirim' },
+                  { key: 'showKdv' as const, label: 'KDV%' },
+                ] as const).map(t => (
+                  <button
+                    type="button"
+                    key={t.key}
+                    onClick={() => onCartSettingsChange?.({
+                      ...cartSettings,
+                      [t.key]: !cartSettings[t.key],
+                    })}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
+                      fontSize: 12, fontWeight: 500, border: '1px solid',
+                      background: cartSettings[t.key] ? '#E3F2FD' : 'white',
+                      borderColor: cartSettings[t.key] ? '#90CAF9' : '#E0E0E0',
+                      color: cartSettings[t.key] ? '#1565C0' : '#9ca3af',
+                    }}
+                  >
+                    <span style={{ fontSize: 11 }}>{cartSettings[t.key] ? '✓' : '○'}</span>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: '#9ca3af',
+                textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10,
+              }}>
+                Font Boyutları
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {([
+                  { key: 'fsUrunAdi' as const, label: 'Ürün adı', min: 11, max: 18 },
+                  { key: 'fsUrunKod' as const, label: 'Barkod', min: 9, max: 14 },
+                  { key: 'fsMiktar' as const, label: 'Miktar', min: 11, max: 18 },
+                  { key: 'fsTutar' as const, label: 'Tutar', min: 11, max: 18 },
+                  { key: 'fsTutarSub' as const, label: 'Tutar alt', min: 9, max: 13 },
+                  { key: 'fsPill' as const, label: 'Pill metin', min: 9, max: 12 },
+                ] as const).map(f => (
+                  <div key={f.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '8px 14px', borderRadius: 8,
+                    background: '#F8F9FA', border: '1px solid #F0F0F0',
+                  }}>
+                    <span style={{ fontSize: 13, color: '#374151', minWidth: 80, flexShrink: 0 }}>
+                      {f.label}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const v = Math.max(f.min, cartSettings[f.key] - 1)
+                          void onCartSettingsChange?.({ ...cartSettings, [f.key]: v })
+                        }}
+                        disabled={cartSettings[f.key] <= f.min}
+                        style={{
+                          width: 28, height: 28, borderRadius: 6,
+                          border: '1px solid #E0E0E0', background: 'white',
+                          cursor: 'pointer', fontSize: 16, fontWeight: 500,
+                          color: '#374151', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: cartSettings[f.key] <= f.min ? 0.3 : 1,
+                        }}
+                      >−</button>
+                      <span style={{
+                        fontSize: 14, fontWeight: 600, color: '#111',
+                        minWidth: 36, textAlign: 'center',
+                      }}>
+                        {cartSettings[f.key]}px
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const v = Math.min(f.max, cartSettings[f.key] + 1)
+                          void onCartSettingsChange?.({ ...cartSettings, [f.key]: v })
+                        }}
+                        disabled={cartSettings[f.key] >= f.max}
+                        style={{
+                          width: 28, height: 28, borderRadius: 6,
+                          border: '1px solid #E0E0E0', background: 'white',
+                          cursor: 'pointer', fontSize: 16, fontWeight: 500,
+                          color: '#374151', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center',
+                          opacity: cartSettings[f.key] >= f.max ? 0.3 : 1,
+                        }}
+                      >+</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid #F0F0F0' }}>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                style={{
+                  width: '100%', padding: '11px', borderRadius: 9,
+                  background: '#1565C0', color: 'white', border: 'none',
+                  cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                }}
+              >Tamam</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {(toast || merkezToast) && (
         <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#212121', color: 'white', padding: '10px 20px', borderRadius: 8, fontSize: 13, zIndex: 10000, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>

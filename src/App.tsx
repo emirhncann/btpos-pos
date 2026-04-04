@@ -3,6 +3,7 @@ import ActivationScreen   from './screens/ActivationScreen'
 import CashierLoginScreen from './screens/CashierLoginScreen'
 import DashboardScreen    from './screens/DashboardScreen'
 import POSScreen          from './screens/POSScreen'
+import AppLogo            from './components/AppLogo'
 import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
@@ -11,13 +12,12 @@ type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
 const DEFAULT_CART_SETTINGS: CartSettings = {
   showBarkod: false,
+  showBirim: false,
   showKdv: true,
   showFiyat: true,
   showIskonto: false,
-  showUrunKodu: true,
   fsUrunAdi: 13,
   fsUrunKod: 10,
-  fsUrunKodu: 10,
   fsMiktar: 13,
   fsTutar: 13,
   fsTutarSub: 10,
@@ -169,7 +169,8 @@ export default function App() {
   if (showSplash) return <SplashScreen />
 
   if (state === 'loading') return (
-    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#F0F2F5' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', alignItems: 'center', justifyContent: 'center', background: '#F0F2F5', gap: 16 }}>
+      <AppLogo height={56} />
       <div style={{ color: '#9E9E9E', fontSize: 16 }}>BTPOS Yükleniyor...</div>
     </div>
   )
@@ -205,6 +206,11 @@ export default function App() {
         commandSyncing={commandSyncing}
         merkezToast={merkezToast}
         cmdPollTick={cmdPollTick}
+        cartSettings={cartSettings}
+        onCartSettingsChange={async s => {
+          setCartSettings(s)
+          await window.electron.store.setCartSettings(s)
+        }}
       />
     )
 
@@ -225,10 +231,6 @@ export default function App() {
       merkezToast={merkezToast}
       onCartChange={setCartActive}
       cartSettings={cartSettings}
-      onCartSettingsChange={async s => {
-        setCartSettings(s)
-        await window.electron.store.setCartSettings(s)
-      }}
     />
   )
 }

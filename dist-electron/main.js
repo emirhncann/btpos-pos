@@ -1,6 +1,7 @@
 "use strict";
 const electron = require("electron");
 const child_process = require("child_process");
+const fs = require("fs");
 const path = require("path");
 const Store = require("electron-store");
 const os = require("os");
@@ -44,13 +45,12 @@ function getDeviceInfo() {
 const store = new Store();
 const DEFAULT_CART_SETTINGS = {
   showBarkod: false,
+  showBirim: false,
   showKdv: true,
   showFiyat: true,
   showIskonto: false,
-  showUrunKodu: true,
   fsUrunAdi: 13,
   fsUrunKod: 10,
-  fsUrunKodu: 10,
   fsMiktar: 13,
   fsTutar: 13,
   fsTutarSub: 10,
@@ -60,13 +60,12 @@ function mergeCartSettings(raw) {
   const o = raw && typeof raw === "object" ? raw : {};
   return {
     showBarkod: Boolean(o.showBarkod ?? DEFAULT_CART_SETTINGS.showBarkod),
+    showBirim: Boolean(o.showBirim ?? DEFAULT_CART_SETTINGS.showBirim),
     showKdv: Boolean(o.showKdv ?? DEFAULT_CART_SETTINGS.showKdv),
     showFiyat: Boolean(o.showFiyat ?? DEFAULT_CART_SETTINGS.showFiyat),
     showIskonto: Boolean(o.showIskonto ?? DEFAULT_CART_SETTINGS.showIskonto),
-    showUrunKodu: Boolean(o.showUrunKodu ?? DEFAULT_CART_SETTINGS.showUrunKodu),
     fsUrunAdi: Math.max(11, Math.min(18, Number(o.fsUrunAdi) || DEFAULT_CART_SETTINGS.fsUrunAdi)),
     fsUrunKod: Math.max(9, Math.min(14, Number(o.fsUrunKod) || DEFAULT_CART_SETTINGS.fsUrunKod)),
-    fsUrunKodu: Math.max(9, Math.min(14, Number(o.fsUrunKodu) || DEFAULT_CART_SETTINGS.fsUrunKodu)),
     fsMiktar: Math.max(11, Math.min(18, Number(o.fsMiktar) || DEFAULT_CART_SETTINGS.fsMiktar)),
     fsTutar: Math.max(11, Math.min(18, Number(o.fsTutar) || DEFAULT_CART_SETTINGS.fsTutar)),
     fsTutarSub: Math.max(9, Math.min(13, Number(o.fsTutarSub) || DEFAULT_CART_SETTINGS.fsTutarSub)),
@@ -75,10 +74,20 @@ function mergeCartSettings(raw) {
 }
 let mainWindow = null;
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
+function resolveAppIconPath() {
+  if (electron.app.isPackaged) {
+    const p = path.join(process.resourcesPath, "logo_bt.png");
+    return fs.existsSync(p) ? p : void 0;
+  }
+  const devPath = path.join(__dirname, "..", "src", "assets", "logo_bt.png");
+  return fs.existsSync(devPath) ? devPath : void 0;
+}
 function createWindow() {
+  const icon = resolveAppIconPath();
   mainWindow = new electron.BrowserWindow({
     width: 1280,
     height: 800,
+    ...icon ? { icon } : {},
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -104,6 +113,9 @@ function createWindow() {
     if (!mainWindow) return;
     mainWindow.setFullScreen(!mainWindow.isFullScreen());
   });
+}
+if (process.platform === "win32") {
+  electron.app.setAppUserModelId("tr.bolutekno.btpos");
 }
 electron.app.whenReady().then(async () => {
   var _a;

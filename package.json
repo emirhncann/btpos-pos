@@ -52,8 +52,15 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "src/assets/logo_bt.png",
+        "to": "logo_bt.png"
+      }
+    ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "src/assets/logo_bt.png"
     },
     "nsis": {
       "oneClick": false,

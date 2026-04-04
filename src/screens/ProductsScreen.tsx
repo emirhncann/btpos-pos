@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import AppLogo from '../components/AppLogo'
 import { api } from '../lib/api'
 import LicenseBanner from '../components/LicenseBanner'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
@@ -83,7 +84,7 @@ export default function ProductsScreen({ companyId, cashier, onStartSale, onLogo
     <div className="flex flex-col h-screen bg-gray-950 text-white">
       <div className="flex items-center justify-between px-6 py-4 bg-gray-900 border-b border-gray-800">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold">BT<span className="text-blue-500">POS</span></h1>
+          <AppLogo height={32} />
           <span className="text-xs text-gray-500 border border-gray-700 rounded-full px-2 py-0.5">
             {cashier.fullName}
           </span>

@@ -18,7 +18,7 @@ export default function ConnectionDot({ status }: Props) {
         boxShadow: status === 'online' ? `0 0 0 3px ${cfg.color}30` : 'none',
         transition: 'background 0.4s',
       }} />
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }}>{cfg.label}</span>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.72)' }}>{cfg.label}</span>
     </div>
   )
 }

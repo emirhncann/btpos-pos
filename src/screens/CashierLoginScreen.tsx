@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import AppLogo from '../components/AppLogo'
 import { api } from '../lib/api'
 
 interface Props {
@@ -65,9 +66,9 @@ export default function CashierLoginScreen({ companyId, onLogin }: Props) {
       <div className="w-full max-w-sm bg-gray-900 rounded-2xl p-8 shadow-2xl border border-gray-800">
 
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white tracking-tight">
-            BT<span className="text-blue-500">POS</span>
-          </h1>
+          <div className="flex justify-center mb-3">
+            <AppLogo height={48} className="mx-auto" />
+          </div>
           <p className="text-gray-400 text-sm mt-1">Kasiyer Girişi</p>
           {syncing && (
             <p className="text-gray-600 text-xs mt-1 animate-pulse">Kasiyer listesi güncelleniyor...</p>

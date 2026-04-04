@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog } from 'electron'
 import { exec } from 'child_process'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import Store from 'electron-store'
 
@@ -9,13 +10,12 @@ const store = new Store()
 
 interface CartSettingsMain {
   showBarkod: boolean
+  showBirim: boolean
   showKdv: boolean
   showFiyat: boolean
   showIskonto: boolean
-  showUrunKodu: boolean
   fsUrunAdi: number
   fsUrunKod: number
-  fsUrunKodu: number
   fsMiktar: number
   fsTutar: number
   fsTutarSub: number
@@ -24,13 +24,12 @@ interface CartSettingsMain {
 
 const DEFAULT_CART_SETTINGS: CartSettingsMain = {
   showBarkod: false,
+  showBirim: false,
   showKdv: true,
   showFiyat: true,
   showIskonto: false,
-  showUrunKodu: true,
   fsUrunAdi: 13,
   fsUrunKod: 10,
-  fsUrunKodu: 10,
   fsMiktar: 13,
   fsTutar: 13,
   fsTutarSub: 10,
@@ -41,13 +40,12 @@ function mergeCartSettings(raw: unknown): CartSettingsMain {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   return {
     showBarkod:  Boolean(o.showBarkod ?? DEFAULT_CART_SETTINGS.showBarkod),
+    showBirim:   Boolean(o.showBirim ?? DEFAULT_CART_SETTINGS.showBirim),
     showKdv:     Boolean(o.showKdv ?? DEFAULT_CART_SETTINGS.showKdv),
     showFiyat:   Boolean(o.showFiyat ?? DEFAULT_CART_SETTINGS.showFiyat),
     showIskonto: Boolean(o.showIskonto ?? DEFAULT_CART_SETTINGS.showIskonto),
-    showUrunKodu: Boolean(o.showUrunKodu ?? DEFAULT_CART_SETTINGS.showUrunKodu),
     fsUrunAdi:   Math.max(11, Math.min(18, Number(o.fsUrunAdi) || DEFAULT_CART_SETTINGS.fsUrunAdi)),
     fsUrunKod:   Math.max(9, Math.min(14, Number(o.fsUrunKod) || DEFAULT_CART_SETTINGS.fsUrunKod)),
-    fsUrunKodu:  Math.max(9, Math.min(14, Number(o.fsUrunKodu) || DEFAULT_CART_SETTINGS.fsUrunKodu)),
     fsMiktar:    Math.max(11, Math.min(18, Number(o.fsMiktar) || DEFAULT_CART_SETTINGS.fsMiktar)),
     fsTutar:     Math.max(11, Math.min(18, Number(o.fsTutar) || DEFAULT_CART_SETTINGS.fsTutar)),
     fsTutarSub:  Math.max(9, Math.min(13, Number(o.fsTutarSub) || DEFAULT_CART_SETTINGS.fsTutarSub)),
@@ -59,10 +57,22 @@ let mainWindow: BrowserWindow | null = null
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
+/** Görev çubuğu / pencere ikonu — dev: kaynak dosya, paket: extraResources */
+function resolveAppIconPath(): string | undefined {
+  if (app.isPackaged) {
+    const p = join(process.resourcesPath, 'logo_bt.png')
+    return existsSync(p) ? p : undefined
+  }
+  const devPath = join(__dirname, '..', 'src', 'assets', 'logo_bt.png')
+  return existsSync(devPath) ? devPath : undefined
+}
+
 function createWindow() {
+  const icon = resolveAppIconPath()
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -91,6 +101,10 @@ function createWindow() {
     if (!mainWindow) return
     mainWindow.setFullScreen(!mainWindow.isFullScreen())
   })
+}
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('tr.bolutekno.btpos')
 }
 
 app.whenReady().then(async () => {

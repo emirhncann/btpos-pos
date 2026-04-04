@@ -3,13 +3,12 @@ export {}
 declare global {
   interface CartSettings {
     showBarkod: boolean
+    showBirim: boolean
     showKdv: boolean
     showFiyat: boolean
     showIskonto: boolean
-    showUrunKodu: boolean
     fsUrunAdi: number
     fsUrunKod: number
-    fsUrunKodu: number
     fsMiktar: number
     fsTutar: number
     fsTutarSub: number
