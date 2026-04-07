@@ -56,6 +56,7 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
           products: failResult(''),
           plu:      failResult(''),
           cashiers: failResult(''),
+          settings: failResult(''),
         }
 
         try {
@@ -96,6 +97,17 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         } catch (e) {
           console.warn('[sync_all] kasiyer hatası:', e)
           results.cashiers = failResult(String(e))
+        }
+
+        try {
+          const workplaceId = localStorage.getItem('workplace_id') || null
+          const settings = await api.getPosSettings(d.companyId, workplaceId, d.terminalId)
+          await window.electron.db.savePosSettings(settings)
+          d.onSettingsUpdated(settings)
+          results.settings = { success: true, inserted: 1, updated: 0, deleted: 0 }
+        } catch (e) {
+          console.warn('[sync_all] settings hatası:', e)
+          results.settings = failResult(String(e))
         }
 
         const vals = Object.values(results)

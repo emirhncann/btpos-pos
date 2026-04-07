@@ -109,6 +109,16 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
   mainWindow.once("ready-to-show", () => mainWindow == null ? void 0 : mainWindow.show());
+  const toggleDevTools = () => {
+    if (!mainWindow) return;
+    if (mainWindow.webContents.isDevToolsOpened()) {
+      mainWindow.webContents.closeDevTools();
+    } else {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  };
+  electron.globalShortcut.register("F12", toggleDevTools);
+  electron.globalShortcut.register("CommandOrControl+Shift+I", toggleDevTools);
   electron.globalShortcut.register("F11", () => {
     if (!mainWindow) return;
     mainWindow.setFullScreen(!mainWindow.isFullScreen());
@@ -160,34 +170,34 @@ electron.app.whenReady().then(async () => {
   electron.ipcMain.handle("device:uid", () => getDeviceUID());
   electron.ipcMain.handle("app:version", () => electron.app.getVersion());
   electron.ipcMain.handle("db:saveProducts", async (_e, prods) => {
-    const { saveProducts } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { saveProducts } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return saveProducts(prods);
   });
   electron.ipcMain.handle("db:getProducts", async () => {
-    const { getAllProducts } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getAllProducts } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getAllProducts();
   });
   electron.ipcMain.handle("db:saveSale", async (_e, sale, items) => {
-    const { saveSale } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { saveSale } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return saveSale(sale, items);
   });
   electron.ipcMain.handle("db:getSales", async (_e, dateFrom, dateTo) => {
-    const { getSales } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getSales } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getSales(dateFrom, dateTo);
   });
   electron.ipcMain.handle("device:info", () => {
     return getDeviceInfo();
   });
   electron.ipcMain.handle("db:saveCashiers", async (_e, cashierList) => {
-    const { saveCashiers } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { saveCashiers } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return saveCashiers(cashierList);
   });
   electron.ipcMain.handle("db:verifyCashier", async (_e, code, password) => {
-    const { verifyCashier } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { verifyCashier } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return verifyCashier(code, password);
   });
   electron.ipcMain.handle("db:getCashiers", async () => {
-    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getAllCashiers();
   });
   electron.ipcMain.handle("app:openKeyboard", () => {
@@ -199,51 +209,51 @@ electron.app.whenReady().then(async () => {
     });
   });
   electron.ipcMain.handle("db:holdDocument", async (_e, doc) => {
-    const { holdDocument } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { holdDocument } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return holdDocument(doc);
   });
   electron.ipcMain.handle("db:getHeldDocuments", async (_e, companyId) => {
-    const { getHeldDocuments } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getHeldDocuments } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getHeldDocuments(companyId);
   });
   electron.ipcMain.handle("db:deleteHeldDocument", async (_e, id) => {
-    const { deleteHeldDocument } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { deleteHeldDocument } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return deleteHeldDocument(id);
   });
   electron.ipcMain.handle("db:savePluGroups", async (_e, groups) => {
-    const { savePluGroups } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { savePluGroups } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     savePluGroups(groups);
   });
   electron.ipcMain.handle("db:getPluGroups", async (_e, companyId, wpId) => {
-    const { getPluGroups } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getPluGroups } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getPluGroups(companyId, wpId);
   });
   electron.ipcMain.handle("db:savePosSettings", async (_e, settings) => {
-    const { savePosSettings } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { savePosSettings } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     savePosSettings(settings);
   });
   electron.ipcMain.handle("db:getPosSettings", async () => {
-    const { getPosSettings } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getPosSettings } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getPosSettings();
   });
   electron.ipcMain.handle("db:saveCommandHistory", async (_e, row) => {
-    const { saveCommandHistory } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { saveCommandHistory } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     saveCommandHistory(row);
   });
   electron.ipcMain.handle("db:getCommandHistory", async (_e, limit) => {
-    const { getCommandHistory } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { getCommandHistory } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return getCommandHistory(limit ?? 20);
   });
   electron.ipcMain.handle("db:syncProductsAcid", async (_e, items, mode) => {
-    const { syncProductsAcid } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { syncProductsAcid } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return syncProductsAcid(items, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:syncPluGroupsAcid", async (_e, groups, mode) => {
-    const { syncPluGroupsAcid } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { syncPluGroupsAcid } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return syncPluGroupsAcid(groups, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:syncCashiersAcid", async (_e, cashierList, companyId, mode) => {
-    const { syncCashiersAcid } = await Promise.resolve().then(() => require("./operations-DbOvSFLe.js"));
+    const { syncCashiersAcid } = await Promise.resolve().then(() => require("./operations-BfMOua70.js"));
     return syncCashiersAcid(cashierList, companyId, mode === "diff" ? "diff" : "full");
   });
 });

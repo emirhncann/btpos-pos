@@ -96,6 +96,19 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
+  const toggleDevTools = () => {
+    if (!mainWindow) return
+    if (mainWindow.webContents.isDevToolsOpened()) {
+      mainWindow.webContents.closeDevTools()
+    } else {
+      mainWindow.webContents.openDevTools({ mode: 'detach' })
+    }
+  }
+
+  // DevTools kısayolları
+  globalShortcut.register('F12', toggleDevTools)
+  globalShortcut.register('CommandOrControl+Shift+I', toggleDevTools)
+
   // F11 → tam ekran aç/kapat
   globalShortcut.register('F11', () => {
     if (!mainWindow) return

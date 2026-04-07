@@ -483,7 +483,7 @@ export function syncProductsAcid(items: ProductRow[], mode: SyncMode = 'full'): 
     db.prepare('DELETE FROM products_temp').run()
 
     const insertTemp = db.prepare(`
-      INSERT INTO products_temp (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at)
+      INSERT OR IGNORE INTO products_temp (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at)
       VALUES (@id, @code, @name, @barcode, @price, @vatRate, @unit, @stock, @category, @syncedAt)
     `)
     for (const item of items) {
