@@ -57,6 +57,7 @@ export const api = {
       password:    String(c.password),
       role:        String(c.role ?? 'cashier'),
       isActive:    Boolean(c.is_active ?? true),
+      cardNumber:  c.card_number ? String(c.card_number) : null,
     }))
   },
 
@@ -97,10 +98,16 @@ export const api = {
     return res.json()
   },
 
-  async getPosSettings(companyId: string, workplaceId?: string | null, terminalId?: string | null): Promise<PosSettingsRow> {
+  async getPosSettings(
+    companyId:   string,
+    workplaceId?: string | null,
+    terminalId?:  string | null,
+    cashierId?:   string | null,
+  ): Promise<PosSettingsRow> {
     const params = new URLSearchParams({ company_id: companyId })
     if (workplaceId) params.append('workplace_id', workplaceId)
     if (terminalId)  params.append('terminal_id',  terminalId)
+    if (cashierId)   params.append('cashier_id',   cashierId)
     const res = await fetch(`${API_URL}/pos-settings/resolve?${params}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const d = await res.json()
@@ -120,17 +127,28 @@ export const api = {
       fontSizePrice:       Number(d.font_size_price       ?? 13),
       fontSizeCode:        Number(d.font_size_code        ?? 9),
       source:              String(d.source                ?? 'default'),
+      pluMode:             d.plu_mode === 'cashier' ? 'cashier' : 'terminal',
+      loginWithCode:       Boolean(d.login_with_code      ?? true),
+      loginWithCard:       Boolean(d.login_with_card      ?? false),
     }
   },
 }
 
 /** Sunucudan PLU listesi — yalnızca sync_plu (veya benzeri komut) işlenirken; POS doğrudan SQLite okur. */
-export async function fetchPluGroupsFromServer(companyId: string, workplaceId?: string | null): Promise<PluGroup[]> {
-  const url = workplaceId
-    ? `${API_URL}/workplaces/${workplaceId}/plu`
-    : `${API_URL}/plu/groups/${companyId}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return Array.isArray(data) ? data : []
+export async function fetchPluGroupsFromServer(
+  companyId: string,
+  workplaceId?: string | null,
+  terminalId?: string | null,
+  cashierId?: string | null,
+): Promise<PluGroup[]> {
+  const params = new URLSearchParams()
+  if (cashierId)   params.append('cashier_id',  cashierId)
+  if (terminalId)  params.append('terminal_id', terminalId)
+  if (workplaceId) params.append('workplace_id', workplaceId)
+
+  const res = await fetch(
+    `${API_URL}/plu/groups/${companyId}?${params.toString()}`,
+  )
+  if (!res.ok) throw new Error(`PLU fetch failed: ${res.status}`)
+  return res.json()
 }

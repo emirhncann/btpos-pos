@@ -7,6 +7,7 @@ import AppLogo            from './components/AppLogo'
 import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
+import { api } from './lib/api'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -45,6 +46,27 @@ export default function App() {
     fontSizePrice: 13,
     fontSizeCode: 9,
     source: 'default',
+    pluMode: 'terminal',
+    loginWithCode: true,
+    loginWithCard: false,
+  })
+  const [terminalSettings, setTerminalSettings] = useState<PosSettingsRow>({
+    showPrice: true, showCode: true, showBarcode: false,
+    duplicateItemAction: 'increase_qty',
+    minQtyPerLine: 1,
+    allowLineDiscount: true,
+    allowDocDiscount: true,
+    maxLineDiscountPct: 100,
+    maxDocDiscountPct: 100,
+    pluCols: 4,
+    pluRows: 3,
+    fontSizeName: 12,
+    fontSizePrice: 13,
+    fontSizeCode: 9,
+    source: 'default',
+    pluMode: 'terminal',
+    loginWithCode: true,
+    loginWithCard: false,
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
   const [terminalLocked, setTerminalLocked] = useState(false)
@@ -65,12 +87,6 @@ export default function App() {
     setPopupMessage(text)
   }, [])
 
-  const loadPluFromCache = useCallback(async (cId: string) => {
-    const workplaceId = localStorage.getItem('workplace_id') || undefined
-    const cached = await window.electron.db.getPluGroups(cId, workplaceId)
-    setPluGroups(cached)
-  }, [])
-
   const handleLogout = useCallback(() => {
     setCashier(null)
     setAllProducts([])
@@ -88,6 +104,7 @@ export default function App() {
     return buildMerkezCommandHandlers({
       companyId,
       terminalId,
+      getCashierId: () => cashier?.id ?? null,
       setCommandSyncing,
       onLogout: handleLogout,
       onShowMessage: showPopupMessage,
@@ -102,6 +119,7 @@ export default function App() {
   }, [
     companyId,
     terminalId,
+    cashier,
     handleLogout,
     showMerkezToast,
     showPopupMessage,
@@ -132,7 +150,10 @@ export default function App() {
     if (activated && storedCompanyId) {
       setCompanyId(storedCompanyId)
       setTerminalId(storedTerminalId)
-      window.electron.db.getPosSettings().then(setPosSettings).catch(() => {})
+      window.electron.db.getPosSettings().then(s => {
+        setPosSettings(s)
+        setTerminalSettings(s)
+      }).catch(() => {})
       window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
       setState('cashier_login')
     } else {
@@ -140,27 +161,80 @@ export default function App() {
     }
   }
 
-  function handleActivated(cId: string) {
+  async function handleActivated(cId: string) {
     setCompanyId(cId)
-    window.electron.store.get('terminal_id').then(id => setTerminalId(id as string))
+    const tid = await window.electron.store.get('terminal_id') as string | null
+    setTerminalId(tid)
     window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
+
+    // Aktivasyon sonrası tek seferlik kasiyer çekimi
+    try {
+      const cashiers = await api.getCashiers(cId)
+      await window.electron.db.syncCashiersAcid(cashiers, cId, 'full')
+    } catch {
+      // Başarısız olursa sorun değil — sync_cashiers komutuyla gelecek
+    }
+
+    try {
+      const s = await window.electron.db.getPosSettings()
+      setPosSettings(s)
+      setTerminalSettings(s)
+    } catch {
+      /* mevcut default değerler kalır */
+    }
+
     setState('cashier_login')
   }
 
-  function handleCashierLogin(c: CashierRow) {
+  async function handleCashierLogin(c: CashierRow) {
     setCashier(c)
-    if (companyId) void loadPluFromCache(companyId)
+    if (companyId) {
+      const wpRaw       = await window.electron.store.get('workplace_id').catch(() => null)
+      const workplaceId = (typeof wpRaw === 'string' && wpRaw) ? wpRaw : undefined
+
+      // 1. Settings — SQLite'tan oku (API'ye gitme)
+      try {
+        const cached = await window.electron.db.getPosSettings(c.id)
+        setPosSettings(cached)
+      } catch { /* mevcut state kalır */ }
+
+      // 2. PLU — SQLite'tan oku (API'ye gitme)
+      // cashierId'yi posSettings.pluMode'dan belirle
+      // Not: getPosSettings sonrası fresh state henüz React'a yansımadı
+      // Bu yüzden direkt db'den oku
+      try {
+        const fresh = await window.electron.db.getPosSettings(c.id)
+        const cashierIdForPlu = fresh.pluMode === 'cashier' ? c.id : null
+        const cached = await window.electron.db.getPluGroups(
+          companyId,
+          workplaceId ?? null,
+          cashierIdForPlu,
+        )
+        if (cached.length > 0) setPluGroups(cached)
+      } catch { /* PLU boş kalır, sync_plu komutu ile gelecek */ }
+    }
     setState('dashboard')
   }
 
   function handleStartSale() {
     window.electron.db.getProducts().then(async p => {
       setAllProducts(p)
+      let fresh: PosSettingsRow | undefined
       try {
-        const fresh = await window.electron.db.getPosSettings()
+        // Kasiyer bazlı settings oku
+        fresh = await window.electron.db.getPosSettings(cashier?.id)
         setPosSettings(fresh)
       } catch {
         /* SQLite okunamazsa mevcut state kalır */
+      }
+      // PLU'yu da cashierId ile tazele
+      if (companyId && cashier) {
+        const wpRaw = await window.electron.store.get('workplace_id').catch(() => null)
+        const workplaceId = (typeof wpRaw === 'string' && wpRaw) ? wpRaw : undefined
+        const cashierIdForPlu = fresh?.pluMode === 'cashier' ? cashier.id : null
+        window.electron.db.getPluGroups(companyId, workplaceId, cashierIdForPlu)
+          .then(groups => { if (groups.length > 0) setPluGroups(groups) })
+          .catch(() => {})
       }
       setState('pos')
     })
@@ -179,7 +253,7 @@ export default function App() {
     return <ActivationScreen onActivated={handleActivated} />
 
   if (state === 'cashier_login')
-    return <CashierLoginScreen companyId={companyId!} onLogin={handleCashierLogin} />
+    return <CashierLoginScreen companyId={companyId!} posSettings={terminalSettings} onLogin={handleCashierLogin} />
 
   if (terminalLocked && cashier && (state === 'dashboard' || state === 'pos')) {
     return (

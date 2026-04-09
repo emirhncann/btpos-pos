@@ -125,13 +125,14 @@ export function getSales(dateFrom?: string, dateTo?: string) {
 }
 
 export interface CashierRow {
-  id: string
-  companyId?: string
-  fullName: string
-  cashierCode: string
-  password: string
-  role: string
-  isActive: boolean
+  id:           string
+  companyId?:   string
+  fullName:     string
+  cashierCode:  string
+  password:     string
+  role:         string
+  isActive:     boolean
+  cardNumber?:  string | null
 }
 
 export function saveCashiers(items: CashierRow[]): number {
@@ -148,6 +149,7 @@ export function saveCashiers(items: CashierRow[]): number {
       password:    item.password,
       role:        item.role ?? 'cashier',
       isActive:    item.isActive ?? true,
+      cardNumber:  item.cardNumber ?? null,
       syncedAt:    now,
     }).run()
   }
@@ -164,6 +166,31 @@ export function verifyCashier(code: string, password: string): CashierRow | null
     ))
     .get()
   return result as CashierRow | null
+}
+
+/**
+ * Kart numarası (barkod/RFID) ile kasiyer doğrula.
+ * Şifre gerekmez — kart sahipliği yeterli.
+ */
+export function verifyCashierByCard(cardNumber: string): CashierRow | null {
+  if (!cardNumber.trim()) return null
+  const db     = getDB()
+  const result = db.select().from(cashiers)
+    .where(and(
+      eq(cashiers.cardNumber, cardNumber.trim()),
+      eq(cashiers.isActive, true)
+    ))
+    .get()
+  return result ? {
+    id:          result.id,
+    companyId:   result.companyId,
+    fullName:    result.fullName,
+    cashierCode: result.cashierCode,
+    password:    result.password,
+    role:        result.role ?? 'cashier',
+    isActive:    result.isActive ?? true,
+    cardNumber:  result.cardNumber ?? null,
+  } : null
 }
 
 export function getAllCashiers(): CashierRow[] {
@@ -234,16 +261,20 @@ export function deleteHeldDocument(id: string): void {
 }
 
 export interface PluGroupCacheRow {
-  id:          string
-  companyId:   string
+  id:           string
+  companyId:    string
   workplaceId?: string
-  name:        string
-  color:       string
-  sortOrder:   number
-  plu_items:   Array<{ id: string; product_code: string; sort_order: number }>
+  terminalId?:  string
+  cashierId?:   string
+  name:         string
+  color:        string
+  sortOrder:    number
+  plu_items:    Array<{ id: string; product_code: string; sort_order: number }>
 }
 
 export type DuplicateItemAction = 'increase_qty' | 'add_new'
+
+export type PluMode = 'terminal' | 'cashier'
 
 export interface PosSettingsRow {
   showPrice:            boolean
@@ -261,6 +292,13 @@ export interface PosSettingsRow {
   fontSizePrice:        number
   fontSizeCode:         number
   source:               string
+  pluMode:              PluMode
+  loginWithCode:        boolean
+  loginWithCard:        boolean
+}
+
+export interface PosSettingsAcidRow extends PosSettingsRow {
+  cashierId?: string | null
 }
 
 export function savePluGroups(groups: PluGroupCacheRow[]): void {
@@ -286,6 +324,8 @@ export function savePluGroups(groups: PluGroupCacheRow[]): void {
       id:          group.id,
       companyId:   group.companyId,
       workplaceId: group.workplaceId ?? null,
+      terminalId:  group.terminalId ?? null,
+      cashierId:   group.cashierId ?? null,
       name:        group.name,
       color:       group.color,
       sortOrder:   group.sortOrder ?? 0,
@@ -303,26 +343,10 @@ export function savePluGroups(groups: PluGroupCacheRow[]): void {
   }
 }
 
-export function getPluGroups(companyId: string, workplaceId?: string | null): PluGroupCacheRow[] {
-  const db = getDB()
-
-  let groups = workplaceId
-    ? db.select().from(pluGroupsCache)
-      .where(and(
-        eq(pluGroupsCache.companyId, companyId),
-        eq(pluGroupsCache.workplaceId, workplaceId)
-      ))
-      .orderBy(asc(pluGroupsCache.sortOrder))
-      .all()
-    : []
-
-  if (groups.length === 0) {
-    groups = db.select().from(pluGroupsCache)
-      .where(eq(pluGroupsCache.companyId, companyId))
-      .orderBy(asc(pluGroupsCache.sortOrder))
-      .all()
-  }
-
+function mapPluGroups(
+  db: ReturnType<typeof getDB>,
+  groups: typeof pluGroupsCache.$inferSelect[]
+): PluGroupCacheRow[] {
   return groups.map(g => {
     const items = db.select().from(pluItemsCache)
       .where(eq(pluItemsCache.groupId, g.id))
@@ -332,6 +356,8 @@ export function getPluGroups(companyId: string, workplaceId?: string | null): Pl
       id:          g.id,
       companyId:   g.companyId,
       workplaceId: g.workplaceId ?? undefined,
+      terminalId:  g.terminalId ?? undefined,
+      cashierId:   g.cashierId ?? undefined,
       name:        g.name,
       color:       g.color,
       sortOrder:   g.sortOrder ?? 0,
@@ -342,6 +368,42 @@ export function getPluGroups(companyId: string, workplaceId?: string | null): Pl
       })),
     }
   })
+}
+
+export function getPluGroups(
+  companyId: string,
+  workplaceId?: string | null,
+  cashierId?: string | null,
+): PluGroupCacheRow[] {
+  const db = getDB()
+
+  if (cashierId) {
+    const groups = db.select().from(pluGroupsCache)
+      .where(and(
+        eq(pluGroupsCache.companyId, companyId),
+        eq(pluGroupsCache.cashierId, cashierId),
+      ))
+      .orderBy(asc(pluGroupsCache.sortOrder))
+      .all()
+    if (groups.length > 0) return mapPluGroups(db, groups)
+  }
+
+  if (workplaceId) {
+    const groups = db.select().from(pluGroupsCache)
+      .where(and(
+        eq(pluGroupsCache.companyId, companyId),
+        eq(pluGroupsCache.workplaceId, workplaceId),
+      ))
+      .orderBy(asc(pluGroupsCache.sortOrder))
+      .all()
+    if (groups.length > 0) return mapPluGroups(db, groups)
+  }
+
+  const groups = db.select().from(pluGroupsCache)
+    .where(eq(pluGroupsCache.companyId, companyId))
+    .orderBy(asc(pluGroupsCache.sortOrder))
+    .all()
+  return mapPluGroups(db, groups)
 }
 
 export function savePosSettings(settings: PosSettingsRow): void {
@@ -364,6 +426,9 @@ export function savePosSettings(settings: PosSettingsRow): void {
     fontSizePrice:        settings.fontSizePrice ?? 13,
     fontSizeCode:         settings.fontSizeCode ?? 9,
     source:               settings.source,
+    pluMode:              settings.pluMode ?? 'terminal',
+    loginWithCode:        settings.loginWithCode ?? true,
+    loginWithCard:        settings.loginWithCard ?? false,
     syncedAt:             now,
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
@@ -383,20 +448,123 @@ export function savePosSettings(settings: PosSettingsRow): void {
       fontSizePrice:        settings.fontSizePrice ?? 13,
       fontSizeCode:         settings.fontSizeCode ?? 9,
       source:               settings.source,
+      pluMode:              settings.pluMode ?? 'terminal',
+      loginWithCode:        settings.loginWithCode ?? true,
+      loginWithCard:        settings.loginWithCard ?? false,
       syncedAt:             now,
     },
   }).run()
+}
+
+export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
+  const sqlite = getSqlite()
+  const now    = new Date().toISOString()
+  const rowId  = settings.cashierId ? `cashier_${settings.cashierId}` : 'local'
+
+  const txn = sqlite.transaction(() => {
+    // 1. Temp'e yaz
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO pos_settings_temp (
+        id, cashier_id, show_price, show_code, show_barcode,
+        duplicate_item_action, min_qty_per_line,
+        allow_line_discount, allow_doc_discount,
+        max_line_discount_pct, max_doc_discount_pct,
+        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+        source, plu_mode, login_with_code, login_with_card, synced_at
+      ) VALUES (
+        @id, @cashierId, @showPrice, @showCode, @showBarcode,
+        @duplicateItemAction, @minQtyPerLine,
+        @allowLineDiscount, @allowDocDiscount,
+        @maxLineDiscountPct, @maxDocDiscountPct,
+        @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
+        @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt
+      )
+    `).run({
+      id:                  rowId,
+      cashierId:           settings.cashierId ?? null,
+      showPrice:           settings.showPrice ? 1 : 0,
+      showCode:            settings.showCode ? 1 : 0,
+      showBarcode:         settings.showBarcode ? 1 : 0,
+      duplicateItemAction: settings.duplicateItemAction,
+      minQtyPerLine:       settings.minQtyPerLine,
+      allowLineDiscount:   settings.allowLineDiscount ? 1 : 0,
+      allowDocDiscount:    settings.allowDocDiscount ? 1 : 0,
+      maxLineDiscountPct:  settings.maxLineDiscountPct,
+      maxDocDiscountPct:   settings.maxDocDiscountPct,
+      pluCols:             settings.pluCols,
+      pluRows:             settings.pluRows,
+      fontSizeName:        settings.fontSizeName,
+      fontSizePrice:       settings.fontSizePrice,
+      fontSizeCode:        settings.fontSizeCode,
+      source:              settings.source,
+      pluMode:             settings.pluMode,
+      loginWithCode:       settings.loginWithCode ? 1 : 0,
+      loginWithCard:       settings.loginWithCard ? 1 : 0,
+      syncedAt:            now,
+    })
+
+    // 2. Doğrula
+    const check = sqlite.prepare(
+      'SELECT COUNT(*) as c FROM pos_settings_temp WHERE id = ?'
+    ).get(rowId) as { c: number }
+    if (check.c === 0) throw new Error('pos_settings_temp boş — rollback')
+
+    // 3. Ana tabloya taşı
+    sqlite.prepare(`
+      INSERT OR REPLACE INTO pos_settings_cache (
+        id, cashier_id, show_price, show_code, show_barcode,
+        duplicate_item_action, min_qty_per_line,
+        allow_line_discount, allow_doc_discount,
+        max_line_discount_pct, max_doc_discount_pct,
+        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+        source, plu_mode, login_with_code, login_with_card, synced_at
+      )
+      SELECT
+        id, cashier_id, show_price, show_code, show_barcode,
+        duplicate_item_action, min_qty_per_line,
+        allow_line_discount, allow_doc_discount,
+        max_line_discount_pct, max_doc_discount_pct,
+        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+        source, plu_mode, login_with_code, login_with_card, synced_at
+      FROM pos_settings_temp WHERE id = ?
+    `).run(rowId)
+
+    // 4. Temp temizle
+    sqlite.prepare('DELETE FROM pos_settings_temp WHERE id = ?').run(rowId)
+  })
+
+  try {
+    txn()
+    return { success: true, inserted: 1, updated: 0, deleted: 0 }
+  } catch (e) {
+    return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
+  }
 }
 
 function normalizeDuplicateAction(v: string | null | undefined): DuplicateItemAction {
   return v === 'add_new' ? 'add_new' : 'increase_qty'
 }
 
-export function getPosSettings(): PosSettingsRow {
-  const db  = getDB()
-  const row = db.select().from(posSettingsCache)
-    .where(eq(posSettingsCache.id, 'local'))
-    .get()
+export function getPosSettings(cashierId?: string | null): PosSettingsRow {
+  const db = getDB()
+
+  // Önce kasiyer bazlı ara
+  let row: typeof posSettingsCache.$inferSelect | undefined = undefined
+
+  if (cashierId) {
+    const cashierRowId = `cashier_${cashierId}`
+    row = db.select().from(posSettingsCache)
+      .where(eq(posSettingsCache.id, cashierRowId))
+      .get()
+  }
+
+  // Kasiyer ayarı yoksa kasa default'una düş
+  if (!row) {
+    row = db.select().from(posSettingsCache)
+      .where(eq(posSettingsCache.id, 'local'))
+      .get()
+  }
+
   return {
     showPrice:            row?.showPrice            ?? true,
     showCode:             row?.showCode             ?? true,
@@ -413,6 +581,9 @@ export function getPosSettings(): PosSettingsRow {
     fontSizePrice:        row?.fontSizePrice        ?? 13,
     fontSizeCode:         row?.fontSizeCode         ?? 9,
     source:               row?.source               ?? 'default',
+    pluMode:              (row?.pluMode === 'cashier' ? 'cashier' : 'terminal') as PluMode,
+    loginWithCode:        row?.loginWithCode        ?? true,
+    loginWithCard:        row?.loginWithCard        ?? false,
   }
 }
 
@@ -571,8 +742,8 @@ export function syncPluGroupsAcid(groups: PluGroupCacheRow[], mode: SyncMode = '
     db.prepare('DELETE FROM plu_items_temp').run()
 
     const insertGrp = db.prepare(`
-      INSERT INTO plu_groups_temp (id, company_id, workplace_id, name, color, sort_order, synced_at)
-      VALUES (@id, @companyId, @workplaceId, @name, @color, @sortOrder, @syncedAt)
+      INSERT INTO plu_groups_temp (id, company_id, workplace_id, terminal_id, cashier_id, name, color, sort_order, synced_at)
+      VALUES (@id, @companyId, @workplaceId, @terminalId, @cashierId, @name, @color, @sortOrder, @syncedAt)
     `)
     const insertItem = db.prepare(`
       INSERT INTO plu_items_temp (id, group_id, product_code, sort_order)
@@ -581,13 +752,15 @@ export function syncPluGroupsAcid(groups: PluGroupCacheRow[], mode: SyncMode = '
 
     for (const g of groups) {
       insertGrp.run({
-        id: g.id,
-        companyId: g.companyId,
+        id:          g.id,
+        companyId:   g.companyId,
         workplaceId: g.workplaceId ?? null,
-        name: g.name,
-        color: g.color,
-        sortOrder: g.sortOrder ?? 0,
-        syncedAt: now,
+        terminalId:  g.terminalId ?? null,
+        cashierId:   g.cashierId ?? null,
+        name:        g.name,
+        color:       g.color,
+        sortOrder:   g.sortOrder ?? 0,
+        syncedAt:    now,
       })
       inserted++
       for (const item of (g.plu_items ?? [])) {
@@ -604,16 +777,38 @@ export function syncPluGroupsAcid(groups: PluGroupCacheRow[], mode: SyncMode = '
     if (grpCount === 0) throw new Error('PLU temp boş — rollback')
 
     if (mode === 'full') {
-      const companyId = groups[0].companyId
-      const delRow = db.prepare('SELECT COUNT(*) as c FROM plu_groups_cache WHERE company_id = ?').get(companyId) as { c: number }
-      deleted = delRow.c
-      const groupIds = (db.prepare('SELECT id FROM plu_groups_cache WHERE company_id = ?').all(companyId) as { id: string }[])
-        .map(r => r.id)
-      if (groupIds.length > 0) {
-        const ph = groupIds.map(() => '?').join(',')
-        db.prepare(`DELETE FROM plu_items_cache WHERE group_id IN (${ph})`).run(...groupIds)
+      const companyId  = groups[0].companyId
+      const cashierId  = groups[0].cashierId ?? null
+      const terminalId = groups[0].terminalId ?? null
+
+      // Scope'a göre sadece ilgili kayıtları sil
+      let scopeWhere: string
+      let scopeParams: unknown[]
+
+      if (cashierId) {
+        scopeWhere  = 'cashier_id = ?'
+        scopeParams = [cashierId]
+      } else if (terminalId) {
+        scopeWhere  = 'terminal_id = ? AND cashier_id IS NULL'
+        scopeParams = [terminalId]
+      } else {
+        scopeWhere  = 'company_id = ? AND terminal_id IS NULL AND cashier_id IS NULL'
+        scopeParams = [companyId]
       }
-      db.prepare('DELETE FROM plu_groups_cache WHERE company_id = ?').run(companyId)
+
+      const existingIds = (
+        db.prepare(`SELECT id FROM plu_groups_cache WHERE ${scopeWhere}`)
+          .all(...scopeParams) as { id: string }[]
+      ).map(r => r.id)
+
+      deleted = existingIds.length
+
+      if (existingIds.length > 0) {
+        const ph = existingIds.map(() => '?').join(',')
+        db.prepare(`DELETE FROM plu_items_cache WHERE group_id IN (${ph})`).run(...existingIds)
+        db.prepare(`DELETE FROM plu_groups_cache WHERE ${scopeWhere}`).run(...scopeParams)
+      }
+
       db.prepare('INSERT INTO plu_groups_cache SELECT * FROM plu_groups_temp').run()
       db.prepare('INSERT INTO plu_items_cache SELECT * FROM plu_items_temp').run()
     } else {
@@ -657,19 +852,20 @@ export function syncCashiersAcid(cashierList: CashierRow[], companyId: string, m
     db.prepare('DELETE FROM cashiers_temp').run()
 
     const ins = db.prepare(`
-      INSERT INTO cashiers_temp (id, company_id, full_name, cashier_code, password, role, is_active, synced_at)
-      VALUES (@id, @companyId, @fullName, @cashierCode, @password, @role, @isActive, @syncedAt)
+      INSERT INTO cashiers_temp (id, company_id, full_name, cashier_code, password, role, is_active, card_number, synced_at)
+      VALUES (@id, @companyId, @fullName, @cashierCode, @password, @role, @isActive, @cardNumber, @syncedAt)
     `)
     for (const c of cashierList) {
       ins.run({
-        id: c.id,
+        id:          c.id,
         companyId,
-        fullName: c.fullName,
+        fullName:    c.fullName,
         cashierCode: c.cashierCode,
-        password: c.password,
-        role: c.role ?? 'cashier',
-        isActive: c.isActive ? 1 : 0,
-        syncedAt: now,
+        password:    c.password,
+        role:        c.role ?? 'cashier',
+        isActive:    c.isActive ? 1 : 0,
+        cardNumber:  c.cardNumber ?? null,
+        syncedAt:    now,
       })
       inserted++
     }
@@ -684,13 +880,13 @@ export function syncCashiersAcid(cashierList: CashierRow[], companyId: string, m
       const delByCompany = db.prepare('DELETE FROM cashiers WHERE company_id = ?').run(companyId) as { changes: number }
       deleted = delById.changes + delByCompany.changes
       db.prepare(`
-        INSERT INTO cashiers (id, company_id, full_name, cashier_code, password, role, is_active, synced_at)
-        SELECT id, company_id, full_name, cashier_code, password, role, is_active, synced_at FROM cashiers_temp
+        INSERT INTO cashiers (id, company_id, full_name, cashier_code, password, role, is_active, card_number, synced_at)
+        SELECT id, company_id, full_name, cashier_code, password, role, is_active, card_number, synced_at FROM cashiers_temp
       `).run()
     } else {
       db.prepare(`
-        INSERT INTO cashiers (id, company_id, full_name, cashier_code, password, role, is_active, synced_at)
-        SELECT id, company_id, full_name, cashier_code, password, role, is_active, synced_at FROM cashiers_temp
+        INSERT INTO cashiers (id, company_id, full_name, cashier_code, password, role, is_active, card_number, synced_at)
+        SELECT id, company_id, full_name, cashier_code, password, role, is_active, card_number, synced_at FROM cashiers_temp
       `).run()
       deleted = delById.changes
     }

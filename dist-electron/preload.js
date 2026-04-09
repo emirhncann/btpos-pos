@@ -20,7 +20,8 @@ electron.contextBridge.exposeInMainWorld("electron", {
   },
   window: {
     isFullscreen: () => electron.ipcRenderer.invoke("window:isFullscreen"),
-    toggleFullscreen: () => electron.ipcRenderer.invoke("window:toggleFullscreen")
+    toggleFullscreen: () => electron.ipcRenderer.invoke("window:toggleFullscreen"),
+    toggleDevTools: () => electron.ipcRenderer.invoke("window:toggleDevTools")
   },
   db: {
     saveProducts: (products) => electron.ipcRenderer.invoke("db:saveProducts", products),
@@ -29,14 +30,15 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getSales: (dateFrom, dateTo) => electron.ipcRenderer.invoke("db:getSales", dateFrom, dateTo),
     saveCashiers: (cashiers) => electron.ipcRenderer.invoke("db:saveCashiers", cashiers),
     verifyCashier: (code, password) => electron.ipcRenderer.invoke("db:verifyCashier", code, password),
+    verifyCashierByCard: (cardNumber) => electron.ipcRenderer.invoke("db:verifyCashierByCard", cardNumber),
     getCashiers: () => electron.ipcRenderer.invoke("db:getCashiers"),
     holdDocument: (doc) => electron.ipcRenderer.invoke("db:holdDocument", doc),
     getHeldDocuments: (companyId) => electron.ipcRenderer.invoke("db:getHeldDocuments", companyId),
     deleteHeldDocument: (id) => electron.ipcRenderer.invoke("db:deleteHeldDocument", id),
     savePluGroups: (groups) => electron.ipcRenderer.invoke("db:savePluGroups", groups),
-    getPluGroups: (companyId, wpId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId),
-    savePosSettings: (settings) => electron.ipcRenderer.invoke("db:savePosSettings", settings),
-    getPosSettings: () => electron.ipcRenderer.invoke("db:getPosSettings"),
+    getPluGroups: (companyId, wpId, cashierId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId, cashierId),
+    savePosSettings: (settings, cashierId) => electron.ipcRenderer.invoke("db:savePosSettings", settings, cashierId),
+    getPosSettings: (cashierId) => electron.ipcRenderer.invoke("db:getPosSettings", cashierId),
     saveCommandHistory: (row) => electron.ipcRenderer.invoke("db:saveCommandHistory", row),
     getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
     syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),

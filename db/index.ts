@@ -82,6 +82,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       password     TEXT NOT NULL,
       role         TEXT DEFAULT 'cashier',
       is_active    INTEGER DEFAULT 1,
+      card_number  TEXT,
       synced_at    TEXT
     );
 
@@ -93,10 +94,15 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
     );
 
     CREATE TABLE IF NOT EXISTS plu_groups_temp (
-      id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
-      workplace_id TEXT, name TEXT NOT NULL,
-      color TEXT NOT NULL DEFAULT '#90CAF9',
-      sort_order INTEGER DEFAULT 0, synced_at TEXT NOT NULL
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      workplace_id TEXT,
+      terminal_id  TEXT,
+      cashier_id   TEXT,
+      name         TEXT NOT NULL,
+      color        TEXT NOT NULL DEFAULT '#90CAF9',
+      sort_order   INTEGER DEFAULT 0,
+      synced_at    TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS plu_items_temp (
@@ -108,7 +114,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
       full_name TEXT NOT NULL, cashier_code TEXT NOT NULL,
       password TEXT NOT NULL, role TEXT DEFAULT 'cashier',
-      is_active INTEGER DEFAULT 1, synced_at TEXT
+      is_active INTEGER DEFAULT 1, card_number TEXT, synced_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS held_documents (
@@ -124,6 +130,8 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       id           TEXT PRIMARY KEY,
       company_id   TEXT NOT NULL,
       workplace_id TEXT,
+      terminal_id  TEXT,
+      cashier_id   TEXT,
       name         TEXT NOT NULL,
       color        TEXT NOT NULL DEFAULT '#90CAF9',
       sort_order   INTEGER DEFAULT 0,
@@ -138,23 +146,27 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
     );
 
     CREATE TABLE IF NOT EXISTS pos_settings_cache (
-      id           TEXT PRIMARY KEY DEFAULT 'local',
-      show_price   INTEGER DEFAULT 1,
-      show_code    INTEGER DEFAULT 1,
-      show_barcode INTEGER DEFAULT 0,
+      id                    TEXT PRIMARY KEY DEFAULT 'local',
+      cashier_id            TEXT,
+      show_price            INTEGER DEFAULT 1,
+      show_code             INTEGER DEFAULT 1,
+      show_barcode          INTEGER DEFAULT 0,
       duplicate_item_action TEXT DEFAULT 'increase_qty',
-      min_qty_per_line INTEGER DEFAULT 1,
-      allow_line_discount INTEGER DEFAULT 1,
-      allow_doc_discount INTEGER DEFAULT 1,
+      min_qty_per_line      INTEGER DEFAULT 1,
+      allow_line_discount   INTEGER DEFAULT 1,
+      allow_doc_discount    INTEGER DEFAULT 1,
       max_line_discount_pct REAL DEFAULT 100,
-      max_doc_discount_pct REAL DEFAULT 100,
-      plu_cols INTEGER DEFAULT 4,
-      plu_rows INTEGER DEFAULT 3,
-      font_size_name INTEGER DEFAULT 12,
-      font_size_price INTEGER DEFAULT 13,
-      font_size_code INTEGER DEFAULT 9,
-      source       TEXT DEFAULT 'default',
-      synced_at    TEXT
+      max_doc_discount_pct  REAL DEFAULT 100,
+      plu_cols              INTEGER DEFAULT 4,
+      plu_rows              INTEGER DEFAULT 3,
+      font_size_name        INTEGER DEFAULT 12,
+      font_size_price       INTEGER DEFAULT 13,
+      font_size_code        INTEGER DEFAULT 9,
+      source                TEXT DEFAULT 'default',
+      plu_mode              TEXT DEFAULT 'terminal',
+      login_with_code       INTEGER DEFAULT 1,
+      login_with_card       INTEGER DEFAULT 1,
+      synced_at             TEXT
     );
 
     CREATE TABLE IF NOT EXISTS command_history (
@@ -173,6 +185,30 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
   sqlite.exec(`
     INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, duplicate_item_action, min_qty_per_line, allow_line_discount, allow_doc_discount, max_line_discount_pct, max_doc_discount_pct, plu_cols, plu_rows, font_size_name, font_size_price, font_size_code, source)
     VALUES ('local', 1, 1, 0, 'increase_qty', 1, 1, 1, 100, 100, 4, 3, 12, 13, 9, 'default');
+
+    CREATE TABLE IF NOT EXISTS pos_settings_temp (
+      id                    TEXT PRIMARY KEY,
+      cashier_id            TEXT,
+      show_price            INTEGER DEFAULT 1,
+      show_code             INTEGER DEFAULT 1,
+      show_barcode          INTEGER DEFAULT 0,
+      duplicate_item_action TEXT DEFAULT 'increase_qty',
+      min_qty_per_line      INTEGER DEFAULT 1,
+      allow_line_discount   INTEGER DEFAULT 1,
+      allow_doc_discount    INTEGER DEFAULT 1,
+      max_line_discount_pct REAL DEFAULT 100,
+      max_doc_discount_pct  REAL DEFAULT 100,
+      plu_cols              INTEGER DEFAULT 4,
+      plu_rows              INTEGER DEFAULT 3,
+      font_size_name        INTEGER DEFAULT 12,
+      font_size_price       INTEGER DEFAULT 13,
+      font_size_code        INTEGER DEFAULT 9,
+      source                TEXT DEFAULT 'default',
+      plu_mode              TEXT DEFAULT 'terminal',
+      login_with_code       INTEGER DEFAULT 1,
+      login_with_card       INTEGER DEFAULT 0,
+      synced_at             TEXT
+    );
   `)
 
   return db
@@ -235,6 +271,17 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_name', 'font_size_name INTEGER DEFAULT 12')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_price', 'font_size_price INTEGER DEFAULT 13')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_code', 'font_size_code INTEGER DEFAULT 9')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_mode', `plu_mode TEXT DEFAULT 'terminal'`)
+  addColumnIfMissing(sqlite, 'plu_groups_cache', 'terminal_id', 'terminal_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_cache', 'cashier_id', 'cashier_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_temp', 'terminal_id', 'terminal_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_temp', 'cashier_id', 'cashier_id TEXT')
+  addColumnIfMissing(sqlite, 'cashiers', 'card_number', 'card_number TEXT')
+  addColumnIfMissing(sqlite, 'cashiers_temp', 'card_number', 'card_number TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'login_with_code', 'login_with_code INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'login_with_card', 'login_with_card INTEGER DEFAULT 0')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_code', 'login_with_code INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_card', 'login_with_card INTEGER DEFAULT 0')
 
   addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
@@ -243,10 +290,79 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'net_amount', 'net_amount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'cashier_id', 'cashier_id TEXT')
   try {
     sqlite.exec(`UPDATE sales SET net_amount = total_amount WHERE net_amount IS NULL OR net_amount = 0`)
   } catch {
     /* yok say */
+  }
+
+  // Sprint 24 — pos_settings_cache kolon sırası düzeltmesi
+  // cashier_id migration ile sona eklenmişti, fiziksel sıra yanlıştı.
+  // Tabloyu yeniden oluşturarak kolon sırasını düzelt.
+  try {
+    const cols = sqlite.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string; cid: number }[]
+    const cashierCol = cols.find(c => c.name === 'cashier_id')
+
+    // cashier_id 2. sırada değilse (cid=1) tablo yeniden oluşturulmalı
+    if (cashierCol && cashierCol.cid !== 1) {
+      sqlite.exec(`
+        -- Mevcut veriyi yedekle
+        CREATE TABLE IF NOT EXISTS pos_settings_cache_backup AS
+          SELECT * FROM pos_settings_cache;
+
+        -- Eski tabloyu sil
+        DROP TABLE pos_settings_cache;
+
+        -- Doğru sırayla yeniden oluştur
+        CREATE TABLE pos_settings_cache (
+          id                    TEXT PRIMARY KEY DEFAULT 'local',
+          cashier_id            TEXT,
+          show_price            INTEGER DEFAULT 1,
+          show_code             INTEGER DEFAULT 1,
+          show_barcode          INTEGER DEFAULT 0,
+          duplicate_item_action TEXT DEFAULT 'increase_qty',
+          min_qty_per_line      INTEGER DEFAULT 1,
+          allow_line_discount   INTEGER DEFAULT 1,
+          allow_doc_discount    INTEGER DEFAULT 1,
+          max_line_discount_pct REAL DEFAULT 100,
+          max_doc_discount_pct  REAL DEFAULT 100,
+          plu_cols              INTEGER DEFAULT 4,
+          plu_rows              INTEGER DEFAULT 3,
+          font_size_name        INTEGER DEFAULT 12,
+          font_size_price       INTEGER DEFAULT 13,
+          font_size_code        INTEGER DEFAULT 9,
+          source                TEXT DEFAULT 'default',
+          plu_mode              TEXT DEFAULT 'terminal',
+          login_with_code       INTEGER DEFAULT 1,
+          login_with_card       INTEGER DEFAULT 0,
+          synced_at             TEXT
+        );
+
+        -- Veriyi açık kolon listesiyle geri yaz (kolon adı bazlı, sıra bağımsız)
+        INSERT INTO pos_settings_cache (
+          id, cashier_id, show_price, show_code, show_barcode,
+          duplicate_item_action, min_qty_per_line,
+          allow_line_discount, allow_doc_discount,
+          max_line_discount_pct, max_doc_discount_pct,
+          plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+          source, plu_mode, login_with_code, login_with_card, synced_at
+        )
+        SELECT
+          id, cashier_id, show_price, show_code, show_barcode,
+          duplicate_item_action, min_qty_per_line,
+          allow_line_discount, allow_doc_discount,
+          max_line_discount_pct, max_doc_discount_pct,
+          plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+          source, plu_mode, login_with_code, login_with_card, synced_at
+        FROM pos_settings_cache_backup;
+
+        -- Yedek tabloyu sil
+        DROP TABLE pos_settings_cache_backup;
+      `)
+    }
+  } catch (e) {
+    console.warn('[migration] pos_settings_cache yeniden oluşturma hatası:', e)
   }
 }
 

@@ -57,6 +57,17 @@ let mainWindow: BrowserWindow | null = null
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
+/** DevTools — kiosk/tam ekranda globalShortcut güvenilir olmadığı için odaklı pencerede tuş yakalanır. */
+function toggleDevTools(): void {
+  if (!mainWindow) return
+  const wc = mainWindow.webContents
+  if (wc.isDevToolsOpened()) {
+    wc.closeDevTools()
+  } else {
+    wc.openDevTools({ mode: 'detach' })
+  }
+}
+
 /** Görev çubuğu / pencere ikonu — dev: kaynak dosya, paket: extraResources */
 function resolveAppIconPath(): string | undefined {
   if (app.isPackaged) {
@@ -96,18 +107,23 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
-  const toggleDevTools = () => {
-    if (!mainWindow) return
-    if (mainWindow.webContents.isDevToolsOpened()) {
-      mainWindow.webContents.closeDevTools()
-    } else {
-      mainWindow.webContents.openDevTools({ mode: 'detach' })
+  // F12 / Ctrl+Shift+I — before-input-event kiosk’ta globalShortcut’tan güvenilir
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    if (input.key === 'F12') {
+      event.preventDefault()
+      toggleDevTools()
+      return
     }
-  }
+    const mod = process.platform === 'darwin' ? input.meta : input.control
+    if (mod && input.shift && input.key.toLowerCase() === 'i') {
+      event.preventDefault()
+      toggleDevTools()
+    }
+  })
 
-  // DevTools kısayolları
-  globalShortcut.register('F12', toggleDevTools)
-  globalShortcut.register('CommandOrControl+Shift+I', toggleDevTools)
+  // DevTools için globalShortcut kullanma: odaklı pencerede F12 ile çift tetiklenme riski var.
+  // Konsol gerekirse: pencereye tıklayıp F12 / Ctrl+Shift+I veya renderer’dan window.toggleDevTools().
 
   // F11 → tam ekran aç/kapat
   globalShortcut.register('F11', () => {
@@ -164,6 +180,9 @@ app.whenReady().then(async () => {
     if (!mainWindow) return
     mainWindow.setFullScreen(!mainWindow.isFullScreen())
   })
+  ipcMain.handle('window:toggleDevTools', () => {
+    toggleDevTools()
+  })
 
   ipcMain.handle('store:get', (_e, key) => store.get(key))
   ipcMain.handle('store:set', (_e, key, value) => store.set(key, value))
@@ -204,6 +223,11 @@ app.whenReady().then(async () => {
     return verifyCashier(code, password)
   })
 
+  ipcMain.handle('db:verifyCashierByCard', async (_e, cardNumber: string) => {
+    const { verifyCashierByCard } = await import('../db/operations')
+    return verifyCashierByCard(cardNumber)
+  })
+
   ipcMain.handle('db:getCashiers', async () => {
     const { getAllCashiers } = await import('../db/operations')
     return getAllCashiers()
@@ -238,19 +262,22 @@ app.whenReady().then(async () => {
     savePluGroups(groups as import('../db/operations').PluGroupCacheRow[])
   })
 
-  ipcMain.handle('db:getPluGroups', async (_e, companyId: string, wpId?: string | null) => {
+  ipcMain.handle('db:getPluGroups', async (_e, companyId: string, wpId?: string | null, cashierId?: string | null) => {
     const { getPluGroups } = await import('../db/operations')
-    return getPluGroups(companyId, wpId)
+    return getPluGroups(companyId, wpId, cashierId)
   })
 
-  ipcMain.handle('db:savePosSettings', async (_e, settings: unknown) => {
-    const { savePosSettings } = await import('../db/operations')
-    savePosSettings(settings as import('../db/operations').PosSettingsRow)
+  ipcMain.handle('db:savePosSettings', async (_e, settings: unknown, cashierId?: string) => {
+    const { syncPosSettingsAcid } = await import('../db/operations')
+    return syncPosSettingsAcid({
+      ...(settings as import('../db/operations').PosSettingsRow),
+      cashierId: cashierId ?? null,
+    })
   })
 
-  ipcMain.handle('db:getPosSettings', async () => {
+  ipcMain.handle('db:getPosSettings', async (_e, cashierId?: string) => {
     const { getPosSettings } = await import('../db/operations')
-    return getPosSettings()
+    return getPosSettings(cashierId ?? null)
   })
 
   ipcMain.handle('db:saveCommandHistory', async (_e, row: unknown) => {

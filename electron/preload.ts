@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electron', {
   window: {
     isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
     toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
+    toggleDevTools: () => ipcRenderer.invoke('window:toggleDevTools'),
   },
   db: {
     saveProducts:       (products: unknown[])                => ipcRenderer.invoke('db:saveProducts', products),
@@ -29,14 +30,19 @@ contextBridge.exposeInMainWorld('electron', {
     getSales:           (dateFrom?: string, dateTo?: string) => ipcRenderer.invoke('db:getSales', dateFrom, dateTo),
     saveCashiers:       (cashiers: unknown[])                => ipcRenderer.invoke('db:saveCashiers', cashiers),
     verifyCashier:      (code: string, password: string)     => ipcRenderer.invoke('db:verifyCashier', code, password),
+    verifyCashierByCard: (cardNumber: string) =>
+      ipcRenderer.invoke('db:verifyCashierByCard', cardNumber),
     getCashiers:        ()                                   => ipcRenderer.invoke('db:getCashiers'),
     holdDocument:       (doc: unknown)                       => ipcRenderer.invoke('db:holdDocument', doc),
     getHeldDocuments:   (companyId: string)                  => ipcRenderer.invoke('db:getHeldDocuments', companyId),
     deleteHeldDocument: (id: string)                          => ipcRenderer.invoke('db:deleteHeldDocument', id),
     savePluGroups:      (groups: unknown[])                  => ipcRenderer.invoke('db:savePluGroups', groups),
-    getPluGroups:       (companyId: string, wpId?: string)   => ipcRenderer.invoke('db:getPluGroups', companyId, wpId),
-    savePosSettings:    (settings: unknown)                  => ipcRenderer.invoke('db:savePosSettings', settings),
-    getPosSettings:     ()                                   => ipcRenderer.invoke('db:getPosSettings'),
+    getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) =>
+      ipcRenderer.invoke('db:getPluGroups', companyId, wpId, cashierId),
+    savePosSettings:    (settings: unknown, cashierId?: string) =>
+      ipcRenderer.invoke('db:savePosSettings', settings, cashierId),
+    getPosSettings:     (cashierId?: string) =>
+      ipcRenderer.invoke('db:getPosSettings', cashierId),
     saveCommandHistory: (row: unknown)                        => ipcRenderer.invoke('db:saveCommandHistory', row),
     getCommandHistory:  (limit?: number)                     => ipcRenderer.invoke('db:getCommandHistory', limit),
     syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),

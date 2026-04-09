@@ -71,6 +71,9 @@ export default function ActivationScreen({ onActivated }: Props) {
       await window.electron.store.set('device_uid', deviceInfo.device_uid)
       await window.electron.store.set('device_name', deviceInfo.device_name)
       await window.electron.store.set('mac_address', deviceInfo.mac_address)
+      if (result.expiry_date) {
+        await window.electron.store.set('expiry_date', result.expiry_date)
+      }
 
       onActivated(companyId)
     } catch (e: unknown) {

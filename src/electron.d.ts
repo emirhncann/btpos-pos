@@ -35,8 +35,9 @@ declare global {
         reinitDb:     (path: string) => Promise<{ success: boolean; error?: string }>
       }
       window: {
-        isFullscreen:    () => Promise<boolean>
+        isFullscreen:     () => Promise<boolean>
         toggleFullscreen: () => Promise<void>
+        toggleDevTools:   () => Promise<void>
       }
       db: {
         saveProducts:       (products: unknown[]) => Promise<number>
@@ -45,14 +46,15 @@ declare global {
         getSales:           (dateFrom?: string, dateTo?: string) => Promise<SaleRecord[]>
         saveCashiers:       (cashiers: unknown[]) => Promise<number>
         verifyCashier:      (code: string, password: string) => Promise<CashierRow | null>
+        verifyCashierByCard: (cardNumber: string) => Promise<CashierRow | null>
         getCashiers:        () => Promise<CashierRow[]>
         holdDocument:       (doc: unknown) => Promise<string>
         getHeldDocuments:   (companyId: string) => Promise<HeldDocRow[]>
         deleteHeldDocument: (id: string) => Promise<void>
         savePluGroups:      (groups: unknown[]) => Promise<void>
-        getPluGroups:       (companyId: string, wpId?: string) => Promise<PluGroupCacheRow[]>
-        savePosSettings:    (settings: PosSettingsRow) => Promise<void>
-        getPosSettings:     () => Promise<PosSettingsRow>
+        getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) => Promise<PluGroupCacheRow[]>
+        savePosSettings:    (settings: PosSettingsRow, cashierId?: string) => Promise<SyncResult>
+        getPosSettings:     (cashierId?: string) => Promise<PosSettingsRow>
         saveCommandHistory: (row: CommandHistoryRow) => Promise<void>
         getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
         syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
@@ -96,13 +98,14 @@ declare global {
   }
 
   interface CashierRow {
-    id:          string
-    companyId?:  string
-    fullName:    string
-    cashierCode: string
-    password:    string
-    role:        string
-    isActive:    boolean
+    id:           string
+    companyId?:   string
+    fullName:     string
+    cashierCode:  string
+    password:     string
+    role:         string
+    isActive:     boolean
+    cardNumber?:  string | null
   }
 
   interface ProductRow {
@@ -184,14 +187,18 @@ declare global {
   }
 
   interface PluGroupCacheRow {
-    id:          string
-    companyId:   string
+    id:           string
+    companyId:    string
     workplaceId?: string
-    name:        string
-    color:       string
-    sortOrder:   number
-    plu_items:   Array<{ id: string; product_code: string; sort_order: number }>
+    terminalId?:  string
+    cashierId?:   string
+    name:         string
+    color:        string
+    sortOrder:    number
+    plu_items:    Array<{ id: string; product_code: string; sort_order: number }>
   }
+
+  type PluMode = 'terminal' | 'cashier'
 
   interface PosSettingsRow {
     showPrice:            boolean
@@ -209,5 +216,8 @@ declare global {
     fontSizePrice:        number
     fontSizeCode:         number
     source:               string
+    pluMode:              PluMode
+    loginWithCode:        boolean
+    loginWithCard:        boolean
   }
 }

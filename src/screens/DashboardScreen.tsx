@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
-import { api } from '../lib/api'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -68,7 +67,6 @@ export default function DashboardScreen({
   void _onSettingsUpdated
   const [summary, setSummary]       = useState<DailySummary>({ saleCount: 0, totalSales: 0, totalCash: 0, totalCard: 0 })
   const [time, setTime]             = useState(new Date())
-  const [syncing, setSyncing]       = useState(false)
   const [toast, setToast]           = useState<string | null>(null)
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
@@ -103,30 +101,6 @@ export default function DashboardScreen({
       const totalCard  = sales.filter(r => r.paymentType === 'card').reduce((s, r) => s + r.totalAmount, 0)
       setSummary({ saleCount: sales.length, totalSales, totalCash, totalCard })
     } catch {}
-  }
-
-  async function handleSync() {
-    setSyncing(true)
-    try {
-      const data    = await api.getProducts(companyId)
-      const rawList = data?.data?.data ?? []
-      const items: ProductRow[] = rawList.map((p: Record<string, unknown>) => {
-        const cat = p.category as Record<string, unknown> | null
-        return {
-          id:       String(p.id ?? ''),
-          code:     String(p.code ?? ''),
-          name:     String(p.name ?? ''),
-          barcode:  String(p.barcode ?? ''),
-          price:    Number(p.salesPriceTaxIncluded ?? 0),
-          vatRate:  Number(p.vatRate ?? 20),
-          unit:     String(p.mainUnitName ?? 'Adet'),
-          stock:    Number(p.stock ?? 0),
-          category: String(cat?.name ?? 'Diğer'),
-        }
-      })
-      await window.electron.db.saveProducts(items)
-    } catch {}
-    finally { setSyncing(false) }
   }
 
   const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -211,16 +185,6 @@ export default function DashboardScreen({
           >
             <span style={{ fontSize: 36 }}>🛒</span>
             <span>Satış Başlat</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing || commandSyncing}
-            style={{ background: 'white', color: '#424242', border: '1px solid #E0E0E0', borderRadius: 16, cursor: (syncing || commandSyncing) ? 'default' : 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500, opacity: (syncing || commandSyncing) ? 0.6 : 1 }}
-          >
-            <span style={{ fontSize: 28 }}>🔄</span>
-            <span>{(syncing || commandSyncing) ? 'Güncelleniyor...' : 'Ürünleri Güncelle'}</span>
           </button>
 
           <button

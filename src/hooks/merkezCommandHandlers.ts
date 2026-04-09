@@ -1,6 +1,15 @@
 import { api, fetchPluGroupsFromServer } from '../lib/api'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
+async function getWorkplaceId(): Promise<string | null> {
+  try {
+    const val = await window.electron.store.get('workplace_id')
+    return (typeof val === 'string' && val) ? val : null
+  } catch {
+    return null
+  }
+}
+
 export const noopCommandHandlers: CommandHandlers = {
   onSyncAll:        async () => {},
   onSyncPrices:     async () => {},
@@ -15,18 +24,26 @@ export const noopCommandHandlers: CommandHandlers = {
   onLock:           () => {},
 }
 
-export function pluGroupsToCacheRows(groups: PluGroup[], companyId: string, workplaceId: string | null): PluGroupCacheRow[] {
+export function pluGroupsToCacheRows(
+  groups: PluGroup[],
+  companyId: string,
+  workplaceId: string | null,
+  terminalId?: string | null,
+  cashierId?: string | null,
+): PluGroupCacheRow[] {
   return groups.map((g, gi) => ({
-    id: g.id,
+    id:          g.id,
     companyId,
     workplaceId: workplaceId ?? undefined,
-    name: g.name,
-    color: g.color || '#90CAF9',
-    sortOrder: g.sort_order ?? gi,
-    plu_items: (g.plu_items ?? []).map((it, idx) => ({
-      id: String(it.id ?? '').length > 0 ? String(it.id) : `plu-${g.id}-${idx}-${it.product_code}`,
+    terminalId:  terminalId  ?? undefined,
+    cashierId:   cashierId   ?? undefined,
+    name:        g.name,
+    color:       g.color || '#90CAF9',
+    sortOrder:   g.sort_order ?? gi,
+    plu_items:   (g.plu_items ?? []).map((it, idx) => ({
+      id:           String(it.id ?? '').length > 0 ? String(it.id) : `plu-${g.id}-${idx}-${it.product_code}`,
       product_code: it.product_code,
-      sort_order: it.sort_order ?? idx,
+      sort_order:   it.sort_order ?? idx,
     })),
   }))
 }
@@ -34,6 +51,7 @@ export function pluGroupsToCacheRows(groups: PluGroup[], companyId: string, work
 export interface MerkezCommandHandlerDeps {
   companyId:            string
   terminalId:           string
+  getCashierId:         () => string | null
   setCommandSyncing:    (v: boolean) => void
   onLogout:             () => void
   onShowMessage:        (text: string) => void
@@ -78,12 +96,13 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         }
 
         try {
-          const workplaceId = localStorage.getItem('workplace_id') || null
-          const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
-          const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
+          const cashierId   = d.getCashierId()
+          const workplaceId = await getWorkplaceId()
+          const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId, d.terminalId, cashierId)
+          const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId, d.terminalId, cashierId)
           results.plu = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
           if (results.plu.success) {
-            const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+            const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined, cashierId)
             d.onPluUpdated(cached)
           }
         } catch (e) {
@@ -100,11 +119,14 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         }
 
         try {
-          const workplaceId = localStorage.getItem('workplace_id') || null
-          const settings = await api.getPosSettings(d.companyId, workplaceId, d.terminalId)
-          await window.electron.db.savePosSettings(settings)
+          const workplaceId = await getWorkplaceId()
+          const cashierId = d.getCashierId()
+          const settings  = await api.getPosSettings(d.companyId, workplaceId, d.terminalId, cashierId)
+          const sResult   = await window.electron.db.savePosSettings(settings, cashierId ?? undefined)
           d.onSettingsUpdated(settings)
-          results.settings = { success: true, inserted: 1, updated: 0, deleted: 0 }
+          results.settings = sResult.success
+            ? { success: true, inserted: 1, updated: 0, deleted: 0 }
+            : sResult
         } catch (e) {
           console.warn('[sync_all] settings hatası:', e)
           results.settings = failResult(String(e))
@@ -119,10 +141,11 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     },
 
     onSyncPrices: async () => {
-      const data    = await api.getProducts(d.companyId)
-      const rawList = data?.data?.data ?? []
-      const local   = await window.electron.db.getProducts()
+      const data     = await api.getProducts(d.companyId)
+      const rawList  = data?.data?.data ?? []
+      const local    = await window.electron.db.getProducts()
       const localMap = new Map(local.map(p => [p.id, p]))
+
       const changed = rawList
         .filter((p: Record<string, unknown>) => {
           const lp = localMap.get(String(p.id))
@@ -135,11 +158,18 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
             barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
             vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
             stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
+            syncedAt: new Date().toISOString(),
           }
         })
+
       if (changed.length > 0) {
-        const all = local.map(lp => changed.find((c: ProductRow) => c.id === lp.id) ?? lp)
-        await window.electron.db.saveProducts(all)
+        const merged = local.map((lp: ProductRow) => {
+          const upd = changed.find((c: ProductRow) => c.id === lp.id)
+          return upd ? { ...lp, ...upd } : lp
+        })
+        const result = await window.electron.db.syncProductsAcid(merged, 'diff')
+        if (!result.success) throw new Error(result.error)
+        d.showToast(`${changed.length} fiyat güncellendi`)
       }
     },
 
@@ -159,14 +189,15 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onLock: (reason) => d.onLock(reason),
 
     onSyncPlu: async (mode: SyncMode = 'full') => {
-      const workplaceId = localStorage.getItem('workplace_id') || null
-      const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId)
-      const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId)
+      const cashierId   = d.getCashierId()
+      const workplaceId = await getWorkplaceId()
+      const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId, d.terminalId, cashierId)
+      const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId, d.terminalId, cashierId)
 
       const result = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
       if (!result.success) throw new Error(result.error)
 
-      const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined)
+      const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined, cashierId)
       d.onPluUpdated(cached)
       d.showToast(`PLU güncellendi (${mode === 'full' ? 'tam' : 'fark'})`)
     },
@@ -199,9 +230,16 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     },
 
     onSyncSettings: async () => {
-      const workplaceId = localStorage.getItem('workplace_id') || null
-      const settings = await api.getPosSettings(d.companyId, workplaceId, d.terminalId)
-      await window.electron.db.savePosSettings(settings)
+      const workplaceId = await getWorkplaceId()
+      const cashierId   = d.getCashierId()
+      const settings    = await api.getPosSettings(
+        d.companyId,
+        workplaceId,
+        d.terminalId,
+        cashierId,
+      )
+      const result = await window.electron.db.savePosSettings(settings, cashierId ?? undefined)
+      if (!result.success) throw new Error(result.error)
       d.onSettingsUpdated(settings)
       d.showToast('Ayarlar güncellendi')
     },

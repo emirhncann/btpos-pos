@@ -4,7 +4,6 @@ import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
-import { api } from '../lib/api'
 
 const CART_GRID = '24px 1fr 72px 82px'
 
@@ -338,9 +337,10 @@ export default function POSScreen({
   async function loadCustomers() {
     setShowCustomer(true)
     closeMenu()
-    if (customers.length > 0) return
-    const list = await api.getCustomers(companyId).catch(() => [])
-    setCustomers(list)
+    // Müşteriler SQLite'tan okunur — sync_customers komutuyla güncellenir
+    // Şu an customers tablosu SQLite'ta yok, ileride eklenecek
+    // Geçici: müşteri seçimi devre dışı
+    setCustomers([])
   }
 
   /* ── Ödeme — ara toplam, satır/belge indirimi, KDV, genel toplam ── */
@@ -1093,7 +1093,7 @@ export default function POSScreen({
               {filtered.length === 0 ? (
                 <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '24px 0', fontSize: 12 }}>Ürün bulunamadı</div>
               ) : filtered.map(p => (
-                <div key={p.id} onClick={() => handlePluClick(p)}
+                <div key={`search-${p.id}-${p.code}`} onClick={() => handlePluClick(p)}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', marginBottom: 3, borderRadius: 7, background: 'white', border: '1px solid #F0F0F0', cursor: 'pointer' }}
                   onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.background = activeSoft }}
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = '#F0F0F0'; el.style.background = 'white' }}
@@ -1129,7 +1129,7 @@ export default function POSScreen({
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
                 return (
-                  <div key={p.id} onClick={() => handlePluClick(p)}
+                  <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
                     style={{ borderRadius: 8, padding: '6px 4px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, border: '2px solid transparent', background: activeSoft, transition: 'all 0.15s', overflow: 'hidden' }}
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}

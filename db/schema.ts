@@ -60,6 +60,7 @@ export const cashiers = sqliteTable('cashiers', {
   password:    text('password').notNull(),
   role:        text('role').default('cashier'),
   isActive:    integer('is_active', { mode: 'boolean' }).default(true),
+  cardNumber:  text('card_number'),
   syncedAt:    text('synced_at'),
 })
 
@@ -77,6 +78,8 @@ export const pluGroupsCache = sqliteTable('plu_groups_cache', {
   id:          text('id').primaryKey(),
   companyId:   text('company_id').notNull(),
   workplaceId: text('workplace_id'),
+  terminalId:  text('terminal_id'),
+  cashierId:   text('cashier_id'),
   name:        text('name').notNull(),
   color:       text('color').notNull().default('#90CAF9'),
   sortOrder:   integer('sort_order').default(0),
@@ -94,6 +97,7 @@ export const pluItemsCache = sqliteTable('plu_items_cache', {
 // POS ayarları (cache)
 export const posSettingsCache = sqliteTable('pos_settings_cache', {
   id:                   text('id').primaryKey(),
+  cashierId:            text('cashier_id'),
   showPrice:            integer('show_price', { mode: 'boolean' }).default(true),
   showCode:             integer('show_code', { mode: 'boolean' }).default(true),
   showBarcode:          integer('show_barcode', { mode: 'boolean' }).default(false),
@@ -109,6 +113,9 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   fontSizePrice:        integer('font_size_price').default(13),
   fontSizeCode:         integer('font_size_code').default(9),
   source:               text('source').default('default'),
+  pluMode:              text('plu_mode').default('terminal'),
+  loginWithCode:        integer('login_with_code', { mode: 'boolean' }).default(true),
+  loginWithCard:        integer('login_with_card', { mode: 'boolean' }).default(false),
   syncedAt:             text('synced_at'),
 })
 
@@ -140,6 +147,8 @@ export const pluGroupsTemp = sqliteTable('plu_groups_temp', {
   id:          text('id').primaryKey(),
   companyId:   text('company_id').notNull(),
   workplaceId: text('workplace_id'),
+  terminalId:  text('terminal_id'),
+  cashierId:   text('cashier_id'),
   name:        text('name').notNull(),
   color:       text('color').notNull().default('#90CAF9'),
   sortOrder:   integer('sort_order').default(0),
@@ -161,5 +170,31 @@ export const cashiersTemp = sqliteTable('cashiers_temp', {
   password:    text('password').notNull(),
   role:        text('role').default('cashier'),
   isActive:    integer('is_active', { mode: 'boolean' }).default(true),
+  cardNumber:  text('card_number'),
   syncedAt:    text('synced_at'),
+})
+
+// POS ayarları temp — ACID sync için
+export const posSettingsTemp = sqliteTable('pos_settings_temp', {
+  id:                   text('id').primaryKey(),
+  cashierId:            text('cashier_id'),
+  showPrice:            integer('show_price',   { mode: 'boolean' }).default(true),
+  showCode:             integer('show_code',    { mode: 'boolean' }).default(true),
+  showBarcode:          integer('show_barcode', { mode: 'boolean' }).default(false),
+  duplicateItemAction:  text('duplicate_item_action').default('increase_qty'),
+  minQtyPerLine:        integer('min_qty_per_line').default(1),
+  allowLineDiscount:    integer('allow_line_discount', { mode: 'boolean' }).default(true),
+  allowDocDiscount:     integer('allow_doc_discount',  { mode: 'boolean' }).default(true),
+  maxLineDiscountPct:   real('max_line_discount_pct').default(100),
+  maxDocDiscountPct:    real('max_doc_discount_pct').default(100),
+  pluCols:              integer('plu_cols').default(4),
+  pluRows:              integer('plu_rows').default(3),
+  fontSizeName:         integer('font_size_name').default(12),
+  fontSizePrice:        integer('font_size_price').default(13),
+  fontSizeCode:         integer('font_size_code').default(9),
+  source:               text('source').default('default'),
+  pluMode:              text('plu_mode').default('terminal'),
+  loginWithCode:        integer('login_with_code', { mode: 'boolean' }).default(true),
+  loginWithCard:        integer('login_with_card', { mode: 'boolean' }).default(false),
+  syncedAt:             text('synced_at'),
 })
