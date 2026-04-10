@@ -35,6 +35,8 @@ export const sales = sqliteTable('sales', {
   cardAmount:     real('card_amount').default(0),
   createdAt:      text('created_at').notNull(),
   synced:         integer('synced', { mode: 'boolean' }).default(false),
+  customerId:     text('customer_id'),
+  customerName:   text('customer_name'),
 })
 
 export const saleItems = sqliteTable('sale_items', {
@@ -92,6 +94,30 @@ export const pluItemsCache = sqliteTable('plu_items_cache', {
   groupId:     text('group_id').notNull(),
   productCode: text('product_code').notNull(),
   sortOrder:   integer('sort_order').default(0),
+})
+
+export const customers = sqliteTable('customers', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  code:      text('code').notNull().default(''),
+  name:      text('name').notNull(),
+  phone:     text('phone').notNull().default(''),
+  taxNo:     text('tax_no').notNull().default(''),
+  address:   text('address').notNull().default(''),
+  balance:   real('balance').notNull().default(0),
+  syncedAt:  text('synced_at').notNull(),
+})
+
+export const customersTemp = sqliteTable('customers_temp', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  code:      text('code').notNull().default(''),
+  name:      text('name').notNull(),
+  phone:     text('phone').notNull().default(''),
+  taxNo:     text('tax_no').notNull().default(''),
+  address:   text('address').notNull().default(''),
+  balance:   real('balance').notNull().default(0),
+  syncedAt:  text('synced_at').notNull(),
 })
 
 // POS ayarları (cache)

@@ -31,6 +31,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     saveCashiers: (cashiers) => electron.ipcRenderer.invoke("db:saveCashiers", cashiers),
     verifyCashier: (code, password) => electron.ipcRenderer.invoke("db:verifyCashier", code, password),
     verifyCashierByCard: (cardNumber) => electron.ipcRenderer.invoke("db:verifyCashierByCard", cardNumber),
+    getAllCashiers: () => electron.ipcRenderer.invoke("db:getAllCashiers"),
     getCashiers: () => electron.ipcRenderer.invoke("db:getCashiers"),
     holdDocument: (doc) => electron.ipcRenderer.invoke("db:holdDocument", doc),
     getHeldDocuments: (companyId) => electron.ipcRenderer.invoke("db:getHeldDocuments", companyId),
@@ -43,6 +44,8 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
     syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),
     syncPluGroupsAcid: (groups, mode) => electron.ipcRenderer.invoke("db:syncPluGroupsAcid", groups, mode ?? "full"),
-    syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full")
+    syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full"),
+    syncCustomersAcid: (items, companyId, mode) => electron.ipcRenderer.invoke("db:syncCustomersAcid", items, companyId, mode ?? "full"),
+    getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query)
   }
 });

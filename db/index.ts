@@ -287,6 +287,36 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'applied_by', 'applied_by TEXT')
 
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      code        TEXT NOT NULL DEFAULT '',
+      name        TEXT NOT NULL,
+      phone       TEXT NOT NULL DEFAULT '',
+      tax_no      TEXT NOT NULL DEFAULT '',
+      address     TEXT NOT NULL DEFAULT '',
+      balance     REAL NOT NULL DEFAULT 0,
+      synced_at   TEXT NOT NULL
+    )
+  `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS customers_temp (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      code        TEXT NOT NULL DEFAULT '',
+      name        TEXT NOT NULL,
+      phone       TEXT NOT NULL DEFAULT '',
+      tax_no      TEXT NOT NULL DEFAULT '',
+      address     TEXT NOT NULL DEFAULT '',
+      balance     REAL NOT NULL DEFAULT 0,
+      synced_at   TEXT NOT NULL
+    )
+  `)
+
+  addColumnIfMissing(sqlite, 'sales', 'customer_id', 'customer_id TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'customer_name', 'customer_name TEXT')
+
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'net_amount', 'net_amount REAL DEFAULT 0')

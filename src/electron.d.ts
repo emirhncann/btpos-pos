@@ -47,6 +47,7 @@ declare global {
         saveCashiers:       (cashiers: unknown[]) => Promise<number>
         verifyCashier:      (code: string, password: string) => Promise<CashierRow | null>
         verifyCashierByCard: (cardNumber: string) => Promise<CashierRow | null>
+        getAllCashiers:     () => Promise<CashierRow[]>
         getCashiers:        () => Promise<CashierRow[]>
         holdDocument:       (doc: unknown) => Promise<string>
         getHeldDocuments:   (companyId: string) => Promise<HeldDocRow[]>
@@ -60,6 +61,8 @@ declare global {
         syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
         syncPluGroupsAcid:  (groups: PluGroupCacheRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
         syncCashiersAcid:   (cashiers: CashierRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
+        syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
+        getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
       }
     }
   }
@@ -142,6 +145,8 @@ declare global {
     paymentType:     'cash' | 'card' | 'mixed'
     cashAmount:      number
     cardAmount:      number
+    customerId?:     string | null
+    customerName?:   string | null
   }
 
   interface SaleRecord {
@@ -178,12 +183,15 @@ declare global {
   }
 
   interface CustomerRow {
-    id:      string
-    code:    string
-    name:    string
-    phone:   string
-    taxNo:   string
-    balance: number
+    id:        string
+    companyId: string
+    code:      string
+    name:      string
+    phone:     string
+    taxNo:     string
+    address:   string
+    balance:   number
+    syncedAt?: string
   }
 
   interface PluGroupCacheRow {

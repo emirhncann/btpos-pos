@@ -13,7 +13,7 @@ export interface CommandHandlers {
   onSyncPrices:     () => Promise<void>
   onSyncCashiers:   (mode?: SyncMode) => Promise<void>
   onSyncPlu:        (mode?: SyncMode) => Promise<void>
-  onSyncCustomers:  () => Promise<void>
+  onSyncCustomers:  (mode?: SyncMode) => Promise<void>
   onSyncProducts:   (mode?: SyncMode) => Promise<void>
   onSyncSettings:   () => Promise<void>
   onLogout:         () => void
@@ -98,7 +98,7 @@ export function useCommandPoller(
               break
 
             case 'sync_customers':
-              await h.onSyncCustomers()
+              await h.onSyncCustomers(mode)
               break
 
             case 'sync_products':

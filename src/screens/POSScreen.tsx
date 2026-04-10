@@ -97,6 +97,13 @@ export default function POSScreen({
   const [customerQ, setCustomerQ]         = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!showCustomer || !companyId) return
+    window.electron.db.getCustomers(companyId, customerQ)
+      .then(setCustomers)
+      .catch(() => setCustomers([]))
+  }, [customerQ, showCustomer, companyId])
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
 
@@ -337,10 +344,12 @@ export default function POSScreen({
   async function loadCustomers() {
     setShowCustomer(true)
     closeMenu()
-    // Müşteriler SQLite'tan okunur — sync_customers komutuyla güncellenir
-    // Şu an customers tablosu SQLite'ta yok, ileride eklenecek
-    // Geçici: müşteri seçimi devre dışı
-    setCustomers([])
+    try {
+      const list = await window.electron.db.getCustomers(companyId)
+      setCustomers(list)
+    } catch {
+      setCustomers([])
+    }
   }
 
   /* ── Ödeme — ara toplam, satır/belge indirimi, KDV, genel toplam ── */
@@ -369,7 +378,7 @@ export default function POSScreen({
     setSaving(true)
     try {
       const receiptNo = nextReceiptNo()
-      await window.electron.db.saveSale({
+      const saleRow: SaleRow = {
         receiptNo,
         totalAmount: lineSubtotal,
         discountRate: docDiscountRate,
@@ -378,7 +387,10 @@ export default function POSScreen({
         paymentType,
         cashAmount: paymentType === 'card'  ? 0 : (paymentType === 'cash' ? cashAmount || grandTotal : cashAmount),
         cardAmount: paymentType === 'cash'  ? 0 : (paymentType === 'card' ? grandTotal : grandTotal - cashAmount),
-      }, cart.map(c => ({
+        customerId:   selectedCustomer?.id   ?? null,
+        customerName: selectedCustomer?.name ?? null,
+      }
+      await window.electron.db.saveSale(saleRow, cart.map(c => ({
         productId: c.id,
         productName: c.name,
         quantity: c.quantity,
@@ -390,6 +402,7 @@ export default function POSScreen({
         appliedBy: cashier.id,
       })))
       setLastReceipt(receiptNo)
+      setSelectedCustomer(null)
       clearCart()
       searchRef.current?.focus()
     } catch (e) {
@@ -625,10 +638,7 @@ export default function POSScreen({
               style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12 }}
             />
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {customers
-                .filter(c => !customerQ || c.name.toLowerCase().includes(customerQ.toLowerCase()) || c.code.includes(customerQ))
-                .slice(0, 50)
-                .map(c => (
+              {customers.map(c => (
                   <div key={c.id}
                     onClick={() => { setSelectedCustomer(c); setShowCustomer(false); setCustomerQ('') }}
                     style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}

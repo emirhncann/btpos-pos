@@ -37,12 +37,14 @@ export const api = {
     const data = await res.json()
     const list = data?.data?.data ?? data?.data?.items ?? data?.items ?? data ?? []
     return list.map((c: Record<string, unknown>) => ({
-      id:      String(c.id ?? ''),
-      code:    String(c.code ?? c.Code ?? ''),
-      name:    String(c.name ?? c.Name ?? c.title ?? ''),
-      phone:   String(c.phone ?? c.Phone ?? c.gsm ?? ''),
-      taxNo:   String(c.taxNo ?? c.vkn ?? ''),
-      balance: Number(c.balance ?? c.Balance ?? 0),
+      id:        String(c.id ?? ''),
+      companyId,
+      code:      String(c.code ?? c.Code ?? ''),
+      name:      String(c.name ?? c.Name ?? c.title ?? ''),
+      phone:     String(c.phone ?? c.Phone ?? c.gsm ?? ''),
+      taxNo:     String(c.taxNo ?? c.vkn ?? ''),
+      address:   String(c.address ?? c.Address ?? ''),
+      balance:   Number(c.balance ?? c.Balance ?? 0),
     }))
   },
 

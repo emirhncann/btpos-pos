@@ -233,6 +233,11 @@ app.whenReady().then(async () => {
     return getAllCashiers()
   })
 
+  ipcMain.handle('db:getAllCashiers', async () => {
+    const { getAllCashiers } = await import('../db/operations')
+    return getAllCashiers()
+  })
+
   ipcMain.handle('app:openKeyboard', () => {
     if (process.platform !== 'win32') return
     exec('C:\\Windows\\System32\\osk.exe', err => {
@@ -303,6 +308,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:syncCashiersAcid', async (_e, cashierList, companyId, mode) => {
     const { syncCashiersAcid } = await import('../db/operations')
     return syncCashiersAcid(cashierList as import('../db/operations').CashierRow[], companyId, (mode === 'diff' ? 'diff' : 'full'))
+  })
+
+  ipcMain.handle('db:syncCustomersAcid', async (_e, items, companyId, mode) => {
+    const { syncCustomersAcid } = await import('../db/operations')
+    return syncCustomersAcid(items as import('../db/operations').CustomerRow[], companyId, (mode === 'diff' ? 'diff' : 'full'))
+  })
+
+  ipcMain.handle('db:getCustomers', async (_e, companyId: string, query?: string) => {
+    const { getCustomers } = await import('../db/operations')
+    return getCustomers(companyId, query)
   })
 })
 

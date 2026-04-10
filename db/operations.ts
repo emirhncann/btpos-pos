@@ -37,6 +37,8 @@ export interface SaleRow {
   paymentType: 'cash' | 'card' | 'mixed'
   cashAmount: number
   cardAmount: number
+  customerId?:   string | null
+  customerName?: string | null
 }
 
 export function saveProducts(items: ProductRow[]): number {
@@ -91,6 +93,8 @@ export function saveSale(sale: SaleRow, items: SaleItem[]): string {
     cardAmount: sale.cardAmount,
     createdAt: now,
     synced: false,
+    customerId:   sale.customerId   ?? null,
+    customerName: sale.customerName ?? null,
   }).run()
 
   for (const item of items) {
@@ -197,7 +201,17 @@ export function getAllCashiers(): CashierRow[] {
   const db = getDB()
   return db.select().from(cashiers)
     .where(eq(cashiers.isActive, true))
-    .all() as CashierRow[]
+    .all()
+    .map(r => ({
+      id:          r.id,
+      companyId:   r.companyId,
+      fullName:    r.fullName,
+      cashierCode: r.cashierCode,
+      password:    r.password,
+      role:        r.role ?? 'cashier',
+      isActive:    r.isActive ?? true,
+      cardNumber:  r.cardNumber ?? null,
+    }))
 }
 
 export interface HeldCartLine {
@@ -375,8 +389,10 @@ export function getPluGroups(
   workplaceId?: string | null,
   cashierId?: string | null,
 ): PluGroupCacheRow[] {
-  const db = getDB()
+  const db     = getDB()
+  const sqlite = getSqlite()
 
+  // 1. Kasiyer bazlı — cashierId verilmişse sadece o kasiyerin grupları
   if (cashierId) {
     const groups = db.select().from(pluGroupsCache)
       .where(and(
@@ -388,22 +404,23 @@ export function getPluGroups(
     if (groups.length > 0) return mapPluGroups(db, groups)
   }
 
+  // 2. İşyeri bazlı — cashier_id IS NULL zorunlu (kasiyer grupları karışmasın)
   if (workplaceId) {
-    const groups = db.select().from(pluGroupsCache)
-      .where(and(
-        eq(pluGroupsCache.companyId, companyId),
-        eq(pluGroupsCache.workplaceId, workplaceId),
-      ))
-      .orderBy(asc(pluGroupsCache.sortOrder))
-      .all()
-    if (groups.length > 0) return mapPluGroups(db, groups)
+    const rows = sqlite.prepare(`
+      SELECT * FROM plu_groups_cache
+      WHERE company_id = ? AND workplace_id = ? AND cashier_id IS NULL
+      ORDER BY sort_order
+    `).all(companyId, workplaceId) as typeof pluGroupsCache.$inferSelect[]
+    if (rows.length > 0) return mapPluGroups(db, rows)
   }
 
-  const groups = db.select().from(pluGroupsCache)
-    .where(eq(pluGroupsCache.companyId, companyId))
-    .orderBy(asc(pluGroupsCache.sortOrder))
-    .all()
-  return mapPluGroups(db, groups)
+  // 3. Şirket geneli — cashier_id IS NULL ve terminal_id IS NULL
+  const rows = sqlite.prepare(`
+    SELECT * FROM plu_groups_cache
+    WHERE company_id = ? AND cashier_id IS NULL AND terminal_id IS NULL
+    ORDER BY sort_order
+  `).all(companyId) as typeof pluGroupsCache.$inferSelect[]
+  return mapPluGroups(db, rows)
 }
 
 export function savePosSettings(settings: PosSettingsRow): void {
@@ -786,11 +803,11 @@ export function syncPluGroupsAcid(groups: PluGroupCacheRow[], mode: SyncMode = '
       let scopeParams: unknown[]
 
       if (cashierId) {
-        scopeWhere  = 'cashier_id = ?'
-        scopeParams = [cashierId]
+        scopeWhere  = 'company_id = ? AND cashier_id = ?'
+        scopeParams = [companyId, cashierId]
       } else if (terminalId) {
-        scopeWhere  = 'terminal_id = ? AND cashier_id IS NULL'
-        scopeParams = [terminalId]
+        scopeWhere  = 'company_id = ? AND terminal_id = ? AND cashier_id IS NULL'
+        scopeParams = [companyId, terminalId]
       } else {
         scopeWhere  = 'company_id = ? AND terminal_id IS NULL AND cashier_id IS NULL'
         scopeParams = [companyId]
@@ -900,4 +917,112 @@ export function syncCashiersAcid(cashierList: CashierRow[], companyId: string, m
   } catch (e) {
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
   }
+}
+
+export interface CustomerRow {
+  id:        string
+  companyId: string
+  code:      string
+  name:      string
+  phone:     string
+  taxNo:     string
+  address:   string
+  balance:   number
+  syncedAt?: string
+}
+
+function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
+  return {
+    id:        String(r.id ?? ''),
+    companyId: String(r.company_id ?? ''),
+    code:      String(r.code ?? ''),
+    name:      String(r.name ?? ''),
+    phone:     String(r.phone ?? ''),
+    taxNo:     String(r.tax_no ?? ''),
+    address:   String(r.address ?? ''),
+    balance:   Number(r.balance ?? 0),
+    syncedAt:  r.synced_at != null ? String(r.synced_at) : undefined,
+  }
+}
+
+export function syncCustomersAcid(
+  items: CustomerRow[],
+  companyId: string,
+  mode: SyncMode = 'full',
+): SyncResult {
+  const db  = getSqlite()
+  const now = new Date().toISOString()
+  let inserted = 0
+  let updated = 0
+  let deleted = 0
+
+  if (items.length === 0) {
+    return { success: false, inserted: 0, updated: 0, deleted: 0, error: 'Boş müşteri listesi' }
+  }
+
+  const txn = db.transaction(() => {
+    db.prepare('DELETE FROM customers_temp').run()
+
+    const ins = db.prepare(`
+      INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance, synced_at)
+      VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance, @syncedAt)
+    `)
+
+    for (const c of items) {
+      ins.run({
+        id:        c.id,
+        companyId,
+        code:      c.code    ?? '',
+        name:      c.name    ?? '',
+        phone:     c.phone   ?? '',
+        taxNo:     c.taxNo   ?? '',
+        address:   c.address ?? '',
+        balance:   c.balance ?? 0,
+        syncedAt:  now,
+      })
+      inserted++
+    }
+
+    const cnt = (db.prepare('SELECT COUNT(*) as c FROM customers_temp').get() as { c: number }).c
+    if (cnt === 0) throw new Error('customers_temp boş — rollback')
+
+    if (mode === 'full') {
+      deleted = (db.prepare('SELECT COUNT(*) as c FROM customers WHERE company_id = ?').get(companyId) as { c: number }).c
+      db.prepare('DELETE FROM customers WHERE company_id = ?').run(companyId)
+      db.prepare('INSERT INTO customers SELECT * FROM customers_temp').run()
+      inserted = items.length
+    } else {
+      db.prepare('INSERT OR REPLACE INTO customers SELECT * FROM customers_temp').run()
+      updated = inserted
+      inserted = 0
+    }
+
+    db.prepare('DELETE FROM customers_temp').run()
+  })
+
+  try {
+    txn()
+    return { success: true, inserted, updated, deleted }
+  } catch (e) {
+    return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
+  }
+}
+
+export function getCustomers(companyId: string, query?: string): CustomerRow[] {
+  const db = getSqlite()
+  if (query && query.trim()) {
+    const q = `%${query.trim().toLowerCase()}%`
+    const rows = db.prepare(`
+      SELECT * FROM customers
+      WHERE company_id = ?
+        AND (LOWER(name) LIKE ? OR LOWER(code) LIKE ? OR LOWER(phone) LIKE ? OR LOWER(tax_no) LIKE ?)
+      ORDER BY name
+      LIMIT 100
+    `).all(companyId, q, q, q, q) as Record<string, unknown>[]
+    return rows.map(mapCustomerRow)
+  }
+  const rows = db.prepare(`
+    SELECT * FROM customers WHERE company_id = ? ORDER BY name LIMIT 500
+  `).all(companyId) as Record<string, unknown>[]
+  return rows.map(mapCustomerRow)
 }

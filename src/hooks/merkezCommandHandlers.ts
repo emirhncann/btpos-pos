@@ -65,6 +65,83 @@ function failResult(msg: string): SyncResult {
   return { success: false, inserted: 0, updated: 0, deleted: 0, error: msg }
 }
 
+/**
+ * PLU sync yardımcısı.
+ * pluMode=cashier  -> SQLite'taki tüm kasiyerlerin PLU'larını ayrı ayrı çek ve yaz.
+ *                    Giriş yapan kasiyerin PLU'sunu ekrana yansıt.
+ * pluMode=terminal -> cashierId göndermeden terminal/firma bazlı çek ve yaz.
+ */
+async function syncPlu(
+  companyId: string,
+  workplaceId: string | null,
+  terminalId: string,
+  loggedInCashierId: string | null,
+  mode: SyncMode,
+): Promise<SyncResult> {
+  const terminalSettings = await window.electron.db.getPosSettings()
+  const pluMode = terminalSettings.pluMode
+
+  if (pluMode === 'cashier') {
+    const allCashiers = await window.electron.db.getAllCashiers()
+    let anySuccess = false
+
+    for (const cashier of allCashiers) {
+      try {
+        const groups = await fetchPluGroupsFromServer(companyId, workplaceId, terminalId, cashier.id)
+        if (groups.length === 0) continue
+        const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, cashier.id)
+        const result = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+        if (result.success) anySuccess = true
+      } catch (e) {
+        console.warn(`[syncPlu] kasiyer ${cashier.fullName} hatası:`, e)
+      }
+    }
+
+    return { success: anySuccess, inserted: 0, updated: 0, deleted: 0 }
+  }
+
+  const groups = await fetchPluGroupsFromServer(companyId, workplaceId, terminalId, null)
+  if (groups.length === 0) {
+    return { success: false, inserted: 0, updated: 0, deleted: 0, error: 'Boş PLU listesi' }
+  }
+  const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, null)
+  return window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+}
+
+async function refreshPluDisplay(
+  companyId: string,
+  workplaceId: string | null,
+  loggedInCashierId: string | null,
+  onPluUpdated: (groups: PluGroupCacheRow[]) => void,
+): Promise<void> {
+  const terminalSettings = await window.electron.db.getPosSettings()
+  const cashierIdForDisplay = terminalSettings.pluMode === 'cashier' ? loggedInCashierId : null
+  const cached = await window.electron.db.getPluGroups(companyId, workplaceId ?? undefined, cashierIdForDisplay)
+  onPluUpdated(cached)
+}
+
+async function syncSettings(
+  companyId: string,
+  workplaceId: string | null,
+  terminalId: string,
+  cashierId: string | null,
+  onSettingsUpdated: (s: PosSettingsRow) => void,
+): Promise<SyncResult> {
+  const terminalSettings = await api.getPosSettings(companyId, workplaceId, terminalId, null)
+  const tResult = await window.electron.db.savePosSettings(terminalSettings, undefined)
+  if (!tResult.success) return tResult
+
+  if (cashierId) {
+    const cashierSettings = await api.getPosSettings(companyId, workplaceId, terminalId, cashierId)
+    await window.electron.db.savePosSettings(cashierSettings, cashierId)
+    onSettingsUpdated(cashierSettings)
+  } else {
+    onSettingsUpdated(terminalSettings)
+  }
+
+  return { success: true, inserted: 1, updated: 0, deleted: 0 }
+}
+
 export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): CommandHandlers {
   return {
     onSyncAll: async (mode: SyncMode = 'full') => {
@@ -96,15 +173,10 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         }
 
         try {
-          const cashierId   = d.getCashierId()
           const workplaceId = await getWorkplaceId()
-          const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId, d.terminalId, cashierId)
-          const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId, d.terminalId, cashierId)
-          results.plu = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
-          if (results.plu.success) {
-            const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined, cashierId)
-            d.onPluUpdated(cached)
-          }
+          const loggedInCashierId = d.getCashierId()
+          results.plu = await syncPlu(d.companyId, workplaceId, d.terminalId, loggedInCashierId, mode)
+          await refreshPluDisplay(d.companyId, workplaceId, loggedInCashierId, d.onPluUpdated)
         } catch (e) {
           console.warn('[sync_all] PLU hatası:', e)
           results.plu = failResult(String(e))
@@ -120,13 +192,10 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
 
         try {
           const workplaceId = await getWorkplaceId()
-          const cashierId = d.getCashierId()
-          const settings  = await api.getPosSettings(d.companyId, workplaceId, d.terminalId, cashierId)
-          const sResult   = await window.electron.db.savePosSettings(settings, cashierId ?? undefined)
-          d.onSettingsUpdated(settings)
-          results.settings = sResult.success
-            ? { success: true, inserted: 1, updated: 0, deleted: 0 }
-            : sResult
+          const cashierId   = d.getCashierId()
+          results.settings = await syncSettings(
+            d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated
+          )
         } catch (e) {
           console.warn('[sync_all] settings hatası:', e)
           results.settings = failResult(String(e))
@@ -189,22 +258,19 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onLock: (reason) => d.onLock(reason),
 
     onSyncPlu: async (mode: SyncMode = 'full') => {
-      const cashierId   = d.getCashierId()
-      const workplaceId = await getWorkplaceId()
-      const groups = await fetchPluGroupsFromServer(d.companyId, workplaceId, d.terminalId, cashierId)
-      const cacheRows = pluGroupsToCacheRows(groups, d.companyId, workplaceId, d.terminalId, cashierId)
-
-      const result = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
-      if (!result.success) throw new Error(result.error)
-
-      const cached = await window.electron.db.getPluGroups(d.companyId, workplaceId ?? undefined, cashierId)
-      d.onPluUpdated(cached)
-      d.showToast(`PLU güncellendi (${mode === 'full' ? 'tam' : 'fark'})`)
+      const workplaceId       = await getWorkplaceId()
+      const loggedInCashierId = d.getCashierId()
+      const result = await syncPlu(d.companyId, workplaceId, d.terminalId, loggedInCashierId, mode)
+      if (!result.success) throw new Error(result.error ?? 'PLU sync başarısız')
+      await refreshPluDisplay(d.companyId, workplaceId, loggedInCashierId, d.onPluUpdated)
+      d.showToast('PLU güncellendi')
     },
 
-    onSyncCustomers: async () => {
+    onSyncCustomers: async (mode: SyncMode = 'full') => {
       const customers = await api.getCustomers(d.companyId)
-      d.showToast(`${customers.length} cari güncellendi`)
+      const result = await window.electron.db.syncCustomersAcid(customers, d.companyId, mode)
+      if (!result.success) throw new Error(result.error ?? 'Cari sync hatası')
+      d.showToast(`${result.inserted + result.updated} cari güncellendi`)
     },
 
     onSyncProducts: async (mode: SyncMode = 'full') => {
@@ -232,15 +298,10 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onSyncSettings: async () => {
       const workplaceId = await getWorkplaceId()
       const cashierId   = d.getCashierId()
-      const settings    = await api.getPosSettings(
-        d.companyId,
-        workplaceId,
-        d.terminalId,
-        cashierId,
+      const result = await syncSettings(
+        d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated
       )
-      const result = await window.electron.db.savePosSettings(settings, cashierId ?? undefined)
       if (!result.success) throw new Error(result.error)
-      d.onSettingsUpdated(settings)
       d.showToast('Ayarlar güncellendi')
     },
   }

@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('electron', {
     verifyCashier:      (code: string, password: string)     => ipcRenderer.invoke('db:verifyCashier', code, password),
     verifyCashierByCard: (cardNumber: string) =>
       ipcRenderer.invoke('db:verifyCashierByCard', cardNumber),
+    getAllCashiers:    ()                                   => ipcRenderer.invoke('db:getAllCashiers'),
     getCashiers:        ()                                   => ipcRenderer.invoke('db:getCashiers'),
     holdDocument:       (doc: unknown)                       => ipcRenderer.invoke('db:holdDocument', doc),
     getHeldDocuments:   (companyId: string)                  => ipcRenderer.invoke('db:getHeldDocuments', companyId),
@@ -48,5 +49,9 @@ contextBridge.exposeInMainWorld('electron', {
     syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),
     syncPluGroupsAcid:  (groups: unknown[], mode?: string)                    => ipcRenderer.invoke('db:syncPluGroupsAcid', groups, mode ?? 'full'),
     syncCashiersAcid:   (cashiers: unknown[], companyId: string, mode?: string) => ipcRenderer.invoke('db:syncCashiersAcid', cashiers, companyId, mode ?? 'full'),
+    syncCustomersAcid:  (items: unknown[], companyId: string, mode?: string) =>
+      ipcRenderer.invoke('db:syncCustomersAcid', items, companyId, mode ?? 'full'),
+    getCustomers:       (companyId: string, query?: string) =>
+      ipcRenderer.invoke('db:getCustomers', companyId, query),
   },
 })

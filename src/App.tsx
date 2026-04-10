@@ -96,6 +96,10 @@ export default function App() {
     setTerminalLockReason(null)
     setMerkezToast(null)
     setCommandSyncing(false)
+    // posSettings'i kasa default'una sıfırla — stale pluMode bir sonraki kasiyeri etkilemesin
+    window.electron.db.getPosSettings().then(s => {
+      setPosSettings(s)
+    }).catch(() => {})
     setState('cashier_login')
   }, [])
 
@@ -204,13 +208,24 @@ export default function App() {
       // Bu yüzden direkt db'den oku
       try {
         const fresh = await window.electron.db.getPosSettings(c.id)
+        // pluMode=cashier -> o kasiyerin PLU'su, terminal -> terminal bazlı (null)
         const cashierIdForPlu = fresh.pluMode === 'cashier' ? c.id : null
         const cached = await window.electron.db.getPluGroups(
           companyId,
           workplaceId ?? null,
           cashierIdForPlu,
         )
-        if (cached.length > 0) setPluGroups(cached)
+        if (cached.length > 0) {
+          setPluGroups(cached)
+        } else {
+          // Kasiyer bazlı PLU yoksa terminal/işyeri fallback'i tekrar dene
+          const fallback = await window.electron.db.getPluGroups(
+            companyId,
+            workplaceId ?? null,
+            null,
+          )
+          if (fallback.length > 0) setPluGroups(fallback)
+        }
       } catch { /* PLU boş kalır, sync_plu komutu ile gelecek */ }
     }
     setState('dashboard')
