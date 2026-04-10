@@ -319,6 +319,28 @@ app.whenReady().then(async () => {
     const { getCustomers } = await import('../db/operations')
     return getCustomers(companyId, query)
   })
+
+  ipcMain.handle('db:getCustomerById', async (_e, companyId: string, id: string) => {
+    const { getCustomerById } = await import('../db/operations')
+    return getCustomerById(companyId, id)
+  })
+
+  ipcMain.handle('db:getPendingInvoices', async () => {
+    const { getPendingInvoices } = await import('../db/operations')
+    return getPendingInvoices()
+  })
+  ipcMain.handle('db:markInvoiceSent', async (_e, saleId: string, invoiceId: string) => {
+    const { markInvoiceSent } = await import('../db/operations')
+    markInvoiceSent(saleId, invoiceId)
+  })
+  ipcMain.handle('db:markInvoiceError', async (_e, saleId: string, error: string) => {
+    const { markInvoiceError } = await import('../db/operations')
+    markInvoiceError(saleId, error)
+  })
+  ipcMain.handle('db:getSaleItems', async (_e, saleId: string) => {
+    const { getSaleItems } = await import('../db/operations')
+    return getSaleItems(saleId)
+  })
 })
 
 app.on('window-all-closed', () => {

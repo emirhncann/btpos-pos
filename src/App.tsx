@@ -6,8 +6,10 @@ import POSScreen          from './screens/POSScreen'
 import AppLogo            from './components/AppLogo'
 import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
+import { useConnectionStatus } from './hooks/useConnectionStatus'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
 import { api } from './lib/api'
+import { sendPendingInvoices } from './lib/invoiceSend'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -77,6 +79,7 @@ export default function App() {
   const [cartActive, setCartActive]     = useState(false)
   const [cartSettings, setCartSettings] = useState<CartSettings>(DEFAULT_CART_SETTINGS)
   const [showSplash, setShowSplash]     = useState(true)
+  const isOnline = useConnectionStatus(30) === 'online'
 
   const showMerkezToast = useCallback((msg: string) => {
     setMerkezToast(msg)
@@ -140,6 +143,15 @@ export default function App() {
   })
 
   useEffect(() => { checkActivation() }, [])
+
+  useEffect(() => {
+    if (!isOnline || !companyId) return
+    window.electron.db.getPendingInvoices()
+      .then(pending => {
+        if (pending.length > 0) void sendPendingInvoices(companyId, { silent: true })
+      })
+      .catch(() => {})
+  }, [isOnline, companyId])
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 3500)

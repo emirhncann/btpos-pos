@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
+import { sendInvoiceForSale } from '../lib/invoiceSend'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -389,8 +390,9 @@ export default function POSScreen({
         cardAmount: paymentType === 'cash'  ? 0 : (paymentType === 'card' ? grandTotal : grandTotal - cashAmount),
         customerId:   selectedCustomer?.id   ?? null,
         customerName: selectedCustomer?.name ?? null,
+        customerCode: selectedCustomer?.code ?? null,
       }
-      await window.electron.db.saveSale(saleRow, cart.map(c => ({
+      const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
         productId: c.id,
         productName: c.name,
         quantity: c.quantity,
@@ -401,6 +403,10 @@ export default function POSScreen({
         lineTotal: c.netTotal,
         appliedBy: cashier.id,
       })))
+      const cust = selectedCustomer
+      if (cust && saleId && companyId) {
+        void sendInvoiceForSale(companyId, saleId, cust)
+      }
       setLastReceipt(receiptNo)
       setSelectedCustomer(null)
       clearCart()

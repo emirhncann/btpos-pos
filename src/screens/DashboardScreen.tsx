@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
+import { sendPendingInvoices } from '../lib/invoiceSend'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -71,6 +72,7 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [invoiceSending, setInvoiceSending] = useState(false)
 
   const refreshCmdHistory = useCallback(() => {
     window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
@@ -101,6 +103,19 @@ export default function DashboardScreen({
       const totalCard  = sales.filter(r => r.paymentType === 'card').reduce((s, r) => s + r.totalAmount, 0)
       setSummary({ saleCount: sales.length, totalSales, totalCash, totalCard })
     } catch {}
+  }
+
+  async function handleSendPendingInvoices() {
+    if (invoiceSending) return
+    setInvoiceSending(true)
+    try {
+      await sendPendingInvoices(companyId, { silent: false })
+      await loadDailySummary()
+    } catch {
+      window.alert('Fatura gönderimi başlatılamadı.')
+    } finally {
+      setInvoiceSending(false)
+    }
   }
 
   const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -177,6 +192,21 @@ export default function DashboardScreen({
             }}
           >
             ⚙ Ekran Ayarları
+          </button>
+          <button
+            type="button"
+            disabled={invoiceSending}
+            onClick={() => void handleSendPendingInvoices()}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 18px', borderRadius: 10, cursor: invoiceSending ? 'wait' : 'pointer',
+              background: '#E8F5E9', border: '1px solid #A5D6A7',
+              fontSize: 13, fontWeight: 500, color: '#2E7D32',
+              opacity: invoiceSending ? 0.7 : 1,
+            }}
+            title="Bekleyen POS faturalarını ERP’ye gönderir (Z raporu / toplu)"
+          >
+            {invoiceSending ? '⏳ Gönderiliyor…' : '📄 Bekleyen faturalar'}
           </button>
           <button
             type="button"

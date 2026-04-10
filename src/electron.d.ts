@@ -63,6 +63,11 @@ declare global {
         syncCashiersAcid:   (cashiers: CashierRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
+        getCustomerById:    (companyId: string, id: string) => Promise<CustomerRow | null>
+        getPendingInvoices: () => Promise<SaleDbRow[]>
+        markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
+        markInvoiceError:  (saleId: string, error: string) => Promise<void>
+        getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
       }
     }
   }
@@ -147,6 +152,39 @@ declare global {
     cardAmount:      number
     customerId?:     string | null
     customerName?:   string | null
+    customerCode?:   string | null
+  }
+
+  /** SQLite sales satırı (fatura / listeler) */
+  interface SaleDbRow {
+    id:             string
+    receiptNo:      string
+    totalAmount:    number
+    discountRate:   number | null
+    discountAmount: number | null
+    netAmount:      number
+    paymentType:    string
+    cashAmount:     number | null
+    cardAmount:     number | null
+    createdAt:      string
+    synced:         boolean
+    customerId:     string | null
+    customerName:   string | null
+    customerCode:   string | null
+    invoiceSent:    number
+    invoiceId:      string | null
+    invoiceError:   string | null
+    invoiceAt:      string | null
+  }
+
+  interface SaleItemRow {
+    productCode:  string
+    productName:  string
+    quantity:     number
+    price:        number
+    vatRate:      number
+    unit:         string
+    discountRate?: number
   }
 
   interface SaleRecord {
@@ -191,6 +229,12 @@ declare global {
     taxNo:     string
     address:   string
     balance:   number
+    isPerson:  boolean
+    firstName: string
+    lastName:  string
+    postalCode: string
+    city:       string
+    district:   string
     syncedAt?: string
   }
 
@@ -227,5 +271,7 @@ declare global {
     pluMode:              PluMode
     loginWithCode:        boolean
     loginWithCard:        boolean
+    torbaCariId?:         string | null
+    torbaCariName?:       string | null
   }
 }

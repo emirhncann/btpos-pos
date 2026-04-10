@@ -46,6 +46,11 @@ electron.contextBridge.exposeInMainWorld("electron", {
     syncPluGroupsAcid: (groups, mode) => electron.ipcRenderer.invoke("db:syncPluGroupsAcid", groups, mode ?? "full"),
     syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full"),
     syncCustomersAcid: (items, companyId, mode) => electron.ipcRenderer.invoke("db:syncCustomersAcid", items, companyId, mode ?? "full"),
-    getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query)
+    getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query),
+    getCustomerById: (companyId, id) => electron.ipcRenderer.invoke("db:getCustomerById", companyId, id),
+    getPendingInvoices: () => electron.ipcRenderer.invoke("db:getPendingInvoices"),
+    markInvoiceSent: (saleId, invoiceId) => electron.ipcRenderer.invoke("db:markInvoiceSent", saleId, invoiceId),
+    markInvoiceError: (saleId, error) => electron.ipcRenderer.invoke("db:markInvoiceError", saleId, error),
+    getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId)
   }
 });

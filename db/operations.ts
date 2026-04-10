@@ -1,6 +1,6 @@
 import { getDB, getSqlite } from './index'
 import { products, sales, saleItems, cashiers, heldDocuments, pluGroupsCache, pluItemsCache, posSettingsCache, commandHistory } from './schema'
-import { eq, gte, lte, and, asc, desc } from 'drizzle-orm'
+import { eq, gte, lte, and, asc, desc, inArray } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 export interface ProductRow {
@@ -39,6 +39,7 @@ export interface SaleRow {
   cardAmount: number
   customerId?:   string | null
   customerName?: string | null
+  customerCode?: string | null
 }
 
 export function saveProducts(items: ProductRow[]): number {
@@ -95,6 +96,11 @@ export function saveSale(sale: SaleRow, items: SaleItem[]): string {
     synced: false,
     customerId:   sale.customerId   ?? null,
     customerName: sale.customerName ?? null,
+    customerCode: sale.customerCode ?? null,
+    invoiceSent:  0,
+    invoiceId:    null,
+    invoiceError: null,
+    invoiceAt:    null,
   }).run()
 
   for (const item of items) {
@@ -114,6 +120,87 @@ export function saveSale(sale: SaleRow, items: SaleItem[]): string {
   }
 
   return saleId
+}
+
+/** Bekleyen veya hatalı (yeniden denenecek) fatura kayıtları */
+export function getPendingInvoices(): (typeof sales.$inferSelect)[] {
+  const db = getDB()
+  return db.select().from(sales)
+    .where(inArray(sales.invoiceSent, [0, 2]))
+    .orderBy(asc(sales.createdAt))
+    .limit(50)
+    .all()
+}
+
+export function markInvoiceSent(saleId: string, invoiceId: string): void {
+  const db = getDB()
+  const at = new Date().toISOString()
+  db.update(sales)
+    .set({
+      invoiceSent:  1,
+      invoiceId,
+      invoiceAt:    at,
+      invoiceError: null,
+    })
+    .where(eq(sales.id, saleId))
+    .run()
+}
+
+export function markInvoiceError(saleId: string, error: string): void {
+  const db = getDB()
+  const at = new Date().toISOString()
+  db.update(sales)
+    .set({ invoiceSent: 2, invoiceError: error, invoiceAt: at })
+    .where(eq(sales.id, saleId))
+    .run()
+}
+
+/** ERP faturası için satır verisi (ürün kodu/birim products ile zenginleştirilir) */
+export interface SaleItemInvoiceRow {
+  productCode:   string
+  productName:   string
+  quantity:      number
+  price:         number
+  vatRate:       number
+  unit:          string
+  discountRate:  number
+}
+
+export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
+  const sqlite = getSqlite()
+  const rows = sqlite.prepare(`
+    SELECT
+      si.product_id   AS product_id,
+      si.product_name AS product_name,
+      si.quantity     AS quantity,
+      si.unit_price   AS unit_price,
+      si.vat_rate     AS vat_rate,
+      si.discount_rate AS discount_rate,
+      p.code          AS p_code,
+      p.unit          AS p_unit
+    FROM sale_items si
+    LEFT JOIN products p ON p.id = si.product_id
+    WHERE si.sale_id = ?
+  `).all(saleId) as Array<{
+    product_id:      string | null
+    product_name:    string
+    quantity:        number
+    unit_price:      number
+    vat_rate:        number | null
+    discount_rate:   number | null
+    p_code:          string | null
+    p_unit:          string | null
+  }>
+
+  return rows.map(r => ({
+    productCode:  r.p_code || r.product_id || '',
+    productName:  r.product_name,
+    quantity:     r.quantity,
+    price:        r.unit_price,
+    vatRate:      r.vat_rate ?? 0,
+    unit:         r.p_unit?.trim() ? r.p_unit : 'Adet',
+    discountRate: r.discount_rate ?? 0,
+  }))
 }
 
 export function getSales(dateFrom?: string, dateTo?: string) {
@@ -309,6 +396,8 @@ export interface PosSettingsRow {
   pluMode:              PluMode
   loginWithCode:        boolean
   loginWithCard:        boolean
+  torbaCariId?:         string | null
+  torbaCariName?:       string | null
 }
 
 export interface PosSettingsAcidRow extends PosSettingsRow {
@@ -447,6 +536,8 @@ export function savePosSettings(settings: PosSettingsRow): void {
     loginWithCode:        settings.loginWithCode ?? true,
     loginWithCard:        settings.loginWithCard ?? false,
     syncedAt:             now,
+    torbaCariId:          settings.torbaCariId   ?? null,
+    torbaCariName:        settings.torbaCariName ?? null,
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
     set: {
@@ -469,6 +560,8 @@ export function savePosSettings(settings: PosSettingsRow): void {
       loginWithCode:        settings.loginWithCode ?? true,
       loginWithCard:        settings.loginWithCard ?? false,
       syncedAt:             now,
+      torbaCariId:          settings.torbaCariId   ?? null,
+      torbaCariName:        settings.torbaCariName ?? null,
     },
   }).run()
 }
@@ -487,14 +580,16 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         allow_line_discount, allow_doc_discount,
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at
+        source, plu_mode, login_with_code, login_with_card, synced_at,
+        torba_cari_id, torba_cari_name
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
         @duplicateItemAction, @minQtyPerLine,
         @allowLineDiscount, @allowDocDiscount,
         @maxLineDiscountPct, @maxDocDiscountPct,
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
-        @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt
+        @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
+        @torbaCariId, @torbaCariName
       )
     `).run({
       id:                  rowId,
@@ -518,6 +613,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       loginWithCode:       settings.loginWithCode ? 1 : 0,
       loginWithCard:       settings.loginWithCard ? 1 : 0,
       syncedAt:            now,
+      torbaCariId:         settings.torbaCariId   ?? null,
+      torbaCariName:       settings.torbaCariName ?? null,
     })
 
     // 2. Doğrula
@@ -534,7 +631,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         allow_line_discount, allow_doc_discount,
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at
+        source, plu_mode, login_with_code, login_with_card, synced_at,
+        torba_cari_id, torba_cari_name
       )
       SELECT
         id, cashier_id, show_price, show_code, show_barcode,
@@ -542,7 +640,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         allow_line_discount, allow_doc_discount,
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at
+        source, plu_mode, login_with_code, login_with_card, synced_at,
+        torba_cari_id, torba_cari_name
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
 
@@ -601,6 +700,8 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     pluMode:              (row?.pluMode === 'cashier' ? 'cashier' : 'terminal') as PluMode,
     loginWithCode:        row?.loginWithCode        ?? true,
     loginWithCard:        row?.loginWithCard        ?? false,
+    torbaCariId:          row?.torbaCariId          ?? null,
+    torbaCariName:        row?.torbaCariName        ?? null,
   }
 }
 
@@ -928,10 +1029,18 @@ export interface CustomerRow {
   taxNo:     string
   address:   string
   balance:   number
+  isPerson:  boolean
+  firstName: string
+  lastName:  string
+  postalCode: string
+  city:       string
+  district:   string
   syncedAt?: string
 }
 
 function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
+  const ip = r.is_person
+  const isPerson = !(ip === 0 || ip === false || ip === '0')
   return {
     id:        String(r.id ?? ''),
     companyId: String(r.company_id ?? ''),
@@ -941,6 +1050,12 @@ function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
     taxNo:     String(r.tax_no ?? ''),
     address:   String(r.address ?? ''),
     balance:   Number(r.balance ?? 0),
+    isPerson,
+    firstName: String(r.first_name ?? ''),
+    lastName:  String(r.last_name ?? ''),
+    postalCode: String(r.postal_code ?? ''),
+    city:       String(r.city ?? ''),
+    district:   String(r.district ?? ''),
     syncedAt:  r.synced_at != null ? String(r.synced_at) : undefined,
   }
 }
@@ -964,8 +1079,10 @@ export function syncCustomersAcid(
     db.prepare('DELETE FROM customers_temp').run()
 
     const ins = db.prepare(`
-      INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance, synced_at)
-      VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance, @syncedAt)
+      INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance,
+        is_person, first_name, last_name, postal_code, city, district, synced_at)
+      VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance,
+        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @syncedAt)
     `)
 
     for (const c of items) {
@@ -978,6 +1095,12 @@ export function syncCustomersAcid(
         taxNo:     c.taxNo   ?? '',
         address:   c.address ?? '',
         balance:   c.balance ?? 0,
+        isPerson:  c.isPerson ? 1 : 0,
+        firstName: c.firstName ?? '',
+        lastName:  c.lastName  ?? '',
+        postalCode: c.postalCode ?? '',
+        city:       c.city       ?? '',
+        district:   c.district   ?? '',
         syncedAt:  now,
       })
       inserted++
@@ -1006,6 +1129,16 @@ export function syncCustomersAcid(
   } catch (e) {
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
   }
+}
+
+export function getCustomerById(companyId: string, id: string): CustomerRow | null {
+  if (!id.trim()) return null
+  const db = getSqlite()
+  const r = db.prepare(`
+    SELECT * FROM customers WHERE company_id = ? AND id = ?
+  `).get(companyId, id.trim()) as Record<string, unknown> | undefined
+  if (!r) return null
+  return mapCustomerRow(r)
 }
 
 export function getCustomers(companyId: string, query?: string): CustomerRow[] {

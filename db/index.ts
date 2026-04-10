@@ -56,7 +56,14 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       cash_amount REAL DEFAULT 0,
       card_amount REAL DEFAULT 0,
       created_at TEXT NOT NULL,
-      synced INTEGER DEFAULT 0
+      synced INTEGER DEFAULT 0,
+      customer_id TEXT,
+      customer_name TEXT,
+      customer_code TEXT,
+      invoice_sent INTEGER NOT NULL DEFAULT 0,
+      invoice_id TEXT,
+      invoice_error TEXT,
+      invoice_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -283,6 +290,11 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_code', 'login_with_code INTEGER DEFAULT 1')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_card', 'login_with_card INTEGER DEFAULT 0')
 
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_id', 'torba_cari_id TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_name', 'torba_cari_name TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_id', 'torba_cari_id TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_name', 'torba_cari_name TEXT')
+
   addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'applied_by', 'applied_by TEXT')
@@ -297,6 +309,12 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       tax_no      TEXT NOT NULL DEFAULT '',
       address     TEXT NOT NULL DEFAULT '',
       balance     REAL NOT NULL DEFAULT 0,
+      is_person   INTEGER NOT NULL DEFAULT 1,
+      first_name  TEXT NOT NULL DEFAULT '',
+      last_name   TEXT NOT NULL DEFAULT '',
+      postal_code TEXT NOT NULL DEFAULT '',
+      city        TEXT NOT NULL DEFAULT '',
+      district    TEXT NOT NULL DEFAULT '',
       synced_at   TEXT NOT NULL
     )
   `)
@@ -310,12 +328,37 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       tax_no      TEXT NOT NULL DEFAULT '',
       address     TEXT NOT NULL DEFAULT '',
       balance     REAL NOT NULL DEFAULT 0,
+      is_person   INTEGER NOT NULL DEFAULT 1,
+      first_name  TEXT NOT NULL DEFAULT '',
+      last_name   TEXT NOT NULL DEFAULT '',
+      postal_code TEXT NOT NULL DEFAULT '',
+      city        TEXT NOT NULL DEFAULT '',
+      district    TEXT NOT NULL DEFAULT '',
       synced_at   TEXT NOT NULL
     )
   `)
 
+  addColumnIfMissing(sqlite, 'customers',      'is_person',  'is_person  INTEGER NOT NULL DEFAULT 1')
+  addColumnIfMissing(sqlite, 'customers',      'first_name', 'first_name TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'last_name',  'last_name  TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'is_person',  'is_person  INTEGER NOT NULL DEFAULT 1')
+  addColumnIfMissing(sqlite, 'customers_temp', 'first_name', 'first_name TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'last_name',  'last_name  TEXT NOT NULL DEFAULT \'\'')
+
+  addColumnIfMissing(sqlite, 'customers',      'postal_code', 'postal_code TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'city',        'city        TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'district',    'district    TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'postal_code', 'postal_code TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'city',        'city        TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'district',    'district    TEXT NOT NULL DEFAULT \'\'')
+
   addColumnIfMissing(sqlite, 'sales', 'customer_id', 'customer_id TEXT')
   addColumnIfMissing(sqlite, 'sales', 'customer_name', 'customer_name TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'customer_code', 'customer_code TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_sent', 'invoice_sent INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_id', 'invoice_id TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_error', 'invoice_error TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
 
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
@@ -366,7 +409,9 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           plu_mode              TEXT DEFAULT 'terminal',
           login_with_code       INTEGER DEFAULT 1,
           login_with_card       INTEGER DEFAULT 0,
-          synced_at             TEXT
+          synced_at             TEXT,
+          torba_cari_id         TEXT,
+          torba_cari_name       TEXT
         );
 
         -- Veriyi açık kolon listesiyle geri yaz (kolon adı bazlı, sıra bağımsız)
@@ -376,7 +421,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           allow_line_discount, allow_doc_discount,
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-          source, plu_mode, login_with_code, login_with_card, synced_at
+          source, plu_mode, login_with_code, login_with_card, synced_at,
+          torba_cari_id, torba_cari_name
         )
         SELECT
           id, cashier_id, show_price, show_code, show_barcode,
@@ -384,7 +430,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           allow_line_discount, allow_doc_discount,
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-          source, plu_mode, login_with_code, login_with_card, synced_at
+          source, plu_mode, login_with_code, login_with_card, synced_at,
+          torba_cari_id, torba_cari_name
         FROM pos_settings_cache_backup;
 
         -- Yedek tabloyu sil

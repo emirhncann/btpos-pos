@@ -36,16 +36,27 @@ export const api = {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     const list = data?.data?.data ?? data?.data?.items ?? data?.items ?? data ?? []
-    return list.map((c: Record<string, unknown>) => ({
-      id:        String(c.id ?? ''),
-      companyId,
-      code:      String(c.code ?? c.Code ?? ''),
-      name:      String(c.name ?? c.Name ?? c.title ?? ''),
-      phone:     String(c.phone ?? c.Phone ?? c.gsm ?? ''),
-      taxNo:     String(c.taxNo ?? c.vkn ?? ''),
-      address:   String(c.address ?? c.Address ?? ''),
-      balance:   Number(c.balance ?? c.Balance ?? 0),
-    }))
+    return list.map((c: Record<string, unknown>) => {
+      const isPersonRaw = c.isPerson
+      const isPerson =
+        isPersonRaw === false || isPersonRaw === 0 || isPersonRaw === '0' ? false : true
+      return {
+        id:        String(c.id ?? ''),
+        companyId,
+        code:      String(c.code ?? c.Code ?? ''),
+        name:      String(c.name ?? c.Name ?? c.title ?? ''),
+        phone:     String(c.phone ?? c.Phone ?? c.gsm ?? ''),
+        taxNo:     String(c.taxNo ?? c.vkn ?? ''),
+        address:   String(c.address ?? c.Address ?? ''),
+        balance:   Number(c.balance ?? c.Balance ?? 0),
+        isPerson,
+        firstName: String(c.firstName ?? ''),
+        lastName:  String(c.lastName ?? ''),
+        postalCode: String(c.postalCode ?? c.postal_code ?? ''),
+        city:       String(c.city ?? ''),
+        district:   String(c.district ?? ''),
+      }
+    })
   },
 
   async getCashiers(companyId: string): Promise<CashierRow[]> {
@@ -132,7 +143,44 @@ export const api = {
       pluMode:             d.plu_mode === 'cashier' ? 'cashier' : 'terminal',
       loginWithCode:       Boolean(d.login_with_code      ?? true),
       loginWithCard:       Boolean(d.login_with_card      ?? false),
+      torbaCariId:         d.torba_cari_id != null && String(d.torba_cari_id).trim() !== ''
+        ? String(d.torba_cari_id)
+        : null,
+      torbaCariName:       d.torba_cari_name != null && String(d.torba_cari_name).trim() !== ''
+        ? String(d.torba_cari_name)
+        : null,
     }
+  },
+
+  async sendInvoiceToErp(
+    companyId: string,
+    payload: {
+      sale_id:      string
+      customer:     {
+        code?:      string
+        name:       string
+        firstName?: string
+        lastName?:  string
+        taxNo?:     string
+        address?:    string
+        phone?:      string
+        isPerson?:   boolean
+        postalCode?: string
+        city?:       string
+        district?:   string
+      }
+      items:        { product_code: string; name: string; quantity: number; price: number; vatRate: number; unit: string; discountRate?: number }[]
+      invoice_date: string
+      description?: string
+    },
+  ): Promise<{ success: boolean; invoice_id?: string; message?: string }> {
+    const res = await fetch(`${API_URL}/integration/invoice/${companyId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json()
   },
 }
 

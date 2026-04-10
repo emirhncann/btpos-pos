@@ -53,5 +53,13 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:syncCustomersAcid', items, companyId, mode ?? 'full'),
     getCustomers:       (companyId: string, query?: string) =>
       ipcRenderer.invoke('db:getCustomers', companyId, query),
+    getCustomerById:    (companyId: string, id: string) =>
+      ipcRenderer.invoke('db:getCustomerById', companyId, id),
+    getPendingInvoices: () => ipcRenderer.invoke('db:getPendingInvoices'),
+    markInvoiceSent:   (saleId: string, invoiceId: string) =>
+      ipcRenderer.invoke('db:markInvoiceSent', saleId, invoiceId),
+    markInvoiceError:  (saleId: string, error: string) =>
+      ipcRenderer.invoke('db:markInvoiceError', saleId, error),
+    getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
   },
 })

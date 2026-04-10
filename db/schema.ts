@@ -37,6 +37,11 @@ export const sales = sqliteTable('sales', {
   synced:         integer('synced', { mode: 'boolean' }).default(false),
   customerId:     text('customer_id'),
   customerName:   text('customer_name'),
+  customerCode:   text('customer_code'),
+  invoiceSent:    integer('invoice_sent').notNull().default(0),
+  invoiceId:      text('invoice_id'),
+  invoiceError:   text('invoice_error'),
+  invoiceAt:      text('invoice_at'),
 })
 
 export const saleItems = sqliteTable('sale_items', {
@@ -105,6 +110,12 @@ export const customers = sqliteTable('customers', {
   taxNo:     text('tax_no').notNull().default(''),
   address:   text('address').notNull().default(''),
   balance:   real('balance').notNull().default(0),
+  isPerson:  integer('is_person').notNull().default(1),
+  firstName: text('first_name').notNull().default(''),
+  lastName:  text('last_name').notNull().default(''),
+  postalCode: text('postal_code').notNull().default(''),
+  city:       text('city').notNull().default(''),
+  district:   text('district').notNull().default(''),
   syncedAt:  text('synced_at').notNull(),
 })
 
@@ -117,6 +128,12 @@ export const customersTemp = sqliteTable('customers_temp', {
   taxNo:     text('tax_no').notNull().default(''),
   address:   text('address').notNull().default(''),
   balance:   real('balance').notNull().default(0),
+  isPerson:  integer('is_person').notNull().default(1),
+  firstName: text('first_name').notNull().default(''),
+  lastName:  text('last_name').notNull().default(''),
+  postalCode: text('postal_code').notNull().default(''),
+  city:       text('city').notNull().default(''),
+  district:   text('district').notNull().default(''),
   syncedAt:  text('synced_at').notNull(),
 })
 
@@ -143,6 +160,8 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   loginWithCode:        integer('login_with_code', { mode: 'boolean' }).default(true),
   loginWithCard:        integer('login_with_card', { mode: 'boolean' }).default(false),
   syncedAt:             text('synced_at'),
+  torbaCariId:          text('torba_cari_id'),
+  torbaCariName:        text('torba_cari_name'),
 })
 
 // Kasanın aldığı komutların lokal geçmişi
@@ -223,4 +242,6 @@ export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   loginWithCode:        integer('login_with_code', { mode: 'boolean' }).default(true),
   loginWithCard:        integer('login_with_card', { mode: 'boolean' }).default(false),
   syncedAt:             text('synced_at'),
+  torbaCariId:          text('torba_cari_id'),
+  torbaCariName:        text('torba_cari_name'),
 })
