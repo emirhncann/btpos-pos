@@ -55,7 +55,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:getCustomers', companyId, query),
     getCustomerById:    (companyId: string, id: string) =>
       ipcRenderer.invoke('db:getCustomerById', companyId, id),
-    getPendingInvoices: () => ipcRenderer.invoke('db:getPendingInvoices'),
+    getPendingInvoices: (onlyAnonymous?: boolean) =>
+      ipcRenderer.invoke('db:getPendingInvoices', onlyAnonymous),
     markInvoiceSent:   (saleId: string, invoiceId: string) =>
       ipcRenderer.invoke('db:markInvoiceSent', saleId, invoiceId),
     markInvoiceError:  (saleId: string, error: string) =>

@@ -1,6 +1,6 @@
 import { getDB, getSqlite } from './index'
 import { products, sales, saleItems, cashiers, heldDocuments, pluGroupsCache, pluItemsCache, posSettingsCache, commandHistory } from './schema'
-import { eq, gte, lte, and, asc, desc, inArray } from 'drizzle-orm'
+import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 export interface ProductRow {
@@ -123,8 +123,18 @@ export function saveSale(sale: SaleRow, items: SaleItem[]): string {
 }
 
 /** Bekleyen veya hatalı (yeniden denenecek) fatura kayıtları */
-export function getPendingInvoices(): (typeof sales.$inferSelect)[] {
+export function getPendingInvoices(onlyAnonymous = false): (typeof sales.$inferSelect)[] {
   const db = getDB()
+  if (onlyAnonymous) {
+    return db.select().from(sales)
+      .where(and(
+        eq(sales.invoiceSent, 0),
+        or(isNull(sales.customerId), eq(sales.customerId, '')),
+      ))
+      .orderBy(asc(sales.createdAt))
+      .limit(200)
+      .all()
+  }
   return db.select().from(sales)
     .where(inArray(sales.invoiceSent, [0, 2]))
     .orderBy(asc(sales.createdAt))

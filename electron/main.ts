@@ -325,9 +325,9 @@ app.whenReady().then(async () => {
     return getCustomerById(companyId, id)
   })
 
-  ipcMain.handle('db:getPendingInvoices', async () => {
+  ipcMain.handle('db:getPendingInvoices', async (_e, onlyAnonymous = false) => {
     const { getPendingInvoices } = await import('../db/operations')
-    return getPendingInvoices()
+    return getPendingInvoices(onlyAnonymous)
   })
   ipcMain.handle('db:markInvoiceSent', async (_e, saleId: string, invoiceId: string) => {
     const { markInvoiceSent } = await import('../db/operations')

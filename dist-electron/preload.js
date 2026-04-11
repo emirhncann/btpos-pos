@@ -48,7 +48,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     syncCustomersAcid: (items, companyId, mode) => electron.ipcRenderer.invoke("db:syncCustomersAcid", items, companyId, mode ?? "full"),
     getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query),
     getCustomerById: (companyId, id) => electron.ipcRenderer.invoke("db:getCustomerById", companyId, id),
-    getPendingInvoices: () => electron.ipcRenderer.invoke("db:getPendingInvoices"),
+    getPendingInvoices: (onlyAnonymous) => electron.ipcRenderer.invoke("db:getPendingInvoices", onlyAnonymous),
     markInvoiceSent: (saleId, invoiceId) => electron.ipcRenderer.invoke("db:markInvoiceSent", saleId, invoiceId),
     markInvoiceError: (saleId, error) => electron.ipcRenderer.invoke("db:markInvoiceError", saleId, error),
     getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId)

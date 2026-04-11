@@ -64,7 +64,7 @@ declare global {
         syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
         getCustomerById:    (companyId: string, id: string) => Promise<CustomerRow | null>
-        getPendingInvoices: () => Promise<SaleDbRow[]>
+        getPendingInvoices: (onlyAnonymous?: boolean) => Promise<SaleDbRow[]>
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>

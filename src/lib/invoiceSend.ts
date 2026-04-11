@@ -19,118 +19,133 @@ function customerRowToInvoicePayload(c: CustomerRow) {
   }
 }
 
-/** Torba cari: ayarlardaki ID ile `customers` tablosundan kayıt; yoksa eski kod/isim fallback */
-async function resolveTorbaInvoiceCustomer(
-  companyId: string,
-  settings: PosSettingsRow,
-): Promise<ReturnType<typeof customerRowToInvoicePayload>> {
-  const torbaId = settings.torbaCariId?.trim()
-  if (!torbaId) {
-    return {
-      code:       undefined,
-      name:       'Genel Müşteri',
-      firstName:  undefined,
-      lastName:   undefined,
-      taxNo:      undefined,
-      address:    undefined,
-      phone:      undefined,
-      postalCode: undefined,
-      city:       undefined,
-      district:   undefined,
-      isPerson:   true,
-    }
-  }
-
-  const row = await window.electron.db.getCustomerById(companyId, torbaId)
-  if (row) return customerRowToInvoicePayload(row)
-
-  return {
-    code:       torbaId,
-    name:       settings.torbaCariName ?? 'Genel Müşteri',
-    firstName:  undefined,
-    lastName:   undefined,
-    taxNo:      undefined,
-    address:    undefined,
-    phone:      undefined,
-    postalCode: undefined,
-    city:       undefined,
-    district:   undefined,
-    isPerson:   true,
-  }
-}
-
-/** Z raporu / toplu: bekleyen veya hatalı faturaları ERP’ye gönderir */
+/** Gün sonu: carisiz bekleyen fişlerin tümünü tek ERP faturasında birleştirir */
 export async function sendPendingInvoices(
   companyId: string,
   opts?: SendPendingInvoicesOpts,
 ): Promise<{ ok: number; fail: number }> {
-  const pending = await window.electron.db.getPendingInvoices()
+  const pending = await window.electron.db.getPendingInvoices(true)
   if (pending.length === 0) return { ok: 0, fail: 0 }
 
   const settings = await window.electron.db.getPosSettings()
-  const torbaCustomer = await resolveTorbaInvoiceCustomer(companyId, settings)
+  let torbaCari: {
+    code?: string
+    name: string
+    taxNo?: string
+    address?: string
+    phone?: string
+    isPerson: boolean
+    firstName?: string
+    lastName?: string
+    postalCode?: string
+    city?: string
+    district?: string
+  }
 
-  let ok = 0
-  let fail = 0
-  for (const sale of pending) {
-    try {
-      const items = await window.electron.db.getSaleItems(sale.id)
-      let customer: ReturnType<typeof customerRowToInvoicePayload>
-      if (sale.customerId) {
-        const row = await window.electron.db.getCustomerById(companyId, sale.customerId)
-        customer = row
-          ? customerRowToInvoicePayload(row)
-          : {
-              code:       sale.customerCode ?? undefined,
-              name:       sale.customerName ?? '',
-              firstName:  undefined,
-              lastName:   undefined,
-              taxNo:      undefined,
-              address:    undefined,
-              phone:      undefined,
-              postalCode: undefined,
-              city:       undefined,
-              district:   undefined,
-              isPerson:   true,
-            }
-      } else {
-        customer = torbaCustomer
+  const torbaKey = settings.torbaCariId?.trim()
+  if (torbaKey) {
+    const allCustomers = await window.electron.db.getCustomers(companyId)
+    const found = allCustomers.find(c => c.code === torbaKey)
+    if (found) {
+      torbaCari = {
+        code:       found.code || undefined,
+        name:       found.name,
+        taxNo:      found.taxNo || undefined,
+        address:    found.address || undefined,
+        phone:      found.phone || undefined,
+        isPerson:   found.isPerson ?? true,
+        firstName:  found.firstName || undefined,
+        lastName:   found.lastName || undefined,
+        postalCode: found.postalCode || undefined,
+        city:       found.city || undefined,
+        district:   found.district || undefined,
       }
+    } else {
+      torbaCari = {
+        code:     torbaKey,
+        name:     settings.torbaCariName ?? 'Genel Müşteri',
+        isPerson: true,
+      }
+    }
+  } else {
+    torbaCari = { name: 'Genel Müşteri', isPerson: true }
+  }
 
-      const result = await api.sendInvoiceToErp(companyId, {
-        sale_id: sale.id,
-        customer,
-        items: items.map(i => ({
+  const groupMap = new Map<string, {
+    product_code: string
+    name:         string
+    quantity:     number
+    price:        number
+    vatRate:      number
+    unit:         string
+    discountRate: number
+  }>()
+
+  for (const sale of pending) {
+    const items = await window.electron.db.getSaleItems(sale.id)
+    for (const i of items) {
+      const key = `${i.productCode}|${i.price}`
+      const existing = groupMap.get(key)
+      if (existing) {
+        existing.quantity += i.quantity
+      } else {
+        groupMap.set(key, {
           product_code: i.productCode,
           name:         i.productName ?? i.productCode,
           quantity:     i.quantity,
           price:        i.price,
           vatRate:      i.vatRate ?? 0,
           unit:         i.unit ?? 'Adet',
-        })),
-        invoice_date: sale.createdAt.replace('T', ' ').slice(0, 19),
-        description: sale.customerId
-          ? `POS Satışı — ${sale.customerName ?? ''}`
-          : 'Z Raporu Toplu Satış',
-      })
-
-      if (result.success && result.invoice_id) {
-        await window.electron.db.markInvoiceSent(sale.id, result.invoice_id)
-        ok++
-      } else {
-        await window.electron.db.markInvoiceError(sale.id, result.message ?? 'Hata')
-        fail++
+          discountRate: i.discountRate ?? 0,
+        })
       }
-    } catch (e) {
-      await window.electron.db.markInvoiceError(sale.id, String(e))
-      fail++
     }
   }
 
-  if (!opts?.silent && (ok > 0 || fail > 0)) {
-    window.alert(`Fatura gönderimi: ${ok} başarılı, ${fail} hatalı`)
+  const allItems = Array.from(groupMap.values())
+  if (allItems.length === 0) return { ok: 0, fail: 0 }
+
+  const now = new Date()
+  const saatStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+  const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  const description = `Gün Sonu — ${tarihStr} ${saatStr} (${pending.length} fiş)`
+  const invoiceDate = now.toISOString().replace('T', ' ').slice(0, 19)
+
+  try {
+    const result = await api.sendInvoiceToErp(companyId, {
+      sale_id:      'gunsonu-' + now.toISOString().slice(0, 10),
+      customer:     torbaCari,
+      items:        allItems,
+      invoice_date: invoiceDate,
+      description,
+    })
+
+    if (result.success && result.invoice_id) {
+      for (const sale of pending) {
+        await window.electron.db.markInvoiceSent(sale.id, result.invoice_id)
+      }
+      if (!opts?.silent) {
+        window.alert(`✓ Gün sonu faturası gönderildi\n${pending.length} fiş → 1 fatura\nFatura No: ${result.invoice_id}`)
+      }
+      return { ok: pending.length, fail: 0 }
+    } else {
+      for (const sale of pending) {
+        await window.electron.db.markInvoiceError(sale.id, result.message ?? 'Gün sonu hatası')
+      }
+      if (!opts?.silent) {
+        window.alert(`✗ Gün sonu faturası gönderilemedi\n${result.message}`)
+      }
+      return { ok: 0, fail: pending.length }
+    }
+  } catch (e) {
+    for (const sale of pending) {
+      await window.electron.db.markInvoiceError(sale.id, String(e))
+    }
+    if (!opts?.silent) {
+      window.alert(`✗ Bağlantı hatası: ${String(e)}`)
+    }
+    return { ok: 0, fail: pending.length }
   }
-  return { ok, fail }
 }
 
 /** Cari seçili satış sonrası anında fatura */
