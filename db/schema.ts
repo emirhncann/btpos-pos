@@ -219,6 +219,21 @@ export const cashiersTemp = sqliteTable('cashiers_temp', {
   syncedAt:    text('synced_at'),
 })
 
+/** Buluta gidecek işlemler kuyruğu */
+export const operationQueue = sqliteTable('operation_queue', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  type:        text('type').notNull(),
+  payload:     text('payload').notNull(),
+  status:      text('status').notNull().default('pending'),
+  attempts:    integer('attempts').default(0),
+  maxAttempts: integer('max_attempts').default(3),
+  error:       text('error'),
+  createdAt:   text('created_at').notNull(),
+  sentAt:      text('sent_at'),
+  label:       text('label'),
+})
+
 // POS ayarları temp — ACID sync için
 export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   id:                   text('id').primaryKey(),

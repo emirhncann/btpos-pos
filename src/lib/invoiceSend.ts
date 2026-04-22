@@ -19,7 +19,7 @@ function customerRowToInvoicePayload(c: CustomerRow) {
   }
 }
 
-/** Gün sonu: carisiz bekleyen fişlerin tümünü tek ERP faturasında birleştirir */
+/** Gün sonu: carisiz bekleyen fişler tek ERP faturasında birleştirilir; gönderim kuyruğa yazılır */
 export async function sendPendingInvoices(
   companyId: string,
   opts?: SendPendingInvoicesOpts,
@@ -110,74 +110,76 @@ export async function sendPendingInvoices(
   const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const description = `Gün Sonu — ${tarihStr} ${saatStr} (${pending.length} fiş)`
   const invoiceDate = now.toISOString().replace('T', ' ').slice(0, 19)
+  const daySaleId = 'gunsonu-' + now.toISOString().slice(0, 10)
 
-  try {
-    const result = await api.sendInvoiceToErp(companyId, {
-      sale_id:      'gunsonu-' + now.toISOString().slice(0, 10),
-      customer:     torbaCari,
-      items:        allItems,
-      invoice_date: invoiceDate,
-      description,
-    })
-
-    if (result.success && result.invoice_id) {
-      for (const sale of pending) {
-        await window.electron.db.markInvoiceSent(sale.id, result.invoice_id)
-      }
-      if (!opts?.silent) {
-        window.alert(`✓ Gün sonu faturası gönderildi\n${pending.length} fiş → 1 fatura\nFatura No: ${result.invoice_id}`)
-      }
-      return { ok: pending.length, fail: 0 }
-    } else {
-      for (const sale of pending) {
-        await window.electron.db.markInvoiceError(sale.id, result.message ?? 'Gün sonu hatası')
-      }
-      if (!opts?.silent) {
-        window.alert(`✗ Gün sonu faturası gönderilemedi\n${result.message}`)
-      }
-      return { ok: 0, fail: pending.length }
-    }
-  } catch (e) {
-    for (const sale of pending) {
-      await window.electron.db.markInvoiceError(sale.id, String(e))
-    }
-    if (!opts?.silent) {
-      window.alert(`✗ Bağlantı hatası: ${String(e)}`)
-    }
-    return { ok: 0, fail: pending.length }
+  const payload = {
+    sale_id:           daySaleId,
+    day_end_sale_ids:  pending.map(s => s.id),
+    customer:          torbaCari,
+    items:             allItems,
+    invoice_date:      invoiceDate,
+    description,
   }
+
+  await window.electron.db.enqueueOperation({
+    id:        crypto.randomUUID(),
+    companyId,
+    type:      'day_end_invoice',
+    payload,
+    label:     `Gün Sonu ${tarihStr}`,
+  })
+
+  if (!opts?.silent) {
+    window.alert(
+      `✓ Gün sonu kuyruğa eklendi\n${pending.length} fiş işlenecek\nİnternet bağlantısında otomatik gönderilecek.`,
+    )
+  }
+
+  return { ok: pending.length, fail: 0 }
 }
 
-/** Cari seçili satış sonrası anında fatura */
+/** Cari seçili satış sonrası fatura — kuyruğa yazılır */
 export async function sendInvoiceForSale(
   companyId: string,
   saleId: string,
   customer: CustomerRow,
 ): Promise<void> {
-  try {
-    const items = await window.electron.db.getSaleItems(saleId)
-    const result = await api.sendInvoiceToErp(companyId, {
-      sale_id: saleId,
-      customer: customerRowToInvoicePayload(customer),
-      items: items.map(i => ({
-        product_code: i.productCode,
-        name:         i.productName ?? i.productCode,
-        quantity:     i.quantity,
-        price:        i.price,
-        vatRate:      i.vatRate ?? 0,
-        unit:         i.unit ?? 'Adet',
-        discountRate: i.discountRate ?? 0,
-      })),
-      invoice_date: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      description:  `POS Satışı — ${customer.name}`,
-    })
-
-    if (result.success && result.invoice_id) {
-      await window.electron.db.markInvoiceSent(saleId, result.invoice_id)
-    } else {
-      await window.electron.db.markInvoiceError(saleId, result.message ?? 'Bilinmeyen hata')
-    }
-  } catch (e) {
-    await window.electron.db.markInvoiceError(saleId, String(e))
+  const items = await window.electron.db.getSaleItems(saleId)
+  const payload = {
+    sale_id:      saleId,
+    customer:     customerRowToInvoicePayload(customer),
+    items:        items.map(i => ({
+      product_code: i.productCode,
+      name:         i.productName ?? i.productCode,
+      quantity:     i.quantity,
+      price:        i.price,
+      vatRate:      i.vatRate ?? 0,
+      unit:         i.unit ?? 'Adet',
+      discountRate: i.discountRate ?? 0,
+    })),
+    invoice_date: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    description:  `POS Satışı — ${customer.name}`,
   }
+
+  await window.electron.db.enqueueOperation({
+    id:        crypto.randomUUID(),
+    companyId,
+    type:      'invoice',
+    payload,
+    label:     `${customer.name} faturası`,
+  })
+}
+
+export async function enqueueCustomer(
+  companyId: string,
+  customerData: Record<string, unknown>,
+  label: string,
+): Promise<void> {
+  await window.electron.db.enqueueOperation({
+    id:        crypto.randomUUID(),
+    companyId,
+    type:      'customer',
+    payload:   customerData,
+    label:     `${label} cari kaydı`,
+  })
 }

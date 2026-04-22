@@ -441,6 +441,22 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   } catch (e) {
     console.warn('[migration] pos_settings_cache yeniden oluşturma hatası:', e)
   }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS operation_queue (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      type         TEXT NOT NULL,
+      payload      TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      attempts     INTEGER DEFAULT 0,
+      max_attempts INTEGER DEFAULT 3,
+      error        TEXT,
+      created_at   TEXT NOT NULL,
+      sent_at      TEXT,
+      label        TEXT
+    )
+  `)
 }
 
 export function getDB() {

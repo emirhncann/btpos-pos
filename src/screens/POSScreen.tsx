@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { sendInvoiceForSale } from '../lib/invoiceSend'
+import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
+import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -33,7 +34,11 @@ interface Props {
   onMessageClose?: () => void
   merkezToast?:    string | null
   onCartChange?:   (hasItems: boolean) => void
-  cartSettings:  CartSettings
+  cartSettings:    CartSettings
+  commandListenerActive?: boolean
+  commandSyncing?: boolean
+  commandRecentlyReceived?: boolean
+  commandDeferred?: boolean
 }
 
 const fmt = (n: number) =>
@@ -69,6 +74,10 @@ export default function POSScreen({
   merkezToast = null,
   onCartChange,
   cartSettings,
+  commandListenerActive = false,
+  commandSyncing = false,
+  commandRecentlyReceived = false,
+  commandDeferred = false,
 }: Props) {
 
   /* ── State ── */
@@ -96,6 +105,8 @@ export default function POSScreen({
   const [showCustomer, setShowCustomer]   = useState(false)
   const [customers, setCustomers]         = useState<CustomerRow[]>([])
   const [customerQ, setCustomerQ]         = useState('')
+  const [addCustomerModal, setAddCustomerModal] = useState(false)
+  const [newCustPrefill, setNewCustPrefill] = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -107,6 +118,21 @@ export default function POSScreen({
   }, [customerQ, showCustomer, companyId])
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
+  const isOnline  = conn === 'online'
+  const [queueToasts, setQueueToasts] = useState<(QueueToastPayload & { shownAt: number })[]>([])
+
+  const handleQueueToast = useCallback((toast: QueueToastPayload) => {
+    setQueueToasts(prev => [...prev, { ...toast, shownAt: Date.now() }])
+    setTimeout(() => {
+      setQueueToasts(prev => prev.filter(t => t.id !== toast.id))
+    }, 4000)
+  }, [])
+
+  useQueueWorker({
+    companyId,
+    isOnline,
+    onToast: handleQueueToast,
+  })
 
   /* ── İlk grup seç ── */
   useEffect(() => {
@@ -190,7 +216,7 @@ export default function POSScreen({
     const t = setTimeout(() => {
       const byBarcode = allProducts.find(p => p.barcode === searchQ)
       if (!byBarcode) return
-      const qty = numBuf ? Math.max(1, parseInt(numBuf, 10)) : 1
+      const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
       setNumBuf('')
       setSearchQ('')
 
@@ -254,7 +280,7 @@ export default function POSScreen({
   }
 
   function handlePluClick(product: ProductRow) {
-    const qty = numBuf ? Math.max(1, parseInt(numBuf)) : 1
+    const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
     setNumBuf('')
     addToCartWithQty(product, qty)
     searchRef.current?.focus()
@@ -314,7 +340,21 @@ export default function POSScreen({
   function handleNumKey(k: string) {
     if (k === 'C')  { setNumBuf(''); return }
     if (k === '⌫') { setNumBuf(p => p.slice(0, -1)); return }
-    if (numBuf.length < 4) setNumBuf(p => p + k)
+
+    if (k === ',') {
+      if (numBuf.includes(',')) return
+      setNumBuf(p => (p === '' ? '0,' : p + ','))
+      return
+    }
+
+    if (numBuf.includes(',')) {
+      const dec = numBuf.split(',')[1] ?? ''
+      if (dec.length >= 2) return
+    }
+
+    if (numBuf.replace(',', '').length < 6) {
+      setNumBuf(p => p + k)
+    }
   }
 
   /* ── Menü işlemleri ── */
@@ -373,6 +413,13 @@ export default function POSScreen({
     : 0
   const cashAmount = parseFloat(cashInput) || 0
   const change     = cashAmount - grandTotal
+  const commandIconAnimation = commandSyncing
+    ? 'merkezMailPulse 0.9s ease-in-out infinite, merkezMailShake 1.4s ease-in-out infinite'
+    : commandDeferred
+      ? 'merkezMailWaitPulse 1s ease-in-out infinite, merkezMailShake 2s ease-in-out infinite'
+      : commandRecentlyReceived
+      ? 'merkezMailPulse 1.2s ease-in-out infinite'
+      : 'merkezMailIdle 2.6s ease-in-out infinite'
 
   async function completeSale() {
     if (!cart.length) return
@@ -425,6 +472,28 @@ export default function POSScreen({
   /* ────────── RENDER ────────── */
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e5e7eb', overflow: 'hidden' }}>
+      <style>{`
+        @keyframes merkezMailPulse {
+          0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(37,99,235,0.35); }
+          70%  { transform: scale(1.08); box-shadow: 0 0 0 9px rgba(37,99,235,0); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37,99,235,0); }
+        }
+        @keyframes merkezMailShake {
+          0%, 100% { transform: rotate(0deg); }
+          25%      { transform: rotate(-8deg); }
+          50%      { transform: rotate(8deg); }
+          75%      { transform: rotate(-5deg); }
+        }
+        @keyframes merkezMailIdle {
+          0%, 100% { transform: translateY(0); }
+          50%      { transform: translateY(-2px); }
+        }
+        @keyframes merkezMailWaitPulse {
+          0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45); }
+          70%  { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+      `}</style>
 
       {/* Lisans banner */}
       {license?.warning && <LicenseBanner daysLeft={license.daysLeft} planName={license.planName} />}
@@ -500,6 +569,66 @@ export default function POSScreen({
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <ConnectionDot status={conn} />
+          {commandListenerActive && (
+            <span
+              title={
+                commandSyncing
+                  ? 'Merkez komutu işleniyor'
+                  : (commandDeferred
+                    ? 'Satış aktif: merkez komutu sırada bekliyor'
+                    : (commandRecentlyReceived
+                      ? 'Merkezden yeni komut alındı'
+                      : 'Merkez komutları dinleniyor'))
+              }
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 22,
+                height: 22,
+                borderRadius: '50%',
+                fontSize: 12,
+                border: commandSyncing
+                  ? '1px solid #93C5FD'
+                  : commandDeferred
+                    ? '1px solid #FCD34D'
+                  : commandRecentlyReceived
+                    ? '1px solid #BFDBFE'
+                    : '1px solid #4B5563',
+                background: commandSyncing
+                  ? '#1D4ED8'
+                  : commandDeferred
+                    ? '#B45309'
+                  : commandRecentlyReceived
+                    ? '#2563EB'
+                    : '#111827',
+                color: '#fff',
+                boxShadow: commandSyncing
+                  ? '0 0 0 4px rgba(37, 99, 235, 0.22)'
+                  : commandDeferred
+                    ? '0 0 0 4px rgba(245, 158, 11, 0.18)'
+                  : 'none',
+                animation: commandIconAnimation,
+                position: 'relative',
+              }}
+            >
+              ✉️
+              {commandDeferred && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    right: -1,
+                    top: -1,
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: '#F59E0B',
+                    border: '1px solid #fff',
+                  }}
+                />
+              )}
+            </span>
+          )}
           <span style={{
             background: cancelMode ? 'rgba(255,255,255,0.12)' : '#1f2937',
             border: cancelMode ? '1px solid rgba(255,255,255,0.22)' : '1px solid #374151',
@@ -662,12 +791,108 @@ export default function POSScreen({
                     )}
                   </div>
                 ))}
-              {customers.length === 0 && (
+              {customers.length === 0 && customerQ.trim().length >= 2 && (
+                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                  <div style={{ fontSize: 13, color: '#9E9E9E', marginBottom: 12 }}>
+                    "{customerQ}" bulunamadı
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewCustPrefill(customerQ)
+                      setAddCustomerModal(true)
+                      setShowCustomer(false)
+                    }}
+                    style={{
+                      background: '#1565C0', color: 'white', border: 'none',
+                      borderRadius: 8, padding: '8px 18px', fontSize: 13,
+                      fontWeight: 600, cursor: 'pointer',
+                    }}
+                  >
+                    + Yeni Müşteri Ekle
+                  </button>
+                </div>
+              )}
+              {customers.length === 0 && customerQ.trim().length < 2 && (
                 <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '32px 0', fontSize: 13 }}>
                   Müşteriler yükleniyor...
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {addCustomerModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 14, width: '100%', maxWidth: 480,
+            maxHeight: '90vh', overflowY: 'auto', padding: 24,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Yeni Müşteri Ekle</span>
+              <button onClick={() => setAddCustomerModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9E9E9E' }}>✕</button>
+            </div>
+            <AddCustomerForm
+              prefillTaxNo={newCustPrefill}
+              onClose={() => setAddCustomerModal(false)}
+              onSuccess={async (customer) => {
+                const newId = crypto.randomUUID()
+                const parts = customer.name.trim().split(/\s+/).filter(Boolean)
+                const firstName = parts[0] ?? ''
+                const lastName = parts.slice(1).join(' ')
+                await window.electron.db.upsertCustomer({
+                  id:         newId,
+                  companyId,
+                  code:       '',
+                  name:       customer.name,
+                  phone:      customer.phone ?? '',
+                  taxNo:      customer.taxNo ?? '',
+                  address:    customer.address ?? '',
+                  balance:    0,
+                  isPerson:   customer.isPerson ?? true,
+                  firstName,
+                  lastName,
+                  postalCode: '',
+                  city:       customer.city ?? '',
+                  district:   customer.district ?? '',
+                  syncedAt:   new Date().toISOString(),
+                })
+                await enqueueCustomer(companyId, {
+                  firmType:   1,
+                  isPerson:   customer.isPerson ?? true,
+                  name:       customer.name,
+                  taxNo:      customer.taxNo ?? '',
+                  taxOffice:  customer.taxOffice ?? '',
+                  phone:      customer.phone ?? '',
+                  email:      customer.email ?? '',
+                  address:    customer.address ?? '',
+                  city:       customer.city ?? '',
+                  district:   customer.district ?? '',
+                  postalCode: customer.postalCode ?? '',
+                }, customer.name)
+                setSelectedCustomer({
+                  id:         newId,
+                  companyId,
+                  code:       '',
+                  name:       customer.name,
+                  phone:      customer.phone ?? '',
+                  taxNo:      customer.taxNo ?? '',
+                  address:    customer.address ?? '',
+                  balance:    0,
+                  isPerson:   customer.isPerson ?? true,
+                  firstName,
+                  lastName,
+                  postalCode: '',
+                  city:       customer.city ?? '',
+                  district:   customer.district ?? '',
+                })
+                setAddCustomerModal(false)
+              }}
+            />
           </div>
         </div>
       )}
@@ -1017,6 +1242,7 @@ export default function POSScreen({
             <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 9, overflow: 'hidden', flexShrink: 0 }}>
               {[
                 { label: '👤 Müşteri Seç',      action: loadCustomers,                               danger: false, disabled: false },
+                { label: '👤+ Müşteri Ekle',    action: () => { setNewCustPrefill(''); setAddCustomerModal(true); closeMenu() }, danger: false, disabled: false },
                 { label: '⏸ Belgeyi Beklet',    action: holdDoc,                                     danger: false, disabled: cart.length === 0 },
                 { label: `▶ Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`,
                   action: () => { setShowHeld(true); closeMenu() },  danger: false, disabled: false },
@@ -1026,7 +1252,7 @@ export default function POSScreen({
               ].map((item, i) => (
                 <div key={i}
                   onClick={item.disabled ? undefined : item.action}
-                  style={{ padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 8, cursor: item.disabled ? 'default' : 'pointer', fontSize: 11, fontWeight: 'active' in item && item.active ? 600 : 500, borderBottom: i < 3 ? '1px solid #f5f5f5' : 'none', color: 'active' in item && item.active ? '#dc2626' : item.danger ? '#dc2626' : '#374151', background: 'active' in item && item.active ? '#fff5f5' : 'white', opacity: item.disabled ? 0.4 : 1, transition: 'background 0.1s' }}
+                  style={{ padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 8, cursor: item.disabled ? 'default' : 'pointer', fontSize: 11, fontWeight: 'active' in item && item.active ? 600 : 500, borderBottom: i < 4 ? '1px solid #f5f5f5' : 'none', color: 'active' in item && item.active ? '#dc2626' : item.danger ? '#dc2626' : '#374151', background: 'active' in item && item.active ? '#fff5f5' : 'white', opacity: item.disabled ? 0.4 : 1, transition: 'background 0.1s' }}
                   onMouseEnter={e => { if (!item.disabled) (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#fff5f5' : '#f3f4f6' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'active' in item && item.active ? '#fff5f5' : 'white' }}
                 >
@@ -1044,31 +1270,50 @@ export default function POSScreen({
           {/* Miktar göstergesi (adet seçili) — tek gösterge */}
           <div style={{ borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`, background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0 }}>
             <span style={{ fontSize: 'clamp(22px, 1.8vw + 12px, 34px)', fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706', display: 'block', lineHeight: 1 }}>{numBuf || '—'}</span>
-            <span style={{ fontSize: 12, color: '#6b7280', marginTop: 4, display: 'block', fontWeight: 500 }}>adet seçili</span>
+            <span style={{ fontSize: 12, color: '#6b7280', marginTop: 4, display: 'block', fontWeight: 500 }}>
+              {numBuf.includes(',') ? 'miktar' : 'adet'} seçili
+            </span>
           </div>
 
           {/* Numpad — büyük dokunma alanı (yaşlı kullanıcı dostu, min ~52px) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, flexShrink: 0 }}>
-            {['7','8','9','4','5','6','1','2','3','C','0','⌫'].map(k => (
-              <button key={k} onClick={() => handleNumKey(k)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, flexShrink: 0, width: '100%' }}>
+            {[
+              { key: '7' }, { key: '8' }, { key: '9' },
+              { key: '4' }, { key: '5' }, { key: '6' },
+              { key: '1' }, { key: '2' }, { key: '3' },
+              { key: ',' }, { key: '0' }, { key: '⌫' },
+              { key: 'C', span: 3 },
+            ].map(({ key, span }) => (
+              <button
+                key={key}
                 type="button"
+                onMouseDown={e => {
+                  e.preventDefault()
+                  handleNumKey(key)
+                }}
                 style={{
+                  width: '100%',
+                  minWidth: 0,
+                  boxSizing: 'border-box',
                   minHeight: 52,
                   height: 'clamp(52px, 5.5vw, 84px)',
                   border: '2px solid',
                   borderRadius: 10,
                   cursor: 'pointer',
-                  fontSize: 'clamp(22px, 1.7vw + 12px, 36px)',
                   fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   userSelect: 'none' as const,
-                  background: k === 'C' ? '#fff5f5' : k === '⌫' ? '#fffbeb' : 'white',
-                  color:      k === 'C' ? '#dc2626' : k === '⌫' ? '#d97706' : '#1f2937',
-                  borderColor: k === 'C' ? '#fecdd3' : k === '⌫' ? '#fde68a' : '#d1d5db',
+                  background: key === 'C' ? '#fff5f5' : key === '⌫' ? '#fffbeb' : 'white',
+                  color:      key === 'C' ? '#dc2626' : key === '⌫' ? '#d97706' : '#1f2937',
+                  borderColor: key === 'C' ? '#fecdd3' : key === '⌫' ? '#fde68a' : '#d1d5db',
+                  gridColumn: span ? `span ${span}` : undefined,
+                  fontSize: key === 'C' ? 'clamp(14px, 1vw + 8px, 20px)' : 'clamp(22px, 1.7vw + 12px, 36px)',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
                 }}
-              >{k}</button>
+              >{key === 'C' ? 'Tümünü Sil' : key}</button>
             ))}
           </div>
         </div>
@@ -1272,6 +1517,318 @@ export default function POSScreen({
           {merkezToast}
         </div>
       )}
+
+      <div style={{
+        position: 'fixed', top: 16, right: 16, zIndex: 9999,
+        display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 320,
+        pointerEvents: 'none',
+      }}>
+        {queueToasts.map(t => (
+          <div
+            key={`${t.id}-${t.shownAt}`}
+            style={{
+              pointerEvents: 'auto',
+              background: t.status === 'success' ? '#E8F5E9' : '#FFEBEE',
+              border: `1px solid ${t.status === 'success' ? '#A5D6A7' : '#FFCDD2'}`,
+              borderRadius: 10, padding: '10px 14px',
+              fontSize: 13, fontWeight: 500,
+              color: t.status === 'success' ? '#2E7D32' : '#C62828',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            }}
+          >
+            <div>{t.status === 'success' ? '✓' : '✗'} {t.label ?? t.type}</div>
+            {t.error && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>{t.error}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const CITY_OPTIONS = [
+  'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Amasya', 'Ankara', 'Antalya', 'Artvin',
+  'Aydın', 'Balıkesir', 'Bilecik', 'Bingöl', 'Bitlis', 'Bolu', 'Burdur', 'Bursa', 'Çanakkale',
+  'Çankırı', 'Çorum', 'Denizli', 'Diyarbakır', 'Düzce', 'Edirne', 'Elazığ', 'Erzincan',
+  'Erzurum', 'Eskişehir', 'Gaziantep', 'Giresun', 'Gümüşhane', 'Hakkari', 'Hatay', 'Isparta',
+  'İstanbul', 'İzmir', 'Kahramanmaraş', 'Karabük', 'Karaman', 'Kars', 'Kastamonu', 'Kayseri',
+  'Kilis', 'Kırıkkale', 'Kırklareli', 'Kırşehir', 'Kocaeli', 'Konya', 'Kütahya', 'Malatya',
+  'Manisa', 'Mardin', 'Mersin', 'Muğla', 'Muş', 'Nevşehir', 'Niğde', 'Ordu', 'Osmaniye',
+  'Rize', 'Sakarya', 'Samsun', 'Siirt', 'Sinop', 'Sivas', 'Şanlıurfa', 'Şırnak', 'Tekirdağ',
+  'Tokat', 'Trabzon', 'Tunceli', 'Uşak', 'Van', 'Yalova', 'Yozgat', 'Zonguldak',
+]
+
+interface AddCustomerFormProps {
+  prefillTaxNo?: string
+  onClose: () => void
+  onSuccess: (customer: {
+    name: string
+    phone?: string
+    taxNo?: string
+    taxOffice?: string
+    email?: string
+    address?: string
+    city?: string
+    district?: string
+    postalCode?: string
+    isPerson?: boolean
+  }) => Promise<void>
+}
+
+/** firmType: 1 (Müşteri & Tedarikçi), code API'ye gönderilmez */
+function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormProps) {
+  const [isPerson, setIsPerson] = useState(true)
+  const [name, setName] = useState('')
+  const [taxNo, setTaxNo] = useState(prefillTaxNo ?? '')
+  const [taxOffice, setTaxOffice] = useState('')
+  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [address, setAddress] = useState('')
+  const [city, setCity] = useState('')
+  const [citySearch, setCitySearch] = useState('')
+  const [showCityDD, setShowCityDD] = useState(false)
+  const [district, setDistrict] = useState('')
+  const [postalCode, setPostalCode] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setTaxNo(prefillTaxNo ?? '')
+  }, [prefillTaxNo])
+
+  const filteredCities = CITY_OPTIONS.filter(c =>
+    c.toLowerCase().includes(citySearch.toLowerCase()),
+  )
+
+  async function handleSave() {
+    if (!name.trim()) {
+      setError('Ad Soyad / Firma Adı zorunludur.')
+      return
+    }
+    if (!taxNo.trim()) {
+      setError('TC / VKN zorunludur.')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await onSuccess({
+        name: name.trim(),
+        phone: phone.trim(),
+        taxNo: taxNo.trim(),
+        taxOffice: taxOffice.trim(),
+        email: email.trim(),
+        address: address.trim(),
+        city,
+        district: district.trim(),
+        postalCode: postalCode.trim(),
+        isPerson,
+      })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const s: CSSProperties = {
+    width: '100%',
+    border: '1px solid #E0E0E0',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 13,
+    outline: 'none',
+    boxSizing: 'border-box',
+  }
+
+  const lbl = (txt: string, req?: boolean) => (
+    <label style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 4 }}>
+      {txt}{req && <span style={{ color: '#EF4444' }}> *</span>}
+    </label>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+
+      <div style={{ marginBottom: 14 }}>
+        {lbl('Kişi Tipi')}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[{ v: true, l: 'Bireysel' }, { v: false, l: 'Kurumsal' }].map(({ v, l }) => (
+            <button
+              key={l}
+              type="button"
+              onClick={() => setIsPerson(v)}
+              style={{
+                flex: 1, padding: '8px', borderRadius: 8, border: '1px solid',
+                background: isPerson === v ? '#EFF6FF' : 'white',
+                borderColor: isPerson === v ? '#3B82F6' : '#E0E0E0',
+                color: isPerson === v ? '#1D4ED8' : '#6B7280',
+                fontWeight: isPerson === v ? 600 : 400, fontSize: 13, cursor: 'pointer',
+              }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 12px' }}>
+
+        <div style={{ gridColumn: 'span 2' }}>
+          {lbl(isPerson ? 'Ad Soyad' : 'Firma Adı', true)}
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={s}
+            placeholder={isPerson ? 'Ahmet Yılmaz' : 'ACME Ltd. Şti.'}
+          />
+        </div>
+
+        <div>
+          {lbl(isPerson ? 'TC Kimlik No' : 'VKN', true)}
+          <input
+            value={taxNo}
+            onChange={e => setTaxNo(e.target.value)}
+            style={s}
+            placeholder={isPerson ? '11111111111' : '1234567890'}
+          />
+        </div>
+
+        <div>
+          {lbl('Vergi Dairesi')}
+          <input value={taxOffice} onChange={e => setTaxOffice(e.target.value)} style={s} placeholder="Bolu" />
+        </div>
+
+        <div>
+          {lbl('Telefon')}
+          <input value={phone} onChange={e => setPhone(e.target.value)} style={s} placeholder="0555 000 0000" />
+        </div>
+
+        <div>
+          {lbl('E-posta')}
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={s} placeholder="ornek@mail.com" />
+        </div>
+
+        <div style={{ gridColumn: 'span 2' }}>
+          {lbl('Adres')}
+          <input
+            value={address}
+            onChange={e => setAddress(e.target.value)}
+            style={s}
+            placeholder="Sokak, No, Mahalle"
+          />
+        </div>
+
+        <div style={{ position: 'relative' }}>
+          {lbl('Şehir')}
+          <input
+            value={city || citySearch}
+            onChange={e => {
+              setCitySearch(e.target.value)
+              setCity('')
+              setShowCityDD(true)
+            }}
+            onFocus={() => setShowCityDD(true)}
+            onBlur={() => setTimeout(() => setShowCityDD(false), 150)}
+            style={s}
+            placeholder="Bolu"
+          />
+          {showCityDD && filteredCities.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              zIndex: 9999,
+              background: 'white',
+              border: '1px solid #E0E0E0',
+              borderRadius: 8,
+              maxHeight: 160,
+              overflowY: 'auto',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            }}
+            >
+              {filteredCities.map(c => (
+                <div
+                  key={c}
+                  onMouseDown={() => {
+                    setCity(c)
+                    setCitySearch(c)
+                    setShowCityDD(false)
+                  }}
+                  style={{ padding: '7px 12px', fontSize: 13, cursor: 'pointer' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}
+                >
+                  {c}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          {lbl('İlçe')}
+          <input value={district} onChange={e => setDistrict(e.target.value)} style={s} placeholder="Merkez" />
+        </div>
+
+        <div>
+          {lbl('Posta Kodu')}
+          <input value={postalCode} onChange={e => setPostalCode(e.target.value)} style={s} placeholder="14100" />
+        </div>
+
+      </div>
+
+      {error && (
+        <div style={{
+          background: '#FEF2F2',
+          border: '1px solid #FECACA',
+          borderRadius: 8,
+          padding: '8px 12px',
+          fontSize: 12,
+          color: '#B91C1C',
+          marginTop: 12,
+        }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            flex: 1,
+            padding: '11px',
+            borderRadius: 8,
+            border: '1px solid #E0E0E0',
+            background: 'white',
+            cursor: 'pointer',
+            fontSize: 13,
+            color: '#6B7280',
+          }}
+        >
+          İptal
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSave()}
+          disabled={saving}
+          style={{
+            flex: 2,
+            padding: '11px',
+            borderRadius: 8,
+            border: 'none',
+            background: saving ? '#93C5FD' : '#1565C0',
+            color: 'white',
+            cursor: saving ? 'wait' : 'pointer',
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          {saving ? 'Kaydediliyor...' : 'Cari Ekle'}
+        </button>
+      </div>
     </div>
   )
 }

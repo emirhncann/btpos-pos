@@ -341,6 +341,57 @@ app.whenReady().then(async () => {
     const { getSaleItems } = await import('../db/operations')
     return getSaleItems(saleId)
   })
+
+  ipcMain.handle('db:upsertCustomer', async (_e, row: unknown) => {
+    const { upsertCustomer } = await import('../db/operations')
+    upsertCustomer(row as import('../db/operations').CustomerRow)
+  })
+
+  ipcMain.handle('db:enqueueOperation', async (_e, params: {
+    id: string
+    companyId: string
+    type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+    payload: Record<string, unknown>
+    label?: string
+  }) => {
+    const { enqueueOperation } = await import('../db/operations')
+    enqueueOperation(params)
+  })
+
+  ipcMain.handle('db:getPendingOperations', async (_e, companyId: string) => {
+    const { getPendingOperations } = await import('../db/operations')
+    return getPendingOperations(companyId)
+  })
+
+  ipcMain.handle('db:getAllOperations', async (_e, companyId: string, limit?: number) => {
+    const { getAllOperations } = await import('../db/operations')
+    return getAllOperations(companyId, limit ?? 100)
+  })
+
+  ipcMain.handle('db:markOperationProcessing', async (_e, id: string) => {
+    const { markOperationProcessing } = await import('../db/operations')
+    markOperationProcessing(id)
+  })
+
+  ipcMain.handle('db:markOperationSuccess', async (_e, id: string) => {
+    const { markOperationSuccess } = await import('../db/operations')
+    markOperationSuccess(id)
+  })
+
+  ipcMain.handle('db:markOperationFailed', async (_e, id: string, error: string) => {
+    const { markOperationFailed } = await import('../db/operations')
+    markOperationFailed(id, error)
+  })
+
+  ipcMain.handle('db:retryOperation', async (_e, id: string) => {
+    const { retryOperation } = await import('../db/operations')
+    retryOperation(id)
+  })
+
+  ipcMain.handle('db:deleteOperation', async (_e, id: string) => {
+    const { deleteOperation } = await import('../db/operations')
+    deleteOperation(id)
+  })
 })
 
 app.on('window-all-closed', () => {

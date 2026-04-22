@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
 import { sendPendingInvoices } from '../lib/invoiceSend'
+import { DocumentQueueScreen } from './DocumentQueueScreen'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -72,6 +73,7 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [showQueue, setShowQueue] = useState(false)
   const [invoiceSending, setInvoiceSending] = useState(false)
 
   const refreshCmdHistory = useCallback(() => {
@@ -210,6 +212,18 @@ export default function DashboardScreen({
           </button>
           <button
             type="button"
+            onClick={() => setShowQueue(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
+              background: '#E3F2FD', border: '1px solid #90CAF9',
+              fontSize: 13, fontWeight: 500, color: '#1565C0',
+            }}
+          >
+            📤 Belge Aktarım
+          </button>
+          <button
+            type="button"
             onClick={onStartSale}
             style={{ background: '#1565C0', color: 'white', border: 'none', borderRadius: 16, cursor: 'pointer', width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22, fontWeight: 600 }}
           >
@@ -277,6 +291,37 @@ export default function DashboardScreen({
           </div>
         </div>
       </div>
+
+      {showQueue && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+          overflow: 'auto',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 14, width: '100%', maxWidth: 840,
+            maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', borderBottom: '1px solid #F0F0F0', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Belge Aktarım</span>
+              <button
+                type="button"
+                onClick={() => setShowQueue(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9E9E9E' }}
+              >✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <DocumentQueueScreen companyId={companyId} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSettings && (
         <div style={{

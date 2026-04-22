@@ -35,6 +35,8 @@ const SYNC_KINDS = new Set([
 interface UseCommandPollerOptions {
   /** Komut geçmişi SQLite'a yazıldıktan sonra (feed yenileme vb.) */
   onCommandPersisted?: () => void
+  /** Satış aktifken komut ertelendiğinde çağrılır */
+  onCommandDeferred?: (command: string) => void
   /** Sepette ürün varken sync komutlarını işleme (ack yok, sonraki poll'da tekrar dener) */
   isCartActive?: () => boolean
 }
@@ -51,6 +53,8 @@ export function useCommandPoller(
   handlersRef.current = handlers
   const onPersistedRef = useRef(options?.onCommandPersisted)
   onPersistedRef.current = options?.onCommandPersisted
+  const onDeferredRef = useRef(options?.onCommandDeferred)
+  onDeferredRef.current = options?.onCommandDeferred
   const isCartActiveRef = useRef(options?.isCartActive)
   isCartActiveRef.current = options?.isCartActive
 
@@ -76,6 +80,7 @@ export function useCommandPoller(
 
         if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
           console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
+          onDeferredRef.current?.(kind)
           continue
         }
 

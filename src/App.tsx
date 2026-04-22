@@ -76,6 +76,8 @@ export default function App() {
   const [merkezToast, setMerkezToast]   = useState<string | null>(null)
   const [commandSyncing, setCommandSyncing] = useState(false)
   const [cmdPollTick, setCmdPollTick]   = useState(0)
+  const [showCommandIndicator, setShowCommandIndicator] = useState(false)
+  const [hasDeferredCommand, setHasDeferredCommand] = useState(false)
   const [cartActive, setCartActive]     = useState(false)
   const [cartSettings, setCartSettings] = useState<CartSettings>(DEFAULT_CART_SETTINGS)
   const [showSplash, setShowSplash]     = useState(true)
@@ -99,6 +101,7 @@ export default function App() {
     setTerminalLockReason(null)
     setMerkezToast(null)
     setCommandSyncing(false)
+    setHasDeferredCommand(false)
     // posSettings'i kasa default'una sıfırla — stale pluMode bir sonraki kasiyeri etkilemesin
     window.electron.db.getPosSettings().then(s => {
       setPosSettings(s)
@@ -138,7 +141,11 @@ export default function App() {
     (state === 'dashboard' || state === 'pos') && terminalId && companyId ? terminalId : null
 
   useCommandPoller(pollTerminalId, merkezHandlers, {
-    onCommandPersisted: () => setCmdPollTick(t => t + 1),
+    onCommandPersisted: () => {
+      setCmdPollTick(t => t + 1)
+      setHasDeferredCommand(false)
+    },
+    onCommandDeferred: () => setHasDeferredCommand(true),
     isCartActive: () => cartActive,
   })
 
@@ -157,6 +164,17 @@ export default function App() {
     const timer = setTimeout(() => setShowSplash(false), 3500)
     return () => clearTimeout(timer)
   }, [])
+
+  useEffect(() => {
+    if (cmdPollTick <= 0) return
+    setShowCommandIndicator(true)
+    const timer = setTimeout(() => setShowCommandIndicator(false), 5000)
+    return () => clearTimeout(timer)
+  }, [cmdPollTick])
+
+  useEffect(() => {
+    if (!pollTerminalId) setHasDeferredCommand(false)
+  }, [pollTerminalId])
 
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
@@ -293,6 +311,8 @@ export default function App() {
     )
   }
 
+  const commandListenerActive = Boolean(pollTerminalId)
+
   if (state === 'dashboard')
     return (
       <DashboardScreen
@@ -332,6 +352,10 @@ export default function App() {
       merkezToast={merkezToast}
       onCartChange={setCartActive}
       cartSettings={cartSettings}
+      commandListenerActive={commandListenerActive}
+      commandSyncing={commandSyncing}
+      commandRecentlyReceived={showCommandIndicator}
+      commandDeferred={hasDeferredCommand}
     />
   )
 }

@@ -1169,3 +1169,150 @@ export function getCustomers(companyId: string, query?: string): CustomerRow[] {
   `).all(companyId) as Record<string, unknown>[]
   return rows.map(mapCustomerRow)
 }
+
+export type OperationQueueType = 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+
+export interface OperationQueueRow {
+  id:          string
+  companyId:   string
+  type:        OperationQueueType
+  payload:     string
+  status:      'pending' | 'processing' | 'success' | 'failed'
+  attempts:    number
+  maxAttempts: number
+  error:       string | null
+  createdAt:   string
+  sentAt:      string | null
+  label:       string | null
+}
+
+function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
+  const st = String(r.status ?? 'pending')
+  const status: OperationQueueRow['status'] =
+    st === 'processing' || st === 'success' || st === 'failed' ? st : 'pending'
+  const tp = String(r.type ?? '')
+  const type = (['invoice', 'return_invoice', 'customer', 'day_end_invoice'].includes(tp)
+    ? tp
+    : 'invoice') as OperationQueueType
+  return {
+    id:          String(r.id ?? ''),
+    companyId:   String(r.company_id ?? ''),
+    type,
+    payload:     String(r.payload ?? '{}'),
+    status,
+    attempts:    Number(r.attempts ?? 0),
+    maxAttempts: Number(r.max_attempts ?? 3),
+    error:       r.error != null ? String(r.error) : null,
+    createdAt:   String(r.created_at ?? ''),
+    sentAt:      r.sent_at != null ? String(r.sent_at) : null,
+    label:       r.label != null ? String(r.label) : null,
+  }
+}
+
+export function upsertCustomer(row: CustomerRow): void {
+  const db = getSqlite()
+  const synced = row.syncedAt ?? new Date().toISOString()
+  db.prepare(`
+    INSERT INTO customers (id, company_id, code, name, phone, tax_no, address, balance,
+      is_person, first_name, last_name, postal_code, city, district, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name=excluded.name, phone=excluded.phone, tax_no=excluded.tax_no,
+      address=excluded.address, city=excluded.city, district=excluded.district,
+      synced_at=excluded.synced_at
+  `).run(
+    row.id,
+    row.companyId,
+    row.code,
+    row.name,
+    row.phone,
+    row.taxNo,
+    row.address,
+    row.balance,
+    row.isPerson ? 1 : 0,
+    row.firstName,
+    row.lastName,
+    row.postalCode,
+    row.city,
+    row.district,
+    synced,
+  )
+}
+
+export function enqueueOperation(params: {
+  id:        string
+  companyId: string
+  type:      OperationQueueType
+  payload:   Record<string, unknown>
+  label?:    string
+}): void {
+  const db = getSqlite()
+  db.prepare(`
+    INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
+    VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)
+  `).run(
+    params.id,
+    params.companyId,
+    params.type,
+    JSON.stringify(params.payload),
+    new Date().toISOString(),
+    params.label ?? null,
+  )
+}
+
+export function getPendingOperations(companyId: string): OperationQueueRow[] {
+  const db = getSqlite()
+  const rows = db.prepare(`
+    SELECT * FROM operation_queue
+    WHERE company_id = ? AND status = 'pending' AND attempts < max_attempts
+    ORDER BY created_at ASC
+  `).all(companyId) as Record<string, unknown>[]
+  return rows.map(mapOperationQueueRow)
+}
+
+export function getAllOperations(companyId: string, limit = 100): OperationQueueRow[] {
+  const db = getSqlite()
+  const rows = db.prepare(`
+    SELECT * FROM operation_queue
+    WHERE company_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(companyId, limit) as Record<string, unknown>[]
+  return rows.map(mapOperationQueueRow)
+}
+
+export function markOperationProcessing(id: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue SET status = 'processing', attempts = attempts + 1 WHERE id = ?
+  `).run(id)
+}
+
+export function markOperationSuccess(id: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue SET status = 'success', sent_at = ?, error = NULL WHERE id = ?
+  `).run(new Date().toISOString(), id)
+}
+
+export function markOperationFailed(id: string, error: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue
+    SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,
+        error = ?
+    WHERE id = ?
+  `).run(error, id)
+}
+
+export function retryOperation(id: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue SET status = 'pending', attempts = 0, error = NULL WHERE id = ?
+  `).run(id)
+}
+
+export function deleteOperation(id: string): void {
+  const db = getSqlite()
+  db.prepare(`DELETE FROM operation_queue WHERE id = ?`).run(id)
+}

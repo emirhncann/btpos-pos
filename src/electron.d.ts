@@ -68,8 +68,37 @@ declare global {
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
+        upsertCustomer:    (row: CustomerRow) => Promise<void>
+        enqueueOperation:  (params: {
+          id: string
+          companyId: string
+          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+          payload: Record<string, unknown>
+          label?: string
+        }) => Promise<void>
+        getPendingOperations: (companyId: string) => Promise<OperationQueueRow[]>
+        getAllOperations:  (companyId: string, limit?: number) => Promise<OperationQueueRow[]>
+        markOperationProcessing: (id: string) => Promise<void>
+        markOperationSuccess: (id: string) => Promise<void>
+        markOperationFailed: (id: string, error: string) => Promise<void>
+        retryOperation:    (id: string) => Promise<void>
+        deleteOperation:   (id: string) => Promise<void>
       }
     }
+  }
+
+  interface OperationQueueRow {
+    id:          string
+    companyId:   string
+    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+    payload:     string
+    status:      'pending' | 'processing' | 'success' | 'failed'
+    attempts:    number
+    maxAttempts: number
+    error:       string | null
+    createdAt:   string
+    sentAt:      string | null
+    label:       string | null
   }
 
   interface CommandHistoryRow {
@@ -230,6 +259,8 @@ declare global {
     address:   string
     balance:   number
     isPerson:  boolean
+    /** true = tedarikçi, false/undefined = müşteri */
+    isSupplier?: boolean
     firstName: string
     lastName:  string
     postalCode: string

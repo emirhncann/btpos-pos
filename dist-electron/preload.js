@@ -51,6 +51,15 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getPendingInvoices: (onlyAnonymous) => electron.ipcRenderer.invoke("db:getPendingInvoices", onlyAnonymous),
     markInvoiceSent: (saleId, invoiceId) => electron.ipcRenderer.invoke("db:markInvoiceSent", saleId, invoiceId),
     markInvoiceError: (saleId, error) => electron.ipcRenderer.invoke("db:markInvoiceError", saleId, error),
-    getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId)
+    getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId),
+    upsertCustomer: (row) => electron.ipcRenderer.invoke("db:upsertCustomer", row),
+    enqueueOperation: (params) => electron.ipcRenderer.invoke("db:enqueueOperation", params),
+    getPendingOperations: (companyId) => electron.ipcRenderer.invoke("db:getPendingOperations", companyId),
+    getAllOperations: (companyId, limit) => electron.ipcRenderer.invoke("db:getAllOperations", companyId, limit),
+    markOperationProcessing: (id) => electron.ipcRenderer.invoke("db:markOperationProcessing", id),
+    markOperationSuccess: (id) => electron.ipcRenderer.invoke("db:markOperationSuccess", id),
+    markOperationFailed: (id, error) => electron.ipcRenderer.invoke("db:markOperationFailed", id, error),
+    retryOperation: (id) => electron.ipcRenderer.invoke("db:retryOperation", id),
+    deleteOperation: (id) => electron.ipcRenderer.invoke("db:deleteOperation", id)
   }
 });

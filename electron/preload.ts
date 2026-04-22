@@ -62,5 +62,19 @@ contextBridge.exposeInMainWorld('electron', {
     markInvoiceError:  (saleId: string, error: string) =>
       ipcRenderer.invoke('db:markInvoiceError', saleId, error),
     getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
+    upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),
+    enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
+    getPendingOperations: (companyId: string) =>
+      ipcRenderer.invoke('db:getPendingOperations', companyId),
+    getAllOperations:  (companyId: string, limit?: number) =>
+      ipcRenderer.invoke('db:getAllOperations', companyId, limit),
+    markOperationProcessing: (id: string) =>
+      ipcRenderer.invoke('db:markOperationProcessing', id),
+    markOperationSuccess: (id: string) =>
+      ipcRenderer.invoke('db:markOperationSuccess', id),
+    markOperationFailed: (id: string, error: string) =>
+      ipcRenderer.invoke('db:markOperationFailed', id, error),
+    retryOperation:    (id: string) => ipcRenderer.invoke('db:retryOperation', id),
+    deleteOperation:   (id: string) => ipcRenderer.invoke('db:deleteOperation', id),
   },
 })
