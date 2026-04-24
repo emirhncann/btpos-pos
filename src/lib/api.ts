@@ -149,7 +149,26 @@ export const api = {
       torbaCariName:       d.torba_cari_name != null && String(d.torba_cari_name).trim() !== ''
         ? String(d.torba_cari_name)
         : null,
+      invoiceType:         d.invoice_type === 'paper' ? 'paper' : 'e_archive',
     }
+  },
+
+  async getPaymentDeviceSettings(companyId: string, terminalId: string) {
+    const res = await fetch(`${API_URL}/payment-devices/${companyId}/${terminalId}`)
+    if (!res.ok) return []
+    return res.json() as Promise<Array<{
+      id: string
+      company_id: string
+      terminal_id: string
+      provider: 'pavo' | 'ingenico' | 'pax'
+      ip_address: string | null
+      port: number | null
+      serial_no: string | null
+      card_read_timeout: number | null
+      print_width: '58mm' | '80mm' | null
+      invoice_type?: 'e_archive' | 'paper' | null
+      is_active: boolean | null
+    }>>
   },
 
   async sendInvoiceToErp(
@@ -172,9 +191,13 @@ export const api = {
       items:        { product_code: string; name: string; quantity: number; price: number; vatRate: number; unit: string; discountRate?: number }[]
       invoice_date: string
       description?: string
+      endpoint?: string
     },
   ): Promise<{ success: boolean; invoice_id?: string; message?: string }> {
-    const res = await fetch(`${API_URL}/integration/invoice/${companyId}`, {
+    const endpoint = payload.endpoint && payload.endpoint.trim().length > 0
+      ? payload.endpoint
+      : `/integration/invoice/${companyId}`
+    const res = await fetch(`${API_URL}${endpoint}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

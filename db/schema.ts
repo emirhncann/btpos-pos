@@ -42,6 +42,8 @@ export const sales = sqliteTable('sales', {
   invoiceId:      text('invoice_id'),
   invoiceError:   text('invoice_error'),
   invoiceAt:      text('invoice_at'),
+  paymentProvider:   text('payment_provider'),
+  paymentDeviceData: text('payment_device_data'),
 })
 
 export const saleItems = sqliteTable('sale_items', {
@@ -162,6 +164,7 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   syncedAt:             text('synced_at'),
   torbaCariId:          text('torba_cari_id'),
   torbaCariName:        text('torba_cari_name'),
+  invoiceType:          text('invoice_type').default('e_archive'),
 })
 
 // Kasanın aldığı komutların lokal geçmişi
@@ -234,6 +237,35 @@ export const operationQueue = sqliteTable('operation_queue', {
   label:       text('label'),
 })
 
+// Odeme terminali ayarlari (Supabase'den sync edilir)
+export const paymentDeviceSettings = sqliteTable('payment_device_settings', {
+  id:              text('id').primaryKey(),
+  companyId:       text('company_id').notNull(),
+  terminalId:      text('terminal_id').notNull(),
+  provider:        text('provider').notNull().default('pavo'),
+  ipAddress:       text('ip_address'),
+  port:            integer('port').default(9100),
+  serialNo:        text('serial_no'),
+  cardReadTimeout: integer('card_read_timeout').default(30),
+  printWidth:      text('print_width').default('80mm'),
+  invoiceType:     text('invoice_type').default('e_archive'),
+  isActive:        integer('is_active', { mode: 'boolean' }).default(true),
+  syncedAt:        text('synced_at'),
+})
+
+export const unitMappings = sqliteTable('unit_mappings', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  unitName:  text('unit_name').notNull(),
+  pavoCode:  text('pavo_code').notNull().default('C62'),
+})
+
+// Pavo islem sirasi
+export const pavoSequence = sqliteTable('pavo_sequence', {
+  id:  integer('id').primaryKey(),
+  seq: integer('seq').notNull().default(0),
+})
+
 // POS ayarları temp — ACID sync için
 export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   id:                   text('id').primaryKey(),
@@ -259,4 +291,5 @@ export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   syncedAt:             text('synced_at'),
   torbaCariId:          text('torba_cari_id'),
   torbaCariName:        text('torba_cari_name'),
+  invoiceType:          text('invoice_type').default('e_archive'),
 })

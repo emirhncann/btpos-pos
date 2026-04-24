@@ -1,4 +1,5 @@
-import { api, fetchPluGroupsFromServer } from '../lib/api'
+import { API_URL, api, fetchPluGroupsFromServer } from '../lib/api'
+import { pavoPair } from '../lib/pavoService'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
 async function getWorkplaceId(): Promise<string | null> {
@@ -18,6 +19,7 @@ export const noopCommandHandlers: CommandHandlers = {
   onSyncCustomers:  async () => {},
   onSyncProducts:   async () => {},
   onSyncSettings:   async () => {},
+  onPairPavo:       async () => {},
   onLogout:         () => {},
   onMessage:        () => {},
   onRestart:        () => {},
@@ -137,6 +139,42 @@ async function syncSettings(
     onSettingsUpdated(cashierSettings)
   } else {
     onSettingsUpdated(terminalSettings)
+  }
+
+  const paymentDevices = await api.getPaymentDeviceSettings(companyId, terminalId)
+  if (paymentDevices && paymentDevices.length > 0) {
+    for (const device of paymentDevices) {
+      await window.electron.db.upsertPaymentDeviceSettings({
+        id:              device.id,
+        companyId:       device.company_id,
+        terminalId:      device.terminal_id,
+        provider:        device.provider,
+        ipAddress:       device.ip_address ?? null,
+        port:            device.port ?? 9100,
+        serialNo:        device.serial_no ?? null,
+        cardReadTimeout: device.card_read_timeout ?? 30,
+        printWidth:      device.print_width ?? '80mm',
+        invoiceType:     device.invoice_type === 'paper' ? 'paper' : 'e_archive',
+        isActive:        device.is_active ?? true,
+        syncedAt:        new Date().toISOString(),
+      })
+    }
+  }
+
+  try {
+    const unitMappings = await fetch(
+      `${API_URL}/unit-mappings/${companyId}`,
+    ).then(r => r.json()) as Array<{ unit_name: string; pavo_code: string }>
+
+    for (const m of unitMappings) {
+      await window.electron.db.upsertUnitMapping({
+        companyId,
+        unitName: m.unit_name,
+        pavoCode: m.pavo_code,
+      })
+    }
+  } catch (e) {
+    console.warn('[sync_settings] unit mapping hatası:', e)
   }
 
   return { success: true, inserted: 1, updated: 0, deleted: 0 }
@@ -303,6 +341,35 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       )
       if (!result.success) throw new Error(result.error)
       d.showToast('Ayarlar güncellendi')
+    },
+
+    onPairPavo: async (payload) => {
+      const p = (payload ?? {}) as {
+        ip?: string
+        port?: number
+        serial_no?: string
+      }
+      if (!p.ip) {
+        console.warn('[pair_pavo] IP adresi eksik')
+        return
+      }
+
+      const settings = {
+        ipAddress: p.ip,
+        port: p.port ?? 9100,
+        serialNo: p.serial_no ?? '',
+        cardReadTimeout: 30,
+        printWidth: '80mm' as const,
+      }
+      const seq = await window.electron.db.nextPavoSequence()
+      const result = await pavoPair(settings, seq)
+      if (result.success) {
+        console.log('[pair_pavo] Eşleştirme başarılı')
+        d.showToast('Pavo eşleştirme başarılı')
+      } else {
+        console.error('[pair_pavo] Eşleştirme başarısız:', result.message)
+        d.showToast(`Pavo eşleştirme hatası: ${result.message ?? 'Bilinmeyen hata'}`)
+      }
     },
   }
 }

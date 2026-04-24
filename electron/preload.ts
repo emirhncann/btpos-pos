@@ -26,7 +26,8 @@ contextBridge.exposeInMainWorld('electron', {
   db: {
     saveProducts:       (products: unknown[])                => ipcRenderer.invoke('db:saveProducts', products),
     getProducts:        ()                                   => ipcRenderer.invoke('db:getProducts'),
-    saveSale:           (sale: unknown, items: unknown[])    => ipcRenderer.invoke('db:saveSale', sale, items),
+    saveSale:           (sale: unknown, items: unknown[], device?: unknown) =>
+      ipcRenderer.invoke('db:saveSale', sale, items, device),
     getSales:           (dateFrom?: string, dateTo?: string) => ipcRenderer.invoke('db:getSales', dateFrom, dateTo),
     saveCashiers:       (cashiers: unknown[])                => ipcRenderer.invoke('db:saveCashiers', cashiers),
     verifyCashier:      (code: string, password: string)     => ipcRenderer.invoke('db:verifyCashier', code, password),
@@ -62,6 +63,8 @@ contextBridge.exposeInMainWorld('electron', {
     markInvoiceError:  (saleId: string, error: string) =>
       ipcRenderer.invoke('db:markInvoiceError', saleId, error),
     getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
+    getProductByCode:  (code: string) => ipcRenderer.invoke('db:getProductByCode', code),
+    getProductIdByCode: (code: string) => ipcRenderer.invoke('db:getProductIdByCode', code),
     upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),
     enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
     getPendingOperations: (companyId: string) =>
@@ -76,5 +79,14 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:markOperationFailed', id, error),
     retryOperation:    (id: string) => ipcRenderer.invoke('db:retryOperation', id),
     deleteOperation:   (id: string) => ipcRenderer.invoke('db:deleteOperation', id),
+    getPaymentDeviceSettings: (provider?: string) =>
+      ipcRenderer.invoke('db:getPaymentDeviceSettings', provider),
+    upsertPaymentDeviceSettings: (row: unknown) =>
+      ipcRenderer.invoke('db:upsertPaymentDeviceSettings', row),
+    nextPavoSequence: () => ipcRenderer.invoke('db:nextPavoSequence'),
+    getUnitPavoCode: (unitName: string) => ipcRenderer.invoke('db:getUnitPavoCode', unitName),
+    upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) =>
+      ipcRenderer.invoke('db:upsertUnitMapping', row),
+    getAllUnitMappings: (companyId: string) => ipcRenderer.invoke('db:getAllUnitMappings', companyId),
   },
 })

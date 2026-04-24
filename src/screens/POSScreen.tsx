@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
+import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
+import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
@@ -108,6 +110,10 @@ export default function POSScreen({
   const [addCustomerModal, setAddCustomerModal] = useState(false)
   const [newCustPrefill, setNewCustPrefill] = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
+  const [invoiceType, setInvoiceType] = useState<'e_archive' | 'paper'>('e_archive')
+  const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
+  const [pavoLoading, setPavoLoading] = useState(false)
+  const [pavoError, setPavoError] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -149,6 +155,30 @@ export default function POSScreen({
 
   useEffect(() => { loadHeld() }, [loadHeld])
   useEffect(() => { searchRef.current?.focus() }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const device = await window.electron.db.getPaymentDeviceSettings('pavo')
+        if (device?.ipAddress && device.isActive) {
+          setPavoSettings({
+            ipAddress:       device.ipAddress,
+            port:            device.port,
+            serialNo:        device.serialNo ?? '',
+            cardReadTimeout: device.cardReadTimeout,
+            printWidth:      device.printWidth,
+          })
+          setInvoiceType(device.invoiceType ?? 'e_archive')
+        } else {
+          setPavoSettings(null)
+          setInvoiceType('e_archive')
+        }
+      } catch {
+        setPavoSettings(null)
+        setInvoiceType('e_archive')
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     onCartChange?.(cart.length > 0)
@@ -424,7 +454,56 @@ export default function POSScreen({
   async function completeSale() {
     if (!cart.length) return
     setSaving(true)
+    setPavoError(null)
+    let deviceResult: PaymentDeviceResult | undefined
+
     try {
+    const cashAmt = paymentType === 'card'
+      ? 0
+      : (paymentType === 'cash' ? grandTotal : cashAmount)
+    const cardAmt = paymentType === 'cash'
+      ? 0
+      : (paymentType === 'card' ? grandTotal : (grandTotal - cashAmount))
+
+    if (pavoSettings) {
+      if (cardAmt > 0) setPavoLoading(true)
+
+      try {
+        const seq = await window.electron.db.nextPavoSequence()
+        const orderNo = nextReceiptNo().padStart(17, '0')
+        const pavoItems = cart.map(c => ({
+          name: c.name,
+          unitName: c.unit ?? 'Adet',
+          vatRate: c.vatRate,
+          quantity: c.quantity,
+          unitPrice: c.price,
+          grossPrice: c.netTotal,
+          totalPrice: c.netTotal,
+        }))
+
+        deviceResult = await pavoCompleteSale(
+          pavoSettings,
+          seq,
+          orderNo,
+          grandTotal,
+          pavoItems,
+          cashAmt,
+          cardAmt,
+          selectedCustomer,
+        )
+
+        if (!deviceResult.success) {
+          alert(`Ödeme başarısız: ${deviceResult.message ?? 'Pavo hatası'}`)
+          return
+        }
+      } catch (e) {
+        alert(`Pavo bağlantı hatası: ${String(e)}`)
+        return
+      } finally {
+        setPavoLoading(false)
+      }
+    }
+
       const receiptNo = nextReceiptNo()
       const saleRow: SaleRow = {
         receiptNo,
@@ -433,14 +512,15 @@ export default function POSScreen({
         discountAmount: docDiscountCalc,
         netAmount: grandTotal,
         paymentType,
-        cashAmount: paymentType === 'card'  ? 0 : (paymentType === 'cash' ? cashAmount || grandTotal : cashAmount),
-        cardAmount: paymentType === 'cash'  ? 0 : (paymentType === 'card' ? grandTotal : grandTotal - cashAmount),
+        cashAmount: cashAmt,
+        cardAmount: cardAmt,
         customerId:   selectedCustomer?.id   ?? null,
         customerName: selectedCustomer?.name ?? null,
         customerCode: selectedCustomer?.code ?? null,
       }
       const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
         productId: c.id,
+        productCode: c.code,
         productName: c.name,
         quantity: c.quantity,
         unitPrice: c.price,
@@ -449,13 +529,14 @@ export default function POSScreen({
         discountAmount: c.discountAmount,
         lineTotal: c.netTotal,
         appliedBy: cashier.id,
-      })))
-      const cust = selectedCustomer
-      if (cust && saleId && companyId) {
-        void sendInvoiceForSale(companyId, saleId, cust)
+      })), deviceResult)
+      if (selectedCustomer && saleId && companyId) {
+        void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType)
       }
       setLastReceipt(receiptNo)
       setSelectedCustomer(null)
+      setPaymentMode(false)
+      setCashInput('')
       clearCart()
       searchRef.current?.focus()
     } catch (e) {
@@ -1428,13 +1509,14 @@ export default function POSScreen({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
                 {[
                   { key: 'cash',  label: 'Nakit', bg: '#e8f5e9', color: '#2e7d32' },
-                  { key: 'card',  label: 'Kart',  bg: '#e3f2fd', color: '#1565C0' },
+                  { key: 'card',  label: 'Kart',  bg: '#e3f2fd', color: '#1565C0', disabled: !pavoSettings },
                   { key: 'mixed', label: 'Karma Ödeme', bg: '#fff8e1', color: '#e65100', span: true },
                 ].map(btn => (
                   <button key={btn.key}
-                    onClick={() => { setPaymentType(btn.key as 'cash' | 'card' | 'mixed'); if (btn.key === 'card') completeSale(); else setPaymentMode(true) }}
-                    disabled={cart.length === 0}
-                    style={{ background: cart.length === 0 ? '#f5f5f5' : btn.bg, color: cart.length === 0 ? '#bdbdbd' : btn.color, border: 'none', borderRadius: 7, padding: '13px 4px', cursor: cart.length === 0 ? 'default' : 'pointer', fontSize: 13, fontWeight: 600, gridColumn: btn.span ? 'span 2' : undefined }}
+                    onClick={() => { setPaymentType(btn.key as 'cash' | 'card' | 'mixed'); setPaymentMode(true) }}
+                    disabled={cart.length === 0 || Boolean(btn.disabled)}
+                    title={btn.disabled ? 'Pavo cihazı ayarlı değil' : undefined}
+                    style={{ background: (cart.length === 0 || btn.disabled) ? '#f5f5f5' : btn.bg, color: (cart.length === 0 || btn.disabled) ? '#bdbdbd' : btn.color, border: 'none', borderRadius: 7, padding: '13px 4px', cursor: (cart.length === 0 || btn.disabled) ? 'default' : 'pointer', fontSize: 13, fontWeight: 600, gridColumn: btn.span ? 'span 2' : undefined }}
                   >{btn.label}</button>
                 ))}
               </div>
@@ -1509,6 +1591,56 @@ export default function POSScreen({
           textAlign: 'center',
         }}>
           ⚠ {cancelWarning}
+        </div>
+      )}
+
+      {pavoLoading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'rgba(0,0,0,0.6)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: 16,
+            padding: '32px 48px',
+            textAlign: 'center',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>💳</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#111', marginBottom: 8 }}>
+              Kartı Okutun
+            </div>
+            <div style={{ fontSize: 13, color: '#6B7280' }}>
+              Pavo cihazında işlem bekleniyor...
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#1565C0', marginTop: 12 }}>
+              {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pavoError && !pavoLoading && (
+        <div style={{
+          position: 'fixed',
+          bottom: merkezToast || cancelWarning ? 72 : 24,
+          right: 24,
+          zIndex: 10002,
+          background: '#FFEBEE',
+          color: '#B71C1C',
+          border: '1px solid #FFCDD2',
+          borderRadius: 8,
+          padding: '8px 12px',
+          fontSize: 12,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        }}>
+          Pavo: {pavoError}
         </div>
       )}
 

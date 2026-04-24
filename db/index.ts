@@ -63,7 +63,9 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       invoice_sent INTEGER NOT NULL DEFAULT 0,
       invoice_id TEXT,
       invoice_error TEXT,
-      invoice_at TEXT
+      invoice_at TEXT,
+      payment_provider TEXT,
+      payment_device_data TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -173,7 +175,10 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       plu_mode              TEXT DEFAULT 'terminal',
       login_with_code       INTEGER DEFAULT 1,
       login_with_card       INTEGER DEFAULT 1,
-      synced_at             TEXT
+      synced_at             TEXT,
+      torba_cari_id         TEXT,
+      torba_cari_name       TEXT,
+      invoice_type          TEXT DEFAULT 'e_archive'
     );
 
     CREATE TABLE IF NOT EXISTS command_history (
@@ -214,7 +219,10 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       plu_mode              TEXT DEFAULT 'terminal',
       login_with_code       INTEGER DEFAULT 1,
       login_with_card       INTEGER DEFAULT 0,
-      synced_at             TEXT
+      synced_at             TEXT,
+      torba_cari_id         TEXT,
+      torba_cari_name       TEXT,
+      invoice_type          TEXT DEFAULT 'e_archive'
     );
   `)
 
@@ -294,6 +302,16 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_name', 'torba_cari_name TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_id', 'torba_cari_id TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_name', 'torba_cari_name TEXT')
+  try {
+    sqlite.exec(`ALTER TABLE pos_settings_cache ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
+  } catch {
+    /* kolon zaten var */
+  }
+  try {
+    sqlite.exec(`ALTER TABLE pos_settings_temp ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
+  } catch {
+    /* kolon zaten var */
+  }
 
   addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
@@ -360,6 +378,11 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sales', 'invoice_error', 'invoice_error TEXT')
   addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
 
+  const salesCols = (sqlite.prepare('PRAGMA table_info(sales)').all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
+  if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
+  addColumnIfMissing(sqlite, 'payment_device_settings', 'invoice_type', `invoice_type TEXT DEFAULT 'e_archive'`)
+
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'net_amount', 'net_amount REAL DEFAULT 0')
@@ -411,7 +434,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           login_with_card       INTEGER DEFAULT 0,
           synced_at             TEXT,
           torba_cari_id         TEXT,
-          torba_cari_name       TEXT
+          torba_cari_name       TEXT,
+          invoice_type          TEXT DEFAULT 'e_archive'
         );
 
         -- Veriyi açık kolon listesiyle geri yaz (kolon adı bazlı, sıra bağımsız)
@@ -422,7 +446,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
           source, plu_mode, login_with_code, login_with_card, synced_at,
-          torba_cari_id, torba_cari_name
+          torba_cari_id, torba_cari_name, invoice_type
         )
         SELECT
           id, cashier_id, show_price, show_code, show_barcode,
@@ -431,7 +455,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
           source, plu_mode, login_with_code, login_with_card, synced_at,
-          torba_cari_id, torba_cari_name
+          torba_cari_id, torba_cari_name, 'e_archive'
         FROM pos_settings_cache_backup;
 
         -- Yedek tabloyu sil
@@ -457,6 +481,41 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       label        TEXT
     )
   `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS payment_device_settings (
+      id                TEXT PRIMARY KEY,
+      company_id        TEXT NOT NULL,
+      terminal_id       TEXT NOT NULL,
+      provider          TEXT NOT NULL DEFAULT 'pavo',
+      ip_address        TEXT,
+      port              INTEGER DEFAULT 9100,
+      serial_no         TEXT,
+      card_read_timeout INTEGER DEFAULT 30,
+      print_width       TEXT DEFAULT '80mm',
+      invoice_type      TEXT DEFAULT 'e_archive',
+      is_active         INTEGER DEFAULT 1,
+      synced_at         TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS unit_mappings (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      unit_name   TEXT NOT NULL,
+      pavo_code   TEXT NOT NULL DEFAULT 'C62',
+      UNIQUE(company_id, unit_name)
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS pavo_sequence (
+      id  INTEGER PRIMARY KEY,
+      seq INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  sqlite.exec(`INSERT OR IGNORE INTO pavo_sequence (id, seq) VALUES (1, 0)`)
 }
 
 export function getDB() {

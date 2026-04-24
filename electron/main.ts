@@ -139,8 +139,49 @@ if (process.platform === 'win32') {
 app.whenReady().then(async () => {
   const savedDbDir = (store.get('db_path') as string | undefined)?.trim()
   const dbDir = savedDbDir && savedDbDir.length > 0 ? savedDbDir : app.getPath('userData')
-  const { initDatabase } = await import('../db/index')
+  const { initDatabase, getSqlite } = await import('../db/index')
   initDatabase(join(dbDir, 'btpos.db'))
+  const db = getSqlite()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS payment_device_settings (
+      id                TEXT PRIMARY KEY,
+      company_id        TEXT NOT NULL,
+      terminal_id       TEXT NOT NULL,
+      provider          TEXT NOT NULL DEFAULT 'pavo',
+      ip_address        TEXT,
+      port              INTEGER DEFAULT 9100,
+      serial_no         TEXT,
+      card_read_timeout INTEGER DEFAULT 30,
+      print_width       TEXT DEFAULT '80mm',
+      invoice_type      TEXT DEFAULT 'e_archive',
+      is_active         INTEGER DEFAULT 1,
+      synced_at         TEXT
+    )
+  `)
+  const pdsCols = (db.prepare("PRAGMA table_info(payment_device_settings)").all() as { name: string }[]).map(c => c.name)
+  if (!pdsCols.includes('invoice_type')) {
+    db.exec(`ALTER TABLE payment_device_settings ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS unit_mappings (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      unit_name   TEXT NOT NULL,
+      pavo_code   TEXT NOT NULL DEFAULT 'C62',
+      UNIQUE(company_id, unit_name)
+    )
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pavo_sequence (
+      id  INTEGER PRIMARY KEY,
+      seq INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  db.prepare('INSERT OR IGNORE INTO pavo_sequence (id, seq) VALUES (1, 0)').run()
+  const salesCols = (db.prepare("PRAGMA table_info(sales)").all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('payment_provider')) db.exec(`ALTER TABLE sales ADD COLUMN payment_provider TEXT`)
+  if (!salesCols.includes('payment_device_data')) db.exec(`ALTER TABLE sales ADD COLUMN payment_device_data TEXT`)
 
   createWindow()
 
@@ -199,9 +240,9 @@ app.whenReady().then(async () => {
     return getAllProducts()
   })
 
-  ipcMain.handle('db:saveSale', async (_e, sale, items) => {
+  ipcMain.handle('db:saveSale', async (_e, sale, items, device) => {
     const { saveSale } = await import('../db/operations')
-    return saveSale(sale, items)
+    return saveSale(sale, items, device)
   })
 
   ipcMain.handle('db:getSales', async (_e, dateFrom, dateTo) => {
@@ -341,6 +382,14 @@ app.whenReady().then(async () => {
     const { getSaleItems } = await import('../db/operations')
     return getSaleItems(saleId)
   })
+  ipcMain.handle('db:getProductByCode', async (_e, code: string) => {
+    const { getProductByCode } = await import('../db/operations')
+    return getProductByCode(code)
+  })
+  ipcMain.handle('db:getProductIdByCode', async (_e, code: string) => {
+    const { getProductIdByCode } = await import('../db/operations')
+    return getProductIdByCode(code)
+  })
 
   ipcMain.handle('db:upsertCustomer', async (_e, row: unknown) => {
     const { upsertCustomer } = await import('../db/operations')
@@ -391,6 +440,33 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:deleteOperation', async (_e, id: string) => {
     const { deleteOperation } = await import('../db/operations')
     deleteOperation(id)
+  })
+
+  ipcMain.handle('db:getPaymentDeviceSettings', async (_e, provider?: string) => {
+    const { getPaymentDeviceSettings } = await import('../db/operations')
+    return getPaymentDeviceSettings(provider ?? 'pavo')
+  })
+
+  ipcMain.handle('db:upsertPaymentDeviceSettings', async (_e, row: unknown) => {
+    const { upsertPaymentDeviceSettings } = await import('../db/operations')
+    upsertPaymentDeviceSettings(row as import('../db/operations').PaymentDeviceRow)
+  })
+
+  ipcMain.handle('db:nextPavoSequence', async () => {
+    const { nextPavoSequence } = await import('../db/operations')
+    return nextPavoSequence()
+  })
+  ipcMain.handle('db:getUnitPavoCode', async (_e, unitName: string) => {
+    const { getUnitPavoCode } = await import('../db/operations')
+    return getUnitPavoCode(db, unitName)
+  })
+  ipcMain.handle('db:upsertUnitMapping', async (_e, row: { companyId: string; unitName: string; pavoCode: string }) => {
+    const { upsertUnitMapping } = await import('../db/operations')
+    upsertUnitMapping(db, row)
+  })
+  ipcMain.handle('db:getAllUnitMappings', async (_e, companyId: string) => {
+    const { getAllUnitMappings } = await import('../db/operations')
+    return getAllUnitMappings(db, companyId)
   })
 })
 

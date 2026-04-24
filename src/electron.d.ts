@@ -42,7 +42,7 @@ declare global {
       db: {
         saveProducts:       (products: unknown[]) => Promise<number>
         getProducts:        () => Promise<ProductRow[]>
-        saveSale:           (sale: SaleRow, items: SaleItem[]) => Promise<string>
+        saveSale:           (sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult) => Promise<string>
         getSales:           (dateFrom?: string, dateTo?: string) => Promise<SaleRecord[]>
         saveCashiers:       (cashiers: unknown[]) => Promise<number>
         verifyCashier:      (code: string, password: string) => Promise<CashierRow | null>
@@ -68,6 +68,8 @@ declare global {
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
+        getProductByCode:  (code: string) => Promise<ProductRow | null>
+        getProductIdByCode: (code: string) => Promise<string | null>
         upsertCustomer:    (row: CustomerRow) => Promise<void>
         enqueueOperation:  (params: {
           id: string
@@ -83,6 +85,12 @@ declare global {
         markOperationFailed: (id: string, error: string) => Promise<void>
         retryOperation:    (id: string) => Promise<void>
         deleteOperation:   (id: string) => Promise<void>
+        getPaymentDeviceSettings: (provider?: string) => Promise<PaymentDeviceRow | undefined>
+        upsertPaymentDeviceSettings: (row: PaymentDeviceRow) => Promise<void>
+        nextPavoSequence: () => Promise<number>
+        getUnitPavoCode: (unitName: string) => Promise<string>
+        upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) => Promise<void>
+        getAllUnitMappings: (companyId: string) => Promise<unknown[]>
       }
     }
   }
@@ -160,6 +168,7 @@ declare global {
 
   interface SaleItem {
     productId?:      string
+    productCode?:    string
     productName:     string
     quantity:        number
     unitPrice:       number
@@ -204,9 +213,12 @@ declare global {
     invoiceId:      string | null
     invoiceError:   string | null
     invoiceAt:      string | null
+    paymentProvider: string | null
+    paymentDeviceData: string | null
   }
 
   interface SaleItemRow {
+    productId:    string | null
     productCode:  string
     productName:  string
     quantity:     number
@@ -302,7 +314,39 @@ declare global {
     pluMode:              PluMode
     loginWithCode:        boolean
     loginWithCard:        boolean
-    torbaCariId?:         string | null
-    torbaCariName?:       string | null
+    torbaCariId:          string | null
+    torbaCariName:        string | null
+    invoiceType:          'e_archive' | 'paper'
+  }
+
+  interface PaymentDeviceRow {
+    id:              string
+    companyId:       string
+    terminalId:      string
+    provider:        'pavo' | 'ingenico' | 'pax'
+    ipAddress:       string | null
+    port:            number
+    serialNo:        string | null
+    cardReadTimeout: number
+    printWidth:      '58mm' | '80mm'
+    invoiceType:     'e_archive' | 'paper'
+    isActive:        boolean
+    syncedAt:        string | null
+  }
+
+  interface PaymentDeviceResult {
+    success:      boolean
+    provider:     'pavo' | 'ingenico' | 'pax' | string
+    errorCode?:   number | string
+    message?:     string
+    authCode?:    string
+    cardNo?:      string
+    cardBrand?:   string
+    cardType?:    string
+    acquirer?:    string
+    batchNo?:     string
+    isOffline?:   boolean
+    receiptUrl?:  string
+    raw:          Record<string, unknown>
   }
 }

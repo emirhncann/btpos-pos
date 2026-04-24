@@ -16,6 +16,7 @@ export interface CommandHandlers {
   onSyncCustomers:  (mode?: SyncMode) => Promise<void>
   onSyncProducts:   (mode?: SyncMode) => Promise<void>
   onSyncSettings:   () => Promise<void>
+  onPairPavo:       (payload?: Record<string, unknown>) => Promise<void>
   onLogout:         () => void
   onMessage:        (text: string, duration?: number) => void
   onRestart:        () => void
@@ -133,6 +134,10 @@ export function useCommandPoller(
                   console.warn('[POLL][sync_settings] 3000ms kontrol hatası:', e)
                 }
               }, 3000)
+              break
+
+            case 'pair_pavo':
+              await h.onPairPavo(cmd.payload)
               break
 
             case 'logout':

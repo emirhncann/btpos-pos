@@ -26,7 +26,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
   db: {
     saveProducts: (products) => electron.ipcRenderer.invoke("db:saveProducts", products),
     getProducts: () => electron.ipcRenderer.invoke("db:getProducts"),
-    saveSale: (sale, items) => electron.ipcRenderer.invoke("db:saveSale", sale, items),
+    saveSale: (sale, items, device) => electron.ipcRenderer.invoke("db:saveSale", sale, items, device),
     getSales: (dateFrom, dateTo) => electron.ipcRenderer.invoke("db:getSales", dateFrom, dateTo),
     saveCashiers: (cashiers) => electron.ipcRenderer.invoke("db:saveCashiers", cashiers),
     verifyCashier: (code, password) => electron.ipcRenderer.invoke("db:verifyCashier", code, password),
@@ -52,6 +52,8 @@ electron.contextBridge.exposeInMainWorld("electron", {
     markInvoiceSent: (saleId, invoiceId) => electron.ipcRenderer.invoke("db:markInvoiceSent", saleId, invoiceId),
     markInvoiceError: (saleId, error) => electron.ipcRenderer.invoke("db:markInvoiceError", saleId, error),
     getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId),
+    getProductByCode: (code) => electron.ipcRenderer.invoke("db:getProductByCode", code),
+    getProductIdByCode: (code) => electron.ipcRenderer.invoke("db:getProductIdByCode", code),
     upsertCustomer: (row) => electron.ipcRenderer.invoke("db:upsertCustomer", row),
     enqueueOperation: (params) => electron.ipcRenderer.invoke("db:enqueueOperation", params),
     getPendingOperations: (companyId) => electron.ipcRenderer.invoke("db:getPendingOperations", companyId),
@@ -60,6 +62,12 @@ electron.contextBridge.exposeInMainWorld("electron", {
     markOperationSuccess: (id) => electron.ipcRenderer.invoke("db:markOperationSuccess", id),
     markOperationFailed: (id, error) => electron.ipcRenderer.invoke("db:markOperationFailed", id, error),
     retryOperation: (id) => electron.ipcRenderer.invoke("db:retryOperation", id),
-    deleteOperation: (id) => electron.ipcRenderer.invoke("db:deleteOperation", id)
+    deleteOperation: (id) => electron.ipcRenderer.invoke("db:deleteOperation", id),
+    getPaymentDeviceSettings: (provider) => electron.ipcRenderer.invoke("db:getPaymentDeviceSettings", provider),
+    upsertPaymentDeviceSettings: (row) => electron.ipcRenderer.invoke("db:upsertPaymentDeviceSettings", row),
+    nextPavoSequence: () => electron.ipcRenderer.invoke("db:nextPavoSequence"),
+    getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),
+    upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
+    getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId)
   }
 });

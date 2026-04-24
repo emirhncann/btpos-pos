@@ -2,6 +2,7 @@ import { getDB, getSqlite } from './index'
 import { products, sales, saleItems, cashiers, heldDocuments, pluGroupsCache, pluItemsCache, posSettingsCache, commandHistory } from './schema'
 import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+import type BetterSqlite3 from 'better-sqlite3'
 
 export interface ProductRow {
   id: string
@@ -18,6 +19,7 @@ export interface ProductRow {
 
 export interface SaleItem {
   productId?: string
+  productCode?: string
   productName: string
   quantity: number
   unitPrice: number
@@ -40,6 +42,22 @@ export interface SaleRow {
   customerId?:   string | null
   customerName?: string | null
   customerCode?: string | null
+}
+
+export interface PaymentDeviceResult {
+  success: boolean
+  provider: 'pavo' | 'ingenico' | 'pax' | string
+  errorCode?: number | string
+  message?: string
+  authCode?: string
+  cardNo?: string
+  cardBrand?: string
+  cardType?: string
+  acquirer?: string
+  batchNo?: string
+  isOffline?: boolean
+  receiptUrl?: string
+  raw: Record<string, unknown>
 }
 
 export function saveProducts(items: ProductRow[]): number {
@@ -77,10 +95,22 @@ export function findByBarcode(barcode: string): ProductRow | null {
   return result as ProductRow | null
 }
 
-export function saveSale(sale: SaleRow, items: SaleItem[]): string {
+export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult): string {
   const db = getDB()
+  const sqlite = getSqlite()
   const saleId = randomUUID()
   const now = new Date().toISOString()
+  const paymentDeviceData = device ? JSON.stringify({
+    authCode:   device.authCode,
+    cardNo:     device.cardNo,
+    cardBrand:  device.cardBrand,
+    cardType:   device.cardType,
+    acquirer:   device.acquirer,
+    batchNo:    device.batchNo,
+    isOffline:  device.isOffline,
+    receiptUrl: device.receiptUrl,
+    raw:        device.raw,
+  }) : null
 
   db.insert(sales).values({
     id: saleId,
@@ -101,13 +131,21 @@ export function saveSale(sale: SaleRow, items: SaleItem[]): string {
     invoiceId:    null,
     invoiceError: null,
     invoiceAt:    null,
+    paymentProvider: device?.provider ?? null,
+    paymentDeviceData,
   }).run()
 
   for (const item of items) {
+    const productRow = item.productCode
+      ? sqlite.prepare(
+        'SELECT id FROM products WHERE code = ? LIMIT 1',
+      ).get(item.productCode) as { id: string } | undefined
+      : undefined
+
     db.insert(saleItems).values({
       id: randomUUID(),
       saleId,
-      productId: item.productId,
+      productId: productRow?.id ?? null,
       productName: item.productName,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
@@ -167,6 +205,7 @@ export function markInvoiceError(saleId: string, error: string): void {
 
 /** ERP faturası için satır verisi (ürün kodu/birim products ile zenginleştirilir) */
 export interface SaleItemInvoiceRow {
+  productId:     string | null
   productCode:   string
   productName:   string
   quantity:      number
@@ -203,6 +242,7 @@ export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
   }>
 
   return rows.map(r => ({
+    productId:    r.product_id ?? null,
     productCode:  r.p_code || r.product_id || '',
     productName:  r.product_name,
     quantity:     r.quantity,
@@ -406,12 +446,28 @@ export interface PosSettingsRow {
   pluMode:              PluMode
   loginWithCode:        boolean
   loginWithCard:        boolean
-  torbaCariId?:         string | null
-  torbaCariName?:       string | null
+  torbaCariId:          string | null
+  torbaCariName:        string | null
+  invoiceType:          'e_archive' | 'paper'
 }
 
 export interface PosSettingsAcidRow extends PosSettingsRow {
   cashierId?: string | null
+}
+
+export interface PaymentDeviceRow {
+  id:              string
+  companyId:       string
+  terminalId:      string
+  provider:        'pavo' | 'ingenico' | 'pax'
+  ipAddress:       string | null
+  port:            number
+  serialNo:        string | null
+  cardReadTimeout: number
+  printWidth:      '58mm' | '80mm'
+  invoiceType:     'e_archive' | 'paper'
+  isActive:        boolean
+  syncedAt:        string | null
 }
 
 export function savePluGroups(groups: PluGroupCacheRow[]): void {
@@ -548,6 +604,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
     syncedAt:             now,
     torbaCariId:          settings.torbaCariId   ?? null,
     torbaCariName:        settings.torbaCariName ?? null,
+    invoiceType:          settings.invoiceType ?? 'e_archive',
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
     set: {
@@ -572,6 +629,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
       syncedAt:             now,
       torbaCariId:          settings.torbaCariId   ?? null,
       torbaCariName:        settings.torbaCariName ?? null,
+      invoiceType:          settings.invoiceType ?? 'e_archive',
     },
   }).run()
 }
@@ -591,7 +649,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name
+        torba_cari_id, torba_cari_name, invoice_type
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
         @duplicateItemAction, @minQtyPerLine,
@@ -599,7 +657,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @maxLineDiscountPct, @maxDocDiscountPct,
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
-        @torbaCariId, @torbaCariName
+        @torbaCariId, @torbaCariName, @invoiceType
       )
     `).run({
       id:                  rowId,
@@ -625,6 +683,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       syncedAt:            now,
       torbaCariId:         settings.torbaCariId   ?? null,
       torbaCariName:       settings.torbaCariName ?? null,
+      invoiceType:         settings.invoiceType ?? 'e_archive',
     })
 
     // 2. Doğrula
@@ -642,7 +701,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name
+        torba_cari_id, torba_cari_name, invoice_type
       )
       SELECT
         id, cashier_id, show_price, show_code, show_barcode,
@@ -651,7 +710,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name
+        torba_cari_id, torba_cari_name, invoice_type
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
 
@@ -712,7 +771,112 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     loginWithCard:        row?.loginWithCard        ?? false,
     torbaCariId:          row?.torbaCariId          ?? null,
     torbaCariName:        row?.torbaCariName        ?? null,
+    invoiceType:          (row?.invoiceType === 'paper' ? 'paper' : 'e_archive'),
   }
+}
+
+// Odeme cihazi ayarlarini getir
+export function getPaymentDeviceSettings(provider = 'pavo'): PaymentDeviceRow | undefined {
+  const db = getSqlite()
+  const row = db.prepare(`
+    SELECT * FROM payment_device_settings
+    WHERE provider = ? AND is_active = 1
+    LIMIT 1
+  `).get(provider) as Record<string, unknown> | undefined
+  if (!row) return undefined
+  return {
+    id:              String(row.id ?? ''),
+    companyId:       String(row.company_id ?? ''),
+    terminalId:      String(row.terminal_id ?? ''),
+    provider:        String(row.provider ?? 'pavo') as PaymentDeviceRow['provider'],
+    ipAddress:       row.ip_address != null ? String(row.ip_address) : null,
+    port:            Number(row.port ?? 9100),
+    serialNo:        row.serial_no != null ? String(row.serial_no) : null,
+    cardReadTimeout: Number(row.card_read_timeout ?? 30),
+    printWidth:      (row.print_width === '58mm' ? '58mm' : '80mm'),
+    invoiceType:     (row.invoice_type === 'paper' ? 'paper' : 'e_archive'),
+    isActive:        Number(row.is_active ?? 1) === 1,
+    syncedAt:        row.synced_at != null ? String(row.synced_at) : null,
+  }
+}
+
+// Odeme cihazi ayarlarini kaydet (upsert)
+export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
+  const db = getSqlite()
+  db.prepare(`
+    INSERT INTO payment_device_settings
+      (id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, invoice_type, is_active, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      company_id=excluded.company_id,
+      terminal_id=excluded.terminal_id,
+      provider=excluded.provider,
+      ip_address=excluded.ip_address,
+      port=excluded.port,
+      serial_no=excluded.serial_no,
+      card_read_timeout=excluded.card_read_timeout,
+      print_width=excluded.print_width,
+      invoice_type=excluded.invoice_type,
+      is_active=excluded.is_active,
+      synced_at=excluded.synced_at
+  `).run(
+    row.id,
+    row.companyId,
+    row.terminalId,
+    row.provider,
+    row.ipAddress,
+    row.port,
+    row.serialNo,
+    row.cardReadTimeout,
+    row.printWidth,
+    row.invoiceType,
+    row.isActive ? 1 : 0,
+    row.syncedAt,
+  )
+}
+
+export function getUnitPavoCode(db: BetterSqlite3.Database, unitName: string): string {
+  const row = db.prepare(`
+    SELECT pavo_code FROM unit_mappings WHERE unit_name = ? LIMIT 1
+  `).get(unitName) as { pavo_code: string } | undefined
+  return row?.pavo_code ?? 'C62'
+}
+
+export function upsertUnitMapping(
+  db: BetterSqlite3.Database,
+  row: { companyId: string; unitName: string; pavoCode: string },
+): void {
+  db.prepare(`
+    INSERT INTO unit_mappings (id, company_id, unit_name, pavo_code)
+    VALUES (lower(hex(randomblob(16))), ?, ?, ?)
+    ON CONFLICT(company_id, unit_name) DO UPDATE SET pavo_code = excluded.pavo_code
+  `).run(row.companyId, row.unitName, row.pavoCode)
+}
+
+export function getAllUnitMappings(db: BetterSqlite3.Database, companyId: string) {
+  return db.prepare(`SELECT * FROM unit_mappings WHERE company_id = ?`).all(companyId)
+}
+
+export function getProductByCode(code: string): ProductRow | null {
+  const db = getDB()
+  const result = db.select().from(products).where(eq(products.code, code)).get()
+  return (result as ProductRow | undefined) ?? null
+}
+
+export function getProductIdByCode(code: string): string | null {
+  const sqlite = getSqlite()
+  const row = sqlite.prepare(
+    'SELECT id FROM products WHERE code = ? LIMIT 1',
+  ).get(code) as { id: string } | undefined
+  return row?.id ?? null
+}
+
+// Pavo sequence — her islemde +1
+export function nextPavoSequence(): number {
+  const db = getSqlite()
+  db.prepare('UPDATE pavo_sequence SET seq = seq + 1 WHERE id = 1').run()
+  const row = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
+  return Number(row?.seq ?? 0)
 }
 
 export interface CommandHistoryRow {
