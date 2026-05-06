@@ -465,9 +465,14 @@ export interface PaymentDeviceRow {
   serialNo:        string | null
   cardReadTimeout: number
   printWidth:      '58mm' | '80mm'
-  invoiceType:     'e_archive' | 'paper'
   isActive:        boolean
   syncedAt:        string | null
+}
+
+function normalizePrintWidth(width: unknown): '58mm' | '80mm' {
+  const raw = String(width ?? '').toLowerCase().trim()
+  if (raw === '58' || raw === '58mm' || raw.includes('58')) return '58mm'
+  return '80mm'
 }
 
 export function savePluGroups(groups: PluGroupCacheRow[]): void {
@@ -793,8 +798,7 @@ export function getPaymentDeviceSettings(provider = 'pavo'): PaymentDeviceRow | 
     port:            Number(row.port ?? 9100),
     serialNo:        row.serial_no != null ? String(row.serial_no) : null,
     cardReadTimeout: Number(row.card_read_timeout ?? 30),
-    printWidth:      (row.print_width === '58mm' ? '58mm' : '80mm'),
-    invoiceType:     (row.invoice_type === 'paper' ? 'paper' : 'e_archive'),
+    printWidth:      normalizePrintWidth(row.print_width),
     isActive:        Number(row.is_active ?? 1) === 1,
     syncedAt:        row.synced_at != null ? String(row.synced_at) : null,
   }
@@ -803,10 +807,11 @@ export function getPaymentDeviceSettings(provider = 'pavo'): PaymentDeviceRow | 
 // Odeme cihazi ayarlarini kaydet (upsert)
 export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
   const db = getSqlite()
+  const printWidth = normalizePrintWidth(row.printWidth)
   db.prepare(`
     INSERT INTO payment_device_settings
-      (id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, invoice_type, is_active, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       company_id=excluded.company_id,
       terminal_id=excluded.terminal_id,
@@ -816,7 +821,6 @@ export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
       serial_no=excluded.serial_no,
       card_read_timeout=excluded.card_read_timeout,
       print_width=excluded.print_width,
-      invoice_type=excluded.invoice_type,
       is_active=excluded.is_active,
       synced_at=excluded.synced_at
   `).run(
@@ -828,8 +832,7 @@ export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
     row.port,
     row.serialNo,
     row.cardReadTimeout,
-    row.printWidth,
-    row.invoiceType,
+    printWidth,
     row.isActive ? 1 : 0,
     row.syncedAt,
   )
@@ -877,6 +880,12 @@ export function nextPavoSequence(): number {
   db.prepare('UPDATE pavo_sequence SET seq = seq + 1 WHERE id = 1').run()
   const row = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
   return Number(row?.seq ?? 0)
+}
+
+export function updatePavoSequence(seq: number): void {
+  const db = getSqlite()
+  const safeSeq = Number.isFinite(seq) ? Math.max(0, Math.floor(seq)) : 0
+  db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(safeSeq)
 }
 
 export interface CommandHistoryRow {

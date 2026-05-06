@@ -26,15 +26,7 @@ export async function sendPendingInvoices(
   if (pending.length === 0) return { ok: 0, fail: 0 }
 
   const settings = await window.electron.db.getPosSettings()
-  let invoiceType: 'e_archive' | 'paper' = 'e_archive'
-  try {
-    const device = await window.electron.db.getPaymentDeviceSettings('pavo')
-    if (device?.isActive && device.invoiceType) {
-      invoiceType = device.invoiceType
-    }
-  } catch {
-    // default e_archive
-  }
+  const invoiceType: 'e_archive' | 'paper' = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
   let torbaCari: {
     code?: string
     name: string

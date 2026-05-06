@@ -166,7 +166,6 @@ export const api = {
       serial_no: string | null
       card_read_timeout: number | null
       print_width: '58mm' | '80mm' | null
-      invoice_type?: 'e_archive' | 'paper' | null
       is_active: boolean | null
     }>>
   },

@@ -154,7 +154,6 @@ async function syncSettings(
         serialNo:        device.serial_no ?? null,
         cardReadTimeout: device.card_read_timeout ?? 30,
         printWidth:      device.print_width ?? '80mm',
-        invoiceType:     device.invoice_type === 'paper' ? 'paper' : 'e_archive',
         isActive:        device.is_active ?? true,
         syncedAt:        new Date().toISOString(),
       })

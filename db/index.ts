@@ -381,7 +381,6 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   const salesCols = (sqlite.prepare('PRAGMA table_info(sales)').all() as { name: string }[]).map(c => c.name)
   if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
-  addColumnIfMissing(sqlite, 'payment_device_settings', 'invoice_type', `invoice_type TEXT DEFAULT 'e_archive'`)
 
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
@@ -493,11 +492,40 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       serial_no         TEXT,
       card_read_timeout INTEGER DEFAULT 30,
       print_width       TEXT DEFAULT '80mm',
-      invoice_type      TEXT DEFAULT 'e_archive',
       is_active         INTEGER DEFAULT 1,
       synced_at         TEXT
     )
   `)
+  try {
+    const pdsCols = (sqlite.prepare('PRAGMA table_info(payment_device_settings)').all() as { name: string }[]).map(c => c.name)
+    if (pdsCols.includes('invoice_type')) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS payment_device_settings_new (
+          id                TEXT PRIMARY KEY,
+          company_id        TEXT NOT NULL,
+          terminal_id       TEXT NOT NULL,
+          provider          TEXT NOT NULL DEFAULT 'pavo',
+          ip_address        TEXT,
+          port              INTEGER DEFAULT 9100,
+          serial_no         TEXT,
+          card_read_timeout INTEGER DEFAULT 30,
+          print_width       TEXT DEFAULT '80mm',
+          is_active         INTEGER DEFAULT 1,
+          synced_at         TEXT
+        );
+        INSERT INTO payment_device_settings_new (
+          id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at
+        )
+        SELECT
+          id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at
+        FROM payment_device_settings;
+        DROP TABLE payment_device_settings;
+        ALTER TABLE payment_device_settings_new RENAME TO payment_device_settings;
+      `)
+    }
+  } catch (e) {
+    console.warn('[migration] payment_device_settings invoice_type kaldırma hatası:', e)
+  }
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS unit_mappings (

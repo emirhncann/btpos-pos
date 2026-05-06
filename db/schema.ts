@@ -248,7 +248,6 @@ export const paymentDeviceSettings = sqliteTable('payment_device_settings', {
   serialNo:        text('serial_no'),
   cardReadTimeout: integer('card_read_timeout').default(30),
   printWidth:      text('print_width').default('80mm'),
-  invoiceType:     text('invoice_type').default('e_archive'),
   isActive:        integer('is_active', { mode: 'boolean' }).default(true),
   syncedAt:        text('synced_at'),
 })

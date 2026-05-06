@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld('electron', {
     upsertPaymentDeviceSettings: (row: unknown) =>
       ipcRenderer.invoke('db:upsertPaymentDeviceSettings', row),
     nextPavoSequence: () => ipcRenderer.invoke('db:nextPavoSequence'),
+    updatePavoSequence: (seq: number) => ipcRenderer.invoke('db:updatePavoSequence', seq),
     getUnitPavoCode: (unitName: string) => ipcRenderer.invoke('db:getUnitPavoCode', unitName),
     upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) =>
       ipcRenderer.invoke('db:upsertUnitMapping', row),

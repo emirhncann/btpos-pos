@@ -68,6 +68,13 @@ function normalizeHeldCartItem(i: CartItem): CartItem {
   return { ...i, lineTotal, discountRate, discountAmount, netTotal, barcode: i.barcode ?? '' }
 }
 
+function localISOString(): string {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  const local = new Date(now.getTime() - offset)
+  return local.toISOString().replace('Z', '').slice(0, 26)
+}
+
 export default function POSScreen({
   companyId, cashier, allProducts,
   pluGroups, posSettings,
@@ -91,6 +98,7 @@ export default function POSScreen({
   const [paymentMode, setPaymentMode]     = useState(false)
   const [paymentType, setPaymentType]     = useState<'cash' | 'card' | 'mixed'>('cash')
   const [cashInput, setCashInput]         = useState('')
+  const [numpadTarget, setNumpadTarget]   = useState<'qty' | 'cash'>('qty')
   const [saving, setSaving]               = useState(false)
   const [lastReceipt, setLastReceipt]     = useState<string | null>(null)
   const [cancelMode, setCancelMode]       = useState(false)
@@ -159,6 +167,9 @@ export default function POSScreen({
   useEffect(() => {
     void (async () => {
       try {
+        const settings = await window.electron.db.getPosSettings()
+        setInvoiceType(settings?.invoiceType === 'paper' ? 'paper' : 'e_archive')
+
         const device = await window.electron.db.getPaymentDeviceSettings('pavo')
         if (device?.ipAddress && device.isActive) {
           setPavoSettings({
@@ -168,17 +179,44 @@ export default function POSScreen({
             cardReadTimeout: device.cardReadTimeout,
             printWidth:      device.printWidth,
           })
-          setInvoiceType(device.invoiceType ?? 'e_archive')
         } else {
           setPavoSettings(null)
-          setInvoiceType('e_archive')
         }
       } catch {
-        setPavoSettings(null)
         setInvoiceType('e_archive')
+        setPavoSettings(null)
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (!pavoSettings) return
+    void (async () => {
+      try {
+        const seq = await window.electron.db.nextPavoSequence()
+        const result = await fetch(`http://${pavoSettings.ipAddress}:${pavoSettings.port}/PaymentMediators`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            TransactionHandle: {
+              SerialNumber: pavoSettings.serialNo,
+              TransactionDate: localISOString(),
+              TransactionSequence: seq,
+              Fingerprint: 'test1',
+            },
+          }),
+        }).then(r => r.json()) as Record<string, unknown>
+
+        const handle = result.TransactionHandle as Record<string, unknown> | undefined
+        const pavoSeq = Number(handle?.TransactionSequence)
+        if (Number.isFinite(pavoSeq)) {
+          await window.electron.db.updatePavoSequence(pavoSeq)
+        }
+      } catch {
+        // Cihaz offline olabilir; normal akış bozulmamalı.
+      }
+    })()
+  }, [pavoSettings])
 
   useEffect(() => {
     onCartChange?.(cart.length > 0)
@@ -357,6 +395,7 @@ export default function POSScreen({
     setPaymentMode(false)
     setCashInput('')
     setPaymentType('cash')
+    setNumpadTarget('qty')
     setNumBuf('')
     setCancelMode(false)
     setDocDiscountMode(false)
@@ -368,6 +407,20 @@ export default function POSScreen({
   }
 
   function handleNumKey(k: string) {
+    if (numpadTarget === 'cash') {
+      if (k === 'C')  { setCashInput(''); return }
+      if (k === '⌫') { setCashInput(p => p.slice(0, -1)); return }
+      if (k === ',') {
+        if (cashInput.includes(',')) return
+        setCashInput(p => (p === '' ? '0,' : p + ','))
+        return
+      }
+      if (cashInput.replace(',', '').length < 8) {
+        setCashInput(p => p + k)
+      }
+      return
+    }
+
     if (k === 'C')  { setNumBuf(''); return }
     if (k === '⌫') { setNumBuf(p => p.slice(0, -1)); return }
 
@@ -441,7 +494,7 @@ export default function POSScreen({
   const toplamKdv = lineSubtotal > 0
     ? parseFloat((vatFromLines * (grandTotal / lineSubtotal)).toFixed(2))
     : 0
-  const cashAmount = parseFloat(cashInput) || 0
+  const cashAmount = parseFloat(cashInput.replace(',', '.')) || 0
   const change     = cashAmount - grandTotal
   const commandIconAnimation = commandSyncing
     ? 'merkezMailPulse 0.9s ease-in-out infinite, merkezMailShake 1.4s ease-in-out infinite'
@@ -451,19 +504,24 @@ export default function POSScreen({
       ? 'merkezMailPulse 1.2s ease-in-out infinite'
       : 'merkezMailIdle 2.6s ease-in-out infinite'
 
-  async function completeSale() {
+  async function completeSale(forcedType?: 'cash' | 'card' | 'mixed') {
     if (!cart.length) return
     setSaving(true)
     setPavoError(null)
     let deviceResult: PaymentDeviceResult | undefined
 
     try {
-    const cashAmt = paymentType === 'card'
+    const type = forcedType ?? paymentType
+    const cashAmt = type === 'card'
       ? 0
-      : (paymentType === 'cash' ? grandTotal : cashAmount)
-    const cardAmt = paymentType === 'cash'
+      : type === 'cash'
+        ? (cashAmount > 0 ? cashAmount : grandTotal)
+        : cashAmount
+    const cardAmt = type === 'cash'
       ? 0
-      : (paymentType === 'card' ? grandTotal : (grandTotal - cashAmount))
+      : type === 'card'
+        ? grandTotal
+        : Math.max(0, parseFloat((grandTotal - cashAmount).toFixed(2)))
 
     if (pavoSettings) {
       if (cardAmt > 0) setPavoLoading(true)
@@ -511,7 +569,7 @@ export default function POSScreen({
         discountRate: docDiscountRate,
         discountAmount: docDiscountCalc,
         netAmount: grandTotal,
-        paymentType,
+        paymentType: type,
         cashAmount: cashAmt,
         cardAmount: cardAmt,
         customerId:   selectedCustomer?.id   ?? null,
@@ -537,6 +595,7 @@ export default function POSScreen({
       setSelectedCustomer(null)
       setPaymentMode(false)
       setCashInput('')
+      setNumpadTarget('qty')
       clearCart()
       searchRef.current?.focus()
     } catch (e) {
@@ -1513,33 +1572,95 @@ export default function POSScreen({
                   { key: 'mixed', label: 'Karma Ödeme', bg: '#fff8e1', color: '#e65100', span: true },
                 ].map(btn => (
                   <button key={btn.key}
-                    onClick={() => { setPaymentType(btn.key as 'cash' | 'card' | 'mixed'); setPaymentMode(true) }}
+                    onClick={() => {
+                      const type = btn.key as 'cash' | 'card' | 'mixed'
+                      setPaymentType(type)
+
+                      if (type === 'cash') {
+                        if (paymentMode && paymentType === 'cash') {
+                          setCashInput('')
+                          setNumpadTarget('qty')
+                          void completeSale('cash')
+                        } else {
+                          setCashInput('')
+                          setPaymentMode(true)
+                          setNumpadTarget('cash')
+                        }
+                      } else if (type === 'card') {
+                        setPaymentType('card')
+                        setNumpadTarget('qty')
+                        void completeSale('card')
+                      } else {
+                        setCashInput('')
+                        setPaymentMode(true)
+                        setNumpadTarget('cash')
+                      }
+                    }}
                     disabled={cart.length === 0 || Boolean(btn.disabled)}
                     title={btn.disabled ? 'Pavo cihazı ayarlı değil' : undefined}
-                    style={{ background: (cart.length === 0 || btn.disabled) ? '#f5f5f5' : btn.bg, color: (cart.length === 0 || btn.disabled) ? '#bdbdbd' : btn.color, border: 'none', borderRadius: 7, padding: '13px 4px', cursor: (cart.length === 0 || btn.disabled) ? 'default' : 'pointer', fontSize: 13, fontWeight: 600, gridColumn: btn.span ? 'span 2' : undefined }}
+                    style={{
+                      background: (cart.length === 0 || btn.disabled) ? '#f5f5f5' : btn.bg,
+                      color: (cart.length === 0 || btn.disabled) ? '#bdbdbd' : btn.color,
+                      border: paymentMode && paymentType === btn.key ? '2px solid currentColor' : 'none',
+                      borderRadius: 7,
+                      padding: '13px 4px',
+                      cursor: (cart.length === 0 || btn.disabled) ? 'default' : 'pointer',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      gridColumn: btn.span ? 'span 2' : undefined,
+                    }}
                   >{btn.label}</button>
                 ))}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {(paymentType === 'cash' || paymentType === 'mixed') && (
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                    <label style={{ fontSize: 10, color: '#757575', whiteSpace: 'nowrap' }}>
-                      {paymentType === 'mixed' ? 'Nakit:' : 'Alınan:'}
-                    </label>
-                    <input type="number" value={cashInput} onChange={e => setCashInput(e.target.value)} autoFocus
-                      style={{ flex: 1, border: '1px solid #90CAF9', borderRadius: 6, padding: '5px 8px', fontSize: 14, fontWeight: 700, outline: 'none' }} />
-                    {paymentType === 'cash' && cashAmount >= grandTotal && cashAmount > 0 && (
-                      <span style={{ fontSize: 11, color: '#2E7D32', fontWeight: 600, whiteSpace: 'nowrap' }}>↩ {fmt(change)}</span>
-                    )}
-                  </div>
+                  <>
+                    <div style={{
+                      display: 'flex',
+                      gap: 5,
+                      alignItems: 'center',
+                      padding: '6px 10px',
+                      borderRadius: 8,
+                      background: cashInput ? '#E8F5E9' : '#F9FAFB',
+                      border: `1px solid ${cashInput ? '#A5D6A7' : '#E5E7EB'}`,
+                    }}>
+                      <span style={{ fontSize: 11, color: '#757575', whiteSpace: 'nowrap' }}>
+                        {paymentType === 'mixed' ? 'Nakit:' : 'Alınan:'}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 16, fontWeight: 700, color: cashInput ? '#2E7D32' : '#9CA3AF' }}>
+                        {cashInput || '—'} {cashInput && '₺'}
+                      </span>
+                      {cashInput && cashAmount >= grandTotal && paymentType === 'cash' && (
+                        <span style={{ fontSize: 11, color: '#2E7D32', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          ↩ {fmt(change)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9CA3AF', textAlign: 'center' }}>
+                      {cashInput ? 'Numpad ile düzenliyorsunuz' : '💡 Numpad ile tutar girin veya boş bırakın'}
+                    </div>
+                  </>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 4 }}>
-                  <button onClick={() => { setPaymentMode(false); setCashInput('') }}
+                  <button onClick={() => {
+                      setPaymentMode(false)
+                      setCashInput('')
+                      setNumpadTarget('qty')
+                    }}
                     style={{ background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: 7, padding: 8, cursor: 'pointer', fontSize: 11 }}>İptal</button>
-                  <button onClick={completeSale}
-                    disabled={saving || (paymentType === 'cash' && cashAmount < grandTotal)}
-                    style={{ background: (saving || (paymentType === 'cash' && cashAmount < grandTotal)) ? '#f5f5f5' : '#2E7D32', color: (saving || (paymentType === 'cash' && cashAmount < grandTotal)) ? '#bdbdbd' : 'white', border: 'none', borderRadius: 7, padding: 8, cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                  <button onClick={() => void completeSale()}
+                    disabled={saving}
+                    style={{
+                      background: saving ? '#f5f5f5' : '#2E7D32',
+                      color: saving ? '#bdbdbd' : 'white',
+                      border: 'none',
+                      borderRadius: 7,
+                      padding: 8,
+                      cursor: saving ? 'default' : 'pointer',
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}>
                     {saving ? 'Kaydediliyor...' : 'Tamamla ✓'}
                   </button>
                 </div>
@@ -1570,9 +1691,7 @@ export default function POSScreen({
             <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>PLU grubu yok</div>
           )}
         </div>
-
       </div>
-
       {cancelWarning && (
         <div style={{
           position: 'fixed',

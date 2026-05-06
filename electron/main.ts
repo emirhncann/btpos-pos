@@ -153,15 +153,10 @@ app.whenReady().then(async () => {
       serial_no         TEXT,
       card_read_timeout INTEGER DEFAULT 30,
       print_width       TEXT DEFAULT '80mm',
-      invoice_type      TEXT DEFAULT 'e_archive',
       is_active         INTEGER DEFAULT 1,
       synced_at         TEXT
     )
   `)
-  const pdsCols = (db.prepare("PRAGMA table_info(payment_device_settings)").all() as { name: string }[]).map(c => c.name)
-  if (!pdsCols.includes('invoice_type')) {
-    db.exec(`ALTER TABLE payment_device_settings ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
-  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS unit_mappings (
@@ -455,6 +450,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:nextPavoSequence', async () => {
     const { nextPavoSequence } = await import('../db/operations')
     return nextPavoSequence()
+  })
+  ipcMain.handle('db:updatePavoSequence', async (_e, seq: number) => {
+    const { updatePavoSequence } = await import('../db/operations')
+    updatePavoSequence(seq)
   })
   ipcMain.handle('db:getUnitPavoCode', async (_e, unitName: string) => {
     const { getUnitPavoCode } = await import('../db/operations')

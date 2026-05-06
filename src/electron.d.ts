@@ -88,6 +88,7 @@ declare global {
         getPaymentDeviceSettings: (provider?: string) => Promise<PaymentDeviceRow | undefined>
         upsertPaymentDeviceSettings: (row: PaymentDeviceRow) => Promise<void>
         nextPavoSequence: () => Promise<number>
+        updatePavoSequence: (seq: number) => Promise<void>
         getUnitPavoCode: (unitName: string) => Promise<string>
         upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) => Promise<void>
         getAllUnitMappings: (companyId: string) => Promise<unknown[]>
@@ -329,7 +330,6 @@ declare global {
     serialNo:        string | null
     cardReadTimeout: number
     printWidth:      '58mm' | '80mm'
-    invoiceType:     'e_archive' | 'paper'
     isActive:        boolean
     syncedAt:        string | null
   }

@@ -66,6 +66,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getPaymentDeviceSettings: (provider) => electron.ipcRenderer.invoke("db:getPaymentDeviceSettings", provider),
     upsertPaymentDeviceSettings: (row) => electron.ipcRenderer.invoke("db:upsertPaymentDeviceSettings", row),
     nextPavoSequence: () => electron.ipcRenderer.invoke("db:nextPavoSequence"),
+    updatePavoSequence: (seq) => electron.ipcRenderer.invoke("db:updatePavoSequence", seq),
     getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),
     upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
     getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId)
