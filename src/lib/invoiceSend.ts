@@ -125,10 +125,26 @@ export async function sendPendingInvoices(
     sale_id:           daySaleId,
     day_end_sale_ids:  pending.map(s => s.id),
     customer:          torbaCari,
+    customer_erp_id:   Number(torbaCari.erp_id ?? 0),
     items:             allItems,
     invoice_date:      invoiceDate,
     description,
     endpoint,
+    cash_amount: pending.reduce((sum, s) => sum + Number(s.cashAmount ?? 0), 0),
+    card_amount: pending.reduce((sum, s) => sum + Number(s.cardAmount ?? 0), 0),
+    card_acquirer_id: null as string | null,
+    card_by_bank: (() => {
+      const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
+      for (const sale of pending) {
+        const cardAcquirerId = (sale as SaleDbRow & { cardAcquirerId?: string | null }).cardAcquirerId ?? null
+        if ((sale.cardAmount ?? 0) > 0 && cardAcquirerId) {
+          const id = cardAcquirerId
+          if (!cardByBank[id]) cardByBank[id] = { amount: 0, acquirerName: '' }
+          cardByBank[id].amount += Number(sale.cardAmount ?? 0)
+        }
+      }
+      return cardByBank
+    })(),
   }
 
   await window.electron.db.enqueueOperation({
@@ -154,6 +170,12 @@ export async function sendInvoiceForSale(
   saleId: string,
   customer: CustomerRow,
   invoiceType: 'e_archive' | 'paper' = 'e_archive',
+  payment?: {
+    cashAmount: number
+    cardAmount: number
+    cardAcquirerId: string | null
+    cardByBank?: Record<string, { amount: number; acquirerName: string }>
+  },
 ): Promise<void> {
   const endpoint = invoiceType === 'paper'
     ? `/integration/invoice-paper/${companyId}`
@@ -163,6 +185,7 @@ export async function sendInvoiceForSale(
   const payload = {
     sale_id:      saleId,
     customer:     customerRowToInvoicePayload(customer),
+    customer_erp_id: Number.parseInt(customer.id ?? '0', 10) || 0,
     items:        await Promise.all(items.map(async i => {
       let productId = 0
       let unitCode = 'C62'
@@ -187,6 +210,10 @@ export async function sendInvoiceForSale(
     invoice_date: new Date().toISOString().replace('T', ' ').slice(0, 19),
     description:  `POS Satışı — ${customer.name}`,
     endpoint,
+    cash_amount:      payment?.cashAmount ?? 0,
+    card_amount:      payment?.cardAmount ?? 0,
+    card_acquirer_id: payment?.cardAcquirerId ?? null,
+    card_by_bank:     payment?.cardByBank ?? {},
   }
 
   await window.electron.db.enqueueOperation({

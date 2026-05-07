@@ -42,6 +42,7 @@ export const sales = sqliteTable('sales', {
   invoiceId:      text('invoice_id'),
   invoiceError:   text('invoice_error'),
   invoiceAt:      text('invoice_at'),
+  cardAcquirerId: text('card_acquirer_id'),
   paymentProvider:   text('payment_provider'),
   paymentDeviceData: text('payment_device_data'),
 })

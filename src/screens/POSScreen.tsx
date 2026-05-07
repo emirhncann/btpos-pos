@@ -43,6 +43,12 @@ interface Props {
   commandDeferred?: boolean
 }
 
+interface CardPaymentInfo {
+  acquirerId: string
+  amount: number
+  acquirerName?: string
+}
+
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
@@ -522,6 +528,16 @@ export default function POSScreen({
       : type === 'card'
         ? grandTotal
         : Math.max(0, parseFloat((grandTotal - cashAmount).toFixed(2)))
+    console.log('[completeSale]', {
+      type,
+      cashAmt,
+      cardAmt,
+      cashInput,
+      cashAmount,
+      grandTotal,
+      forcedType,
+      paymentType,
+    })
 
     if (pavoSettings) {
       if (cardAmt > 0) setPavoLoading(true)
@@ -563,7 +579,48 @@ export default function POSScreen({
     }
 
       const receiptNo = nextReceiptNo()
-      const saleRow: SaleRow = {
+      type RawPayment = {
+        StatusId?: unknown
+        PaymentMediatorId?: unknown
+        PaymentAmount?: unknown
+        OnlinePayment?: { AcquirerId?: unknown; AcquirerName?: unknown }
+        CashPayment?: { GivenAmount?: unknown }
+      }
+      const rawData = (deviceResult?.raw?.Data as { AddedPayments?: unknown[] } | undefined)
+      const addedPayments = Array.isArray(rawData?.AddedPayments) ? rawData.AddedPayments : []
+      const successPayments = addedPayments
+        .map(p => p as RawPayment)
+        .filter(p => Number(p.StatusId) === 2)
+      const cashPayments = successPayments.filter(p => Number(p.PaymentMediatorId) === 1)
+      const actualCashAmt = cashPayments.reduce((s, p) => s + Number(p.PaymentAmount ?? 0), 0)
+      const cardPaymentsRaw = successPayments.filter(p => Number(p.PaymentMediatorId) === 2)
+
+      const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
+      for (const p of cardPaymentsRaw) {
+        const acquirerId = String(p.OnlinePayment?.AcquirerId ?? 'unknown')
+        const acquirerName = String(p.OnlinePayment?.AcquirerName ?? '')
+        const amount = Number(p.PaymentAmount ?? 0)
+        if (!cardByBank[acquirerId]) {
+          cardByBank[acquirerId] = { amount: 0, acquirerName }
+        }
+        cardByBank[acquirerId].amount += amount
+      }
+      const cardPaymentInfos: CardPaymentInfo[] = Object.entries(cardByBank).map(([acquirerId, info]) => ({
+        acquirerId,
+        amount: info.amount,
+        acquirerName: info.acquirerName,
+      }))
+      const firstCard = cardPaymentsRaw[0]
+      const cardAcquirerId = firstCard?.OnlinePayment?.AcquirerId != null
+        ? String(firstCard.OnlinePayment.AcquirerId)
+        : null
+      console.log('[completeSale] cardAcquirerId:', cardAcquirerId)
+      console.log('[completeSale] addedPayments:', addedPayments)
+      console.log('[completeSale] cardByBank:', cardByBank)
+      console.log('[completeSale] cardPaymentInfos:', cardPaymentInfos)
+      console.log('[completeSale] actualCashAmt:', actualCashAmt)
+
+      const saleRow = {
         receiptNo,
         totalAmount: lineSubtotal,
         discountRate: docDiscountRate,
@@ -572,6 +629,7 @@ export default function POSScreen({
         paymentType: type,
         cashAmount: cashAmt,
         cardAmount: cardAmt,
+        cardAcquirerId,
         customerId:   selectedCustomer?.id   ?? null,
         customerName: selectedCustomer?.name ?? null,
         customerCode: selectedCustomer?.code ?? null,
@@ -589,7 +647,12 @@ export default function POSScreen({
         appliedBy: cashier.id,
       })), deviceResult)
       if (selectedCustomer && saleId && companyId) {
-        void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType)
+        void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType, {
+          cashAmount: cashAmt,
+          cardAmount: cardAmt,
+          cardAcquirerId,
+          cardByBank,
+        })
       }
       setLastReceipt(receiptNo)
       setSelectedCustomer(null)

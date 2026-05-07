@@ -74,7 +74,7 @@ declare global {
         enqueueOperation:  (params: {
           id: string
           companyId: string
-          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
           payload: Record<string, unknown>
           label?: string
         }) => Promise<void>
@@ -99,7 +99,7 @@ declare global {
   interface OperationQueueRow {
     id:          string
     companyId:   string
-    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
     payload:     string
     status:      'pending' | 'processing' | 'success' | 'failed'
     attempts:    number
@@ -189,6 +189,7 @@ declare global {
     paymentType:     'cash' | 'card' | 'mixed'
     cashAmount:      number
     cardAmount:      number
+    cardAcquirerId?: string | null
     customerId?:     string | null
     customerName?:   string | null
     customerCode?:   string | null
@@ -205,6 +206,7 @@ declare global {
     paymentType:    string
     cashAmount:     number | null
     cardAmount:     number | null
+    cardAcquirerId: string | null
     createdAt:      string
     synced:         boolean
     customerId:     string | null

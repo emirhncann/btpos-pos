@@ -175,6 +175,7 @@ app.whenReady().then(async () => {
   `)
   db.prepare('INSERT OR IGNORE INTO pavo_sequence (id, seq) VALUES (1, 0)').run()
   const salesCols = (db.prepare("PRAGMA table_info(sales)").all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('card_acquirer_id')) db.exec(`ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT`)
   if (!salesCols.includes('payment_provider')) db.exec(`ALTER TABLE sales ADD COLUMN payment_provider TEXT`)
   if (!salesCols.includes('payment_device_data')) db.exec(`ALTER TABLE sales ADD COLUMN payment_device_data TEXT`)
 
@@ -394,7 +395,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:enqueueOperation', async (_e, params: {
     id: string
     companyId: string
-    type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+    type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
     payload: Record<string, unknown>
     label?: string
   }) => {

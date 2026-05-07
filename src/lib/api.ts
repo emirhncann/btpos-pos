@@ -192,7 +192,7 @@ export const api = {
       description?: string
       endpoint?: string
     },
-  ): Promise<{ success: boolean; invoice_id?: string; message?: string }> {
+  ): Promise<{ success: boolean; invoice_id?: string; invoice_number?: string; message?: string }> {
     const endpoint = payload.endpoint && payload.endpoint.trim().length > 0
       ? payload.endpoint
       : `/integration/invoice/${companyId}`

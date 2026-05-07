@@ -39,6 +39,7 @@ export interface SaleRow {
   paymentType: 'cash' | 'card' | 'mixed'
   cashAmount: number
   cardAmount: number
+  cardAcquirerId?: string | null
   customerId?:   string | null
   customerName?: string | null
   customerCode?: string | null
@@ -131,6 +132,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     invoiceId:    null,
     invoiceError: null,
     invoiceAt:    null,
+    cardAcquirerId: sale.cardAcquirerId ?? null,
     paymentProvider: device?.provider ?? null,
     paymentDeviceData,
   }).run()
@@ -1343,7 +1345,7 @@ export function getCustomers(companyId: string, query?: string): CustomerRow[] {
   return rows.map(mapCustomerRow)
 }
 
-export type OperationQueueType = 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice'
+export type OperationQueueType = 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
 
 export interface OperationQueueRow {
   id:          string
@@ -1364,7 +1366,7 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
   const status: OperationQueueRow['status'] =
     st === 'processing' || st === 'success' || st === 'failed' ? st : 'pending'
   const tp = String(r.type ?? '')
-  const type = (['invoice', 'return_invoice', 'customer', 'day_end_invoice'].includes(tp)
+  const type = (['invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment'].includes(tp)
     ? tp
     : 'invoice') as OperationQueueType
   return {

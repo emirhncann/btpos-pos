@@ -64,6 +64,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       invoice_id TEXT,
       invoice_error TEXT,
       invoice_at TEXT,
+      card_acquirer_id TEXT,
       payment_provider TEXT,
       payment_device_data TEXT
     );
@@ -379,6 +380,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
 
   const salesCols = (sqlite.prepare('PRAGMA table_info(sales)').all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('card_acquirer_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT')
   if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
 
