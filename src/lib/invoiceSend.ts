@@ -120,6 +120,9 @@ export async function sendPendingInvoices(
   const endpoint = invoiceType === 'paper'
     ? `/integration/invoice-paper/${companyId}`
     : `/integration/invoice/${companyId}`
+  const pendingSaleIds = pending.map(s => s.id)
+  const cardByBank = await window.electron.db.getCardTotalsByBank(pendingSaleIds)
+  const cashTotal = await window.electron.db.getCashTotal(pendingSaleIds)
 
   const payload = {
     sale_id:           daySaleId,
@@ -130,21 +133,10 @@ export async function sendPendingInvoices(
     invoice_date:      invoiceDate,
     description,
     endpoint,
-    cash_amount: pending.reduce((sum, s) => sum + Number(s.cashAmount ?? 0), 0),
+    cash_amount: cashTotal,
     card_amount: pending.reduce((sum, s) => sum + Number(s.cardAmount ?? 0), 0),
     card_acquirer_id: null as string | null,
-    card_by_bank: (() => {
-      const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
-      for (const sale of pending) {
-        const cardAcquirerId = (sale as SaleDbRow & { cardAcquirerId?: string | null }).cardAcquirerId ?? null
-        if ((sale.cardAmount ?? 0) > 0 && cardAcquirerId) {
-          const id = cardAcquirerId
-          if (!cardByBank[id]) cardByBank[id] = { amount: 0, acquirerName: '' }
-          cardByBank[id].amount += Number(sale.cardAmount ?? 0)
-        }
-      }
-      return cardByBank
-    })(),
+    card_by_bank: cardByBank,
   }
 
   await window.electron.db.enqueueOperation({

@@ -84,6 +84,17 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       FOREIGN KEY (sale_id) REFERENCES sales(id)
     );
 
+    CREATE TABLE IF NOT EXISTS sale_payments (
+      id            TEXT PRIMARY KEY,
+      sale_id       TEXT NOT NULL,
+      method        TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      mediator      INTEGER,
+      acquirer_id   TEXT,
+      acquirer_name TEXT,
+      created_at    TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS cashiers (
       id           TEXT PRIMARY KEY,
       company_id   TEXT NOT NULL DEFAULT '',

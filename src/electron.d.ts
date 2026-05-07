@@ -68,6 +68,10 @@ declare global {
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
+        saveSalePayments:  (payments: SalePaymentRow[]) => Promise<void>
+        getSalePayments:   (saleId: string) => Promise<SalePaymentRow[]>
+        getCardTotalsByBank: (saleIds: string[]) => Promise<Record<string, { amount: number; acquirerName: string }>>
+        getCashTotal:      (saleIds: string[]) => Promise<number>
         getProductByCode:  (code: string) => Promise<ProductRow | null>
         getProductIdByCode: (code: string) => Promise<string | null>
         upsertCustomer:    (row: CustomerRow) => Promise<void>
@@ -229,6 +233,17 @@ declare global {
     vatRate:      number
     unit:         string
     discountRate?: number
+  }
+
+  interface SalePaymentRow {
+    id:            string
+    saleId:        string
+    method:        'cash' | 'card' | 'meal_card'
+    amount:        number
+    mediator?:     number | null
+    acquirerId?:   string | null
+    acquirerName?: string | null
+    createdAt?:    string | null
   }
 
   interface SaleRecord {

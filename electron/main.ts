@@ -178,6 +178,25 @@ app.whenReady().then(async () => {
   if (!salesCols.includes('card_acquirer_id')) db.exec(`ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT`)
   if (!salesCols.includes('payment_provider')) db.exec(`ALTER TABLE sales ADD COLUMN payment_provider TEXT`)
   if (!salesCols.includes('payment_device_data')) db.exec(`ALTER TABLE sales ADD COLUMN payment_device_data TEXT`)
+  if (!salesCols.includes('cashier_id')) db.exec(`ALTER TABLE sales ADD COLUMN cashier_id TEXT`)
+  if (!salesCols.includes('cashier_name')) db.exec(`ALTER TABLE sales ADD COLUMN cashier_name TEXT`)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sale_payments (
+      id            TEXT PRIMARY KEY,
+      sale_id       TEXT NOT NULL,
+      method        TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      mediator      INTEGER,
+      acquirer_id   TEXT,
+      acquirer_name TEXT,
+      cashier_id    TEXT,
+      cashier_name  TEXT,
+      created_at    TEXT DEFAULT (datetime('now'))
+    )
+  `)
+  const spCols = (db.prepare("PRAGMA table_info(sale_payments)").all() as { name: string }[]).map(c => c.name)
+  if (!spCols.includes('cashier_id')) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_id TEXT`)
+  if (!spCols.includes('cashier_name')) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_name TEXT`)
 
   createWindow()
 
@@ -377,6 +396,22 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getSaleItems', async (_e, saleId: string) => {
     const { getSaleItems } = await import('../db/operations')
     return getSaleItems(saleId)
+  })
+  ipcMain.handle('db:saveSalePayments', async (_e, payments: unknown) => {
+    const { saveSalePayments } = await import('../db/operations')
+    saveSalePayments(db, payments as import('../db/operations').SalePaymentRow[])
+  })
+  ipcMain.handle('db:getSalePayments', async (_e, saleId: string) => {
+    const { getSalePayments } = await import('../db/operations')
+    return getSalePayments(db, saleId)
+  })
+  ipcMain.handle('db:getCardTotalsByBank', async (_e, saleIds: string[]) => {
+    const { getCardTotalsByBank } = await import('../db/operations')
+    return getCardTotalsByBank(db, saleIds)
+  })
+  ipcMain.handle('db:getCashTotal', async (_e, saleIds: string[]) => {
+    const { getCashTotal } = await import('../db/operations')
+    return getCashTotal(db, saleIds)
   })
   ipcMain.handle('db:getProductByCode', async (_e, code: string) => {
     const { getProductByCode } = await import('../db/operations')

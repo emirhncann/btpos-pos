@@ -38,6 +38,8 @@ export const sales = sqliteTable('sales', {
   customerId:     text('customer_id'),
   customerName:   text('customer_name'),
   customerCode:   text('customer_code'),
+  cashierId:      text('cashier_id'),
+  cashierName:    text('cashier_name'),
   invoiceSent:    integer('invoice_sent').notNull().default(0),
   invoiceId:      text('invoice_id'),
   invoiceError:   text('invoice_error'),
@@ -59,6 +61,19 @@ export const saleItems = sqliteTable('sale_items', {
   discountAmount: real('discount_amount').default(0),
   lineTotal:      real('line_total').notNull(),
   appliedBy:      text('applied_by'),
+})
+
+export const salePayments = sqliteTable('sale_payments', {
+  id:           text('id').primaryKey(),
+  saleId:       text('sale_id').notNull(),
+  method:       text('method').notNull(),
+  amount:       real('amount').notNull(),
+  mediator:     integer('mediator'),
+  acquirerId:   text('acquirer_id'),
+  acquirerName: text('acquirer_name'),
+  cashierId:    text('cashier_id'),
+  cashierName:  text('cashier_name'),
+  createdAt:    text('created_at'),
 })
 
 // Kasiyerler (Supabase'den çekilip yerel cache olarak saklanır)

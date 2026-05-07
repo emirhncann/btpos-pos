@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('electron', {
     markInvoiceError:  (saleId: string, error: string) =>
       ipcRenderer.invoke('db:markInvoiceError', saleId, error),
     getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
+    saveSalePayments: (payments: unknown) => ipcRenderer.invoke('db:saveSalePayments', payments),
+    getSalePayments: (saleId: string) => ipcRenderer.invoke('db:getSalePayments', saleId),
+    getCardTotalsByBank: (saleIds: string[]) => ipcRenderer.invoke('db:getCardTotalsByBank', saleIds),
+    getCashTotal: (saleIds: string[]) => ipcRenderer.invoke('db:getCashTotal', saleIds),
     getProductByCode:  (code: string) => ipcRenderer.invoke('db:getProductByCode', code),
     getProductIdByCode: (code: string) => ipcRenderer.invoke('db:getProductIdByCode', code),
     upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),

@@ -99,23 +99,14 @@ export async function pavoCompleteSale(
   orderNo: string,
   amount: number,
   items: PavoSaleItem[],
-  cashAmount: number,
-  cardAmount: number,
-  customer?: CustomerRow | null,
-): Promise<PaymentDeviceResult> {
-  const payments: Array<{
+  payments: Array<{
     Mediator: number
     Amount: number
     CurrencyCode: string
     ExchangeRate: number
-  }> = []
-  if (cashAmount > 0) {
-    payments.push({ Mediator: 1, Amount: cashAmount, CurrencyCode: 'TRY', ExchangeRate: 1 })
-  }
-  if (cardAmount > 0) {
-    payments.push({ Mediator: 2, Amount: cardAmount, CurrencyCode: 'TRY', ExchangeRate: 1 })
-  }
-
+  }>,
+  customer?: CustomerRow | null,
+): Promise<PaymentDeviceResult> {
   let customerParty: Record<string, unknown> | undefined
   if (customer) {
     const parts = (customer.name ?? '').split(' ')

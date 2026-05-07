@@ -30,6 +30,19 @@ export interface SaleItem {
   appliedBy?: string
 }
 
+export interface SalePaymentRow {
+  id:            string
+  saleId:        string
+  method:        'cash' | 'card' | 'meal_card'
+  amount:        number
+  mediator?:     number | null
+  acquirerId?:   string | null
+  acquirerName?: string | null
+  cashierId?:    string | null
+  cashierName?:  string | null
+  createdAt?:    string | null
+}
+
 export interface SaleRow {
   receiptNo: string
   totalAmount: number
@@ -40,6 +53,8 @@ export interface SaleRow {
   cashAmount: number
   cardAmount: number
   cardAcquirerId?: string | null
+  cashierId?:   string | null
+  cashierName?: string | null
   customerId?:   string | null
   customerName?: string | null
   customerCode?: string | null
@@ -128,6 +143,8 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     customerId:   sale.customerId   ?? null,
     customerName: sale.customerName ?? null,
     customerCode: sale.customerCode ?? null,
+    cashierId: sale.cashierId ?? null,
+    cashierName: sale.cashierName ?? null,
     invoiceSent:  0,
     invoiceId:    null,
     invoiceError: null,
@@ -253,6 +270,79 @@ export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
     unit:         r.p_unit?.trim() ? r.p_unit : 'Adet',
     discountRate: r.discount_rate ?? 0,
   }))
+}
+
+export function saveSalePayments(
+  db: BetterSqlite3.Database,
+  payments: SalePaymentRow[],
+): void {
+  const stmt = db.prepare(`
+    INSERT INTO sale_payments (id, sale_id, method, amount, mediator, acquirer_id, acquirer_name, cashier_id, cashier_name, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  for (const p of payments) {
+    stmt.run(
+      p.id,
+      p.saleId,
+      p.method,
+      p.amount,
+      p.mediator ?? null,
+      p.acquirerId ?? null,
+      p.acquirerName ?? null,
+      p.cashierId ?? null,
+      p.cashierName ?? null,
+      p.createdAt ?? new Date().toISOString(),
+    )
+  }
+}
+
+export function getSalePayments(
+  db: BetterSqlite3.Database,
+  saleId: string,
+): SalePaymentRow[] {
+  return db.prepare(`
+    SELECT * FROM sale_payments WHERE sale_id = ? ORDER BY created_at
+  `).all(saleId) as SalePaymentRow[]
+}
+
+export function getCardTotalsByBank(
+  db: BetterSqlite3.Database,
+  saleIds: string[],
+): Record<string, { amount: number; acquirerName: string }> {
+  if (saleIds.length === 0) return {}
+  const placeholders = saleIds.map(() => '?').join(',')
+  const rows = db.prepare(`
+    SELECT acquirer_id, acquirer_name, SUM(amount) as total
+    FROM sale_payments
+    WHERE sale_id IN (${placeholders})
+      AND method = 'card'
+      AND acquirer_id IS NOT NULL
+    GROUP BY acquirer_id
+  `).all(...saleIds) as Array<{ acquirer_id: string; acquirer_name: string | null; total: number }>
+
+  const result: Record<string, { amount: number; acquirerName: string }> = {}
+  for (const r of rows) {
+    result[r.acquirer_id] = {
+      amount: Number(r.total ?? 0),
+      acquirerName: r.acquirer_name ?? '',
+    }
+  }
+  return result
+}
+
+export function getCashTotal(
+  db: BetterSqlite3.Database,
+  saleIds: string[],
+): number {
+  if (saleIds.length === 0) return 0
+  const placeholders = saleIds.map(() => '?').join(',')
+  const row = db.prepare(`
+    SELECT SUM(amount) as total
+    FROM sale_payments
+    WHERE sale_id IN (${placeholders})
+      AND method = 'cash'
+  `).get(...saleIds) as { total: number | null } | undefined
+  return Number(row?.total ?? 0)
 }
 
 export function getSales(dateFrom?: string, dateTo?: string) {
