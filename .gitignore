@@ -24,3 +24,8 @@ Thumbs.db
 # Electron / native derleme artıkları
 *.node
 dist-electron/
+package-lock.json
+package-lock.json
+package-lock.json
+/.tools
+package.json
