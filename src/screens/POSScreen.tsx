@@ -144,6 +144,8 @@ export default function POSScreen({
   const [pavoLoading, setPavoLoading] = useState(false)
   const [pavoError, setPavoError] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const cartListRef = useRef<HTMLDivElement>(null)
+  const prevCartLenRef = useRef(0)
 
   useEffect(() => {
     if (!showCustomer || !companyId) return
@@ -298,6 +300,14 @@ export default function POSScreen({
       setLineDiscAmtIn(c.discountAmount ? String(c.discountAmount) : '')
     }
   }, [lineDiscountTarget])
+
+  useEffect(() => {
+    if (cart.length > prevCartLenRef.current) {
+      const el = cartListRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
+    prevCartLenRef.current = cart.length
+  }, [cart.length])
 
   /* ── Barkod okuyucu ── */
   useEffect(() => {
@@ -1361,7 +1371,7 @@ export default function POSScreen({
             <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Tutar</span>
           </div>
 
-          <div style={{
+          <div ref={cartListRef} style={{
             flex: 1,
             overflowY: 'auto',
             minHeight: 0,
@@ -1438,14 +1448,13 @@ export default function POSScreen({
                   key={item.id}
                   onClick={() => {
                     if (cancelMode) removeFromCart(item.id)
-                    else if (posSettings.allowLineDiscount) setLineDiscountTarget(item.id)
                   }}
                   style={{
                     display: 'grid',
                     gridTemplateColumns: CART_GRID,
                     padding: '8px 12px',
                     alignItems: 'start',
-                    cursor: cancelMode || posSettings.allowLineDiscount ? 'pointer' : 'default',
+                    cursor: cancelMode ? 'pointer' : 'default',
                     background: rowBg,
                     borderRadius: 11,
                     marginBottom: 5,
@@ -1461,7 +1470,23 @@ export default function POSScreen({
                     (e.currentTarget as HTMLDivElement).style.background = rowBg
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                    <div style={{
+                      minWidth: 20,
+                      height: 20,
+                      borderRadius: 6,
+                      border: '1px solid #d1d5db',
+                      background: '#f9fafb',
+                      color: '#6b7280',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      marginTop: 2,
+                    }}>
+                      {rowIdx + 1}
+                    </div>
                     {cancelMode ? (
                       <div style={{
                         width: 20, height: 20, borderRadius: 6,
@@ -1469,14 +1494,25 @@ export default function POSScreen({
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 9, fontWeight: 700, color: '#C62828', marginTop: 2,
                       }}>İ</div>
-                    ) : (
-                      <div style={{
-                        width: 20, height: 20, borderRadius: 6,
-                        background: '#E8F5E9', border: '1.5px solid #A5D6A7',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 9, fontWeight: 700, color: '#2E7D32', marginTop: 2,
-                      }}>S</div>
-                    )}
+                    ) : posSettings.allowLineDiscount ? (
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation()
+                          setLineDiscountTarget(item.id)
+                        }}
+                        style={{
+                          width: 20, height: 20, borderRadius: 6,
+                          background: '#FFF3E0', border: '1.5px solid #FFCC80',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10, fontWeight: 700, color: '#E65100', marginTop: 2,
+                          cursor: 'pointer', padding: 0,
+                        }}
+                        title="Satır indirimi"
+                      >
+                        %
+                      </button>
+                    ) : null}
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{
