@@ -9,7 +9,7 @@ import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 
-const CART_GRID = '24px 1fr 72px 82px'
+const CART_GRID = '42px 1fr 72px 82px'
 
 function hexToSoft(hex: string): string {
   try {
@@ -612,6 +612,13 @@ export default function POSScreen({
         const seq = await window.electron.db.nextPavoSequence()
         const orderNo = nextReceiptNo().padStart(17, '0')
         const round2 = (n: number) => parseFloat(n.toFixed(2))
+        const salePriceEffect = docDiscountCalc > 0
+          ? {
+            Type: 1,
+            Rate: docDiscountRate > 0 ? round2(docDiscountRate) : 0,
+            Amount: docDiscountRate > 0 ? 0 : round2(docDiscountCalc),
+          }
+          : undefined
         const pavoItems = cart.map(c => {
           // Pavo'ya indirimli satır fiyatını gönder:
           // birim = net satır / miktar, ardından gross/total bu birimden türetilir.
@@ -636,6 +643,7 @@ export default function POSScreen({
           grandTotal,
           pavoItems,
           pavoPaymentsFinal,
+          salePriceEffect,
           selectedCustomer,
         )
 
@@ -1502,10 +1510,10 @@ export default function POSScreen({
                     (e.currentTarget as HTMLDivElement).style.background = rowBg
                   }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
                     <div style={{
-                      minWidth: 20,
-                      height: 20,
+                      minWidth: 22,
+                      height: 22,
                       borderRadius: 6,
                       border: '1px solid #d1d5db',
                       background: '#f9fafb',
@@ -1513,7 +1521,7 @@ export default function POSScreen({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: 10,
+                      fontSize: 11,
                       fontWeight: 700,
                       marginTop: 2,
                     }}>
@@ -1534,10 +1542,10 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
-                          width: 24, height: 24, borderRadius: 7,
+                          width: 30, height: 30, borderRadius: 9,
                           background: '#FFF3E0', border: '1.5px solid #FFB74D',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 14, fontWeight: 700, color: '#E65100', marginTop: 2,
+                          fontSize: 17, fontWeight: 700, color: '#E65100', marginTop: 2,
                           cursor: 'pointer', padding: 0,
                         }}
                         title="Satır indirimi"
@@ -1550,7 +1558,8 @@ export default function POSScreen({
                     <div style={{
                       fontSize: cartSettings.fsUrunAdi, fontWeight: 600,
                       color: cancelMode ? '#dc2626' : '#111',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip',
+                      wordBreak: 'break-word',
                       lineHeight: 1.3, marginBottom: 3,
                     }}>{item.name}</div>
                     <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>

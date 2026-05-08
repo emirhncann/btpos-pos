@@ -105,6 +105,11 @@ export async function pavoCompleteSale(
     CurrencyCode: string
     ExchangeRate: number
   }>,
+  explicitPriceEffect?: {
+    Type: number
+    Rate: number
+    Amount: number
+  },
   customer?: CustomerRow | null,
 ): Promise<PaymentDeviceResult> {
   let customerParty: Record<string, unknown> | undefined
@@ -143,9 +148,10 @@ export async function pavoCompleteSale(
   }))
   const itemsTotal = saleItems.reduce((sum, item) => sum + Number(item.TotalPriceAmount ?? 0), 0)
   const priceEffectAmount = Math.max(0, parseFloat((itemsTotal - amount).toFixed(2)))
-  const priceEffect = priceEffectAmount > 0
+  const computedPriceEffect = priceEffectAmount > 0
     ? { Type: 1, Rate: 0, Amount: priceEffectAmount }
     : undefined
+  const priceEffect = explicitPriceEffect ?? computedPriceEffect
 
   const body = {
     TransactionHandle: transactionHandle(settings, seq),
