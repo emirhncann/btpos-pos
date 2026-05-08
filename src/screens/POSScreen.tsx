@@ -143,6 +143,7 @@ export default function POSScreen({
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
   const [pavoError, setPavoError] = useState<string | null>(null)
+  const [errorPopup, setErrorPopup] = useState<{ title: string; message: string } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
@@ -288,6 +289,10 @@ export default function POSScreen({
     setTimeout(() => setCancelWarning(null), 3000)
   }
 
+  function showErrorPopup(title: string, message: string) {
+    setErrorPopup({ title, message })
+  }
+
   useEffect(() => {
     if (!lineDiscountTarget) {
       setLineDiscRateIn('')
@@ -402,7 +407,7 @@ export default function POSScreen({
     const amt = discMode === 'amt' ? parseFloat(lineDiscAmtIn.replace(',', '.')) || 0 : 0
     const maxPct = posSettings.maxLineDiscountPct ?? 100
     if (rate > maxPct) {
-      alert(`Maksimum satır indirimi %${maxPct}`)
+      showErrorPopup('İndirim Limiti', `Maksimum satır indirimi %${maxPct}`)
       return
     }
     setCart(prev => prev.map(c => {
@@ -624,7 +629,7 @@ export default function POSScreen({
         }
         })
 
-        deviceResult = await (pavoCompleteSale as any)(
+        deviceResult = await pavoCompleteSale(
           pavoSettings,
           seq,
           orderNo,
@@ -632,14 +637,14 @@ export default function POSScreen({
           pavoItems,
           pavoPaymentsFinal,
           selectedCustomer,
-        ) as PaymentDeviceResult
+        )
 
         if (!deviceResult.success) {
-          alert(`Ödeme başarısız: ${deviceResult.message ?? 'Pavo hatası'}`)
+          showErrorPopup('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
           return
         }
       } catch (e) {
-        alert(`Pavo bağlantı hatası: ${String(e)}`)
+        showErrorPopup('Pavo Bağlantı Hatası', String(e))
         return
       } finally {
         setPavoLoading(false)
@@ -769,7 +774,7 @@ export default function POSScreen({
       clearCart()
       searchRef.current?.focus()
     } catch (e) {
-      alert('Satış kaydedilemedi: ' + (e instanceof Error ? e.message : 'Hata'))
+      showErrorPopup('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
     }
@@ -1023,11 +1028,7 @@ export default function POSScreen({
                   C
                 </button>
                 <button type="button"
-                  onClick={() => {
-                    applyLineDiscount()
-                    setLineDiscountTarget(null)
-                    setDiscMode('rate')
-                  }}
+                  onClick={() => { applyLineDiscount(); setDiscMode('rate') }}
                   style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
                   Uygula
                 </button>
@@ -1106,7 +1107,7 @@ export default function POSScreen({
                   if (docDiscMode === 'rate') {
                     const maxPct = posSettings.maxDocDiscountPct ?? 100
                     if (val > maxPct) {
-                      alert(`Maksimum belge indirimi %${maxPct}`)
+                      showErrorPopup('İndirim Limiti', `Maksimum belge indirimi %${maxPct}`)
                       return
                     }
                     setDocDiscountRate(val)
@@ -1119,6 +1120,32 @@ export default function POSScreen({
                 }}
                 style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
                 Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {errorPopup && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #FECACA', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+            <div style={{ background: '#FEF2F2', borderBottom: '1px solid #FECACA', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <AppLogo height={22} />
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#991B1B' }}>{errorPopup.title}</span>
+              </div>
+              <button onClick={() => setErrorPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: '#B91C1C', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ padding: '14px 16px 6px', fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
+              {errorPopup.message}
+            </div>
+            <div style={{ padding: '10px 16px 16px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setErrorPopup(null)}
+                style={{ padding: '10px 16px', borderRadius: 9, border: 'none', background: '#B91C1C', color: 'white', fontWeight: 700, cursor: 'pointer' }}
+              >
+                Tamam
               </button>
             </div>
           </div>
@@ -1507,15 +1534,15 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
-                          width: 26, height: 26, borderRadius: 8,
-                          background: '#FFF3E0', border: '1.5px solid #FFCC80',
+                          width: 24, height: 24, borderRadius: 7,
+                          background: '#FFF3E0', border: '1.5px solid #FFB74D',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           fontSize: 14, fontWeight: 700, color: '#E65100', marginTop: 2,
                           cursor: 'pointer', padding: 0,
                         }}
                         title="Satır indirimi"
                       >
-                        🏷️
+                        🏷
                       </button>
                     ) : null}
                   </div>

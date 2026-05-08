@@ -93,48 +93,20 @@ export async function pavoPair(settings: PavoSettings, seq: number): Promise<Pay
   }
 }
 
-type PavoPaymentInformation = {
-  Mediator: number
-  Amount: number
-  CurrencyCode: string
-  ExchangeRate: number
-}
-
 export async function pavoCompleteSale(
   settings: PavoSettings,
   seq: number,
   orderNo: string,
   amount: number,
   items: PavoSaleItem[],
-  payments: PavoPaymentInformation[],
-  customer?: CustomerRow | null,
-): Promise<PaymentDeviceResult>
-export async function pavoCompleteSale(
-  settings: PavoSettings,
-  seq: number,
-  orderNo: string,
-  amount: number,
-  grossAmount: number | undefined,
-  items: PavoSaleItem[],
-  payments: PavoPaymentInformation[],
+  payments: Array<{
+    Mediator: number
+    Amount: number
+    CurrencyCode: string
+    ExchangeRate: number
+  }>,
   customer?: CustomerRow | null,
 ): Promise<PaymentDeviceResult> {
-  let grossAmount: number | undefined
-  let items: PavoSaleItem[]
-  let payments: PavoPaymentInformation[]
-  let customer: CustomerRow | null | undefined
-
-  if (Array.isArray(arguments[4])) {
-    items = arguments[4] as PavoSaleItem[]
-    payments = arguments[5] as PavoPaymentInformation[]
-    customer = arguments[6] as CustomerRow | null | undefined
-  } else {
-    grossAmount = arguments[4] as number | undefined
-    items = arguments[5] as PavoSaleItem[]
-    payments = arguments[6] as PavoPaymentInformation[]
-    customer = arguments[7] as CustomerRow | null | undefined
-  }
-
   let customerParty: Record<string, unknown> | undefined
   if (customer) {
     const parts = (customer.name ?? '').split(' ')
@@ -169,10 +141,11 @@ export async function pavoCompleteSale(
       TotalPriceAmount: i.totalPrice,
     }
   }))
-  const round2 = (n: number) => Math.round(n * 100) / 100
-  const itemsGrossTotal = round2(items.reduce((s, i) => s + i.totalPrice, 0))
-  const saleGrossTotal = grossAmount ?? itemsGrossTotal
-  const saleDiscountAmount = round2(Math.max(0, saleGrossTotal - amount))
+  const itemsTotal = saleItems.reduce((sum, item) => sum + Number(item.TotalPriceAmount ?? 0), 0)
+  const priceEffectAmount = Math.max(0, parseFloat((itemsTotal - amount).toFixed(2)))
+  const priceEffect = priceEffectAmount > 0
+    ? { Type: 1, Rate: 0, Amount: priceEffectAmount }
+    : undefined
 
   const body = {
     TransactionHandle: transactionHandle(settings, seq),
@@ -181,7 +154,7 @@ export async function pavoCompleteSale(
       RefererAppVersion: '1.0.0',
       OrderNo: orderNo,
       MainDocumentType: 1,
-      GrossPrice: saleGrossTotal,
+      GrossPrice: amount,
       TotalPrice: amount,
       CurrencyCode: 'TRY',
       ExchangeRate: 1,
@@ -196,9 +169,7 @@ export async function pavoCompleteSale(
       AskCustomer: false,
       SendResponseBeforePrint: false,
       AddedSaleItems: saleItems,
-      ...(saleDiscountAmount > 0
-        ? { PriceEffect: { Type: 1, Amount: saleDiscountAmount } }
-        : {}),
+      ...(priceEffect ? { PriceEffect: priceEffect } : {}),
       PaymentInformations: payments,
       ReceiptInformation: {
         ReceiptImageEnabled: false,
