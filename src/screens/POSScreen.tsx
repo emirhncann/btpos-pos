@@ -624,7 +624,7 @@ export default function POSScreen({
         }
         })
 
-        deviceResult = await pavoCompleteSale(
+        deviceResult = await (pavoCompleteSale as any)(
           pavoSettings,
           seq,
           orderNo,
@@ -632,7 +632,7 @@ export default function POSScreen({
           pavoItems,
           pavoPaymentsFinal,
           selectedCustomer,
-        )
+        ) as PaymentDeviceResult
 
         if (!deviceResult.success) {
           alert(`Ödeme başarısız: ${deviceResult.message ?? 'Pavo hatası'}`)
@@ -1023,7 +1023,11 @@ export default function POSScreen({
                   C
                 </button>
                 <button type="button"
-                  onClick={() => { applyLineDiscount(); setDiscMode('rate') }}
+                  onClick={() => {
+                    applyLineDiscount()
+                    setLineDiscountTarget(null)
+                    setDiscMode('rate')
+                  }}
                   style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
                   Uygula
                 </button>
@@ -1111,6 +1115,7 @@ export default function POSScreen({
                     setDocDiscountAmt(val)
                     setDocDiscountRate(0)
                   }
+                  setDocDiscountMode(false)
                 }}
                 style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
                 Uygula
@@ -1502,15 +1507,15 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
-                          width: 20, height: 20, borderRadius: 6,
+                          width: 26, height: 26, borderRadius: 8,
                           background: '#FFF3E0', border: '1.5px solid #FFCC80',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 10, fontWeight: 700, color: '#E65100', marginTop: 2,
+                          fontSize: 14, fontWeight: 700, color: '#E65100', marginTop: 2,
                           cursor: 'pointer', padding: 0,
                         }}
                         title="Satır indirimi"
                       >
-                        %
+                        🏷️
                       </button>
                     ) : null}
                   </div>
