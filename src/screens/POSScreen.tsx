@@ -596,14 +596,16 @@ export default function POSScreen({
       try {
         const seq = await window.electron.db.nextPavoSequence()
         const orderNo = nextReceiptNo().padStart(17, '0')
+        const round2 = (n: number) => parseFloat(n.toFixed(2))
         const pavoItems = cart.map(c => ({
           name: c.name,
           unitName: c.unit ?? 'Adet',
           vatRate: c.vatRate,
           quantity: c.quantity,
-          unitPrice: c.price,
-          grossPrice: c.netTotal,
-          totalPrice: c.netTotal,
+          unitPrice: round2(c.price),
+          // Pavo validasyonu: quantity * unitPrice mutlaka grossPrice ile uyumlu olmalı.
+          grossPrice: round2(c.quantity * c.price),
+          totalPrice: round2(c.quantity * c.price),
         }))
 
         deviceResult = await pavoCompleteSale(
@@ -1014,6 +1016,93 @@ export default function POSScreen({
           </div>
         )
       })()}
+
+      {docDiscountMode && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Belge İndirimi</div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Toplam belgeye uygulanır</div>
+              </div>
+              <button
+                onClick={() => {
+                  setDocDiscountMode(false)
+                  setDocDiscInput('')
+                  setDocDiscMode('rate')
+                }}
+                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+              >✕</button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {[{ key: 'rate', label: 'Yüzde (%)' }, { key: 'amt', label: 'Tutar (₺)' }].map(m => (
+                <button key={m.key} type="button"
+                  onClick={() => {
+                    setDocDiscMode(m.key as 'rate' | 'amt')
+                    setDocDiscInput('')
+                    setDocDiscountRate(0)
+                    setDocDiscountAmt(0)
+                  }}
+                  style={{ flex: 1, padding: '8px', borderRadius: 8, border: '2px solid', borderColor: docDiscMode === m.key ? '#E65100' : '#E0E0E0', background: docDiscMode === m.key ? '#FFF3E0' : 'white', color: docDiscMode === m.key ? '#E65100' : '#6B7280', fontWeight: docDiscMode === m.key ? 700 : 400, fontSize: 13, cursor: 'pointer' }}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 32, fontWeight: 700, color: '#E65100', letterSpacing: 2, minHeight: 56 }}>
+              {docDiscMode === 'rate' ? `${docDiscInput || '0'} %` : `${docDiscInput || '0'} ₺`}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                <button key={k} type="button"
+                  onClick={() => {
+                    if (k === '⌫') { setDocDiscInput(v => v.slice(0, -1)); return }
+                    if (k === ',') {
+                      setDocDiscInput(v => {
+                        if (v.includes(',')) return v
+                        return v === '' ? '0,' : v + ','
+                      })
+                      return
+                    }
+                    setDocDiscInput(v => (v.replace(',', '').length < 6 ? v + k : v))
+                  }}
+                  style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 18, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
+                  {k}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
+              <button type="button"
+                onClick={() => { setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
+                style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                C
+              </button>
+              <button type="button"
+                onClick={() => {
+                  const val = parseFloat(docDiscInput.replace(',', '.')) || 0
+                  if (docDiscMode === 'rate') {
+                    const maxPct = posSettings.maxDocDiscountPct ?? 100
+                    if (val > maxPct) {
+                      alert(`Maksimum belge indirimi %${maxPct}`)
+                      return
+                    }
+                    setDocDiscountRate(val)
+                    setDocDiscountAmt(0)
+                  } else {
+                    setDocDiscountAmt(val)
+                    setDocDiscountRate(0)
+                  }
+                }}
+                style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
+                Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODALLER ── */}
 
@@ -1455,11 +1544,18 @@ export default function POSScreen({
                   <button
                     type="button"
                     onClick={() => {
-                      setDocDiscountMode(m => !m)
-                      setDocDiscMode('rate')
-                      setDocDiscInput('')
-                      setDocDiscountRate(0)
-                      setDocDiscountAmt(0)
+                      if (docDiscountMode) {
+                        setDocDiscountMode(false)
+                        return
+                      }
+                      const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
+                      setDocDiscMode(openMode)
+                      setDocDiscInput(
+                        openMode === 'rate'
+                          ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
+                          : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
+                      )
+                      setDocDiscountMode(true)
                     }}
                     style={{
                       fontSize: 11, color: '#E65100', background: 'none', border: 'none',
@@ -1469,65 +1565,6 @@ export default function POSScreen({
                   >
                     {docDiscountMode ? 'İndirimi Kapat' : '+ Belge İndirimi'}
                   </button>
-                  {docDiscountMode && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                        {[{ key: 'rate', label: 'Yüzde (%)' }, { key: 'amt', label: 'Tutar (₺)' }].map(m => (
-                          <button key={m.key} type="button"
-                            onClick={() => { setDocDiscMode(m.key as 'rate' | 'amt'); setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
-                            style={{ flex: 1, padding: '7px', borderRadius: 8, border: '2px solid', borderColor: docDiscMode === m.key ? '#E65100' : '#E0E0E0', background: docDiscMode === m.key ? '#FFF3E0' : 'white', color: docDiscMode === m.key ? '#E65100' : '#6B7280', fontWeight: docDiscMode === m.key ? 700 : 500, fontSize: 12, cursor: 'pointer' }}>
-                            {m.label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div style={{ textAlign: 'center', padding: '6px 0 10px', fontSize: 24, fontWeight: 700, color: '#E65100', minHeight: 40 }}>
-                        {docDiscMode === 'rate' ? `${docDiscInput || '0'} %` : `${docDiscInput || '0'} ₺`}
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                        {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
-                          <button key={k} type="button"
-                            onClick={() => {
-                              if (k === '⌫') { setDocDiscInput(v => v.slice(0, -1)); return }
-                              if (k === ',') {
-                                setDocDiscInput(v => {
-                                  if (v.includes(',')) return v
-                                  return v === '' ? '0,' : v + ','
-                                })
-                                return
-                              }
-                              setDocDiscInput(v => (v.replace(',', '').length < 6 ? v + k : v))
-                            }}
-                            style={{ padding: '10px 0', borderRadius: 8, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 16, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
-                            {k}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 6, marginTop: 6 }}>
-                        <button type="button"
-                          onClick={() => { setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
-                          style={{ padding: '10px', borderRadius: 8, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
-                          C
-                        </button>
-                        <button type="button"
-                          onClick={() => {
-                            const val = parseFloat(docDiscInput.replace(',', '.')) || 0
-                            if (docDiscMode === 'rate') {
-                              setDocDiscountRate(val)
-                              setDocDiscountAmt(0)
-                            } else {
-                              setDocDiscountAmt(val)
-                              setDocDiscountRate(0)
-                            }
-                          }}
-                          style={{ padding: '10px', borderRadius: 8, border: 'none', background: '#E65100', fontSize: 13, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
-                          Uygula
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', padding: '2px 0' }}>
