@@ -122,6 +122,9 @@ export default function POSScreen({
   const [cancelMode, setCancelMode]       = useState(false)
   const [cancelWarning, setCancelWarning] = useState<string | null>(null)
   const [docDiscountMode, setDocDiscountMode] = useState(false)
+  const [discMode, setDiscMode] = useState<'rate' | 'amt'>('rate')
+  const [docDiscMode, setDocDiscMode] = useState<'rate' | 'amt'>('rate')
+  const [docDiscInput, setDocDiscInput] = useState('')
   const [docDiscountRate, setDocDiscountRate] = useState(0)
   const [docDiscountAmt, setDocDiscountAmt]   = useState(0)
   const [lineDiscountTarget, setLineDiscountTarget] = useState<string | null>(null)
@@ -385,8 +388,8 @@ export default function POSScreen({
 
   function applyLineDiscount() {
     if (!lineDiscountTarget) return
-    const rate = parseFloat(lineDiscRateIn) || 0
-    const amt = parseFloat(lineDiscAmtIn) || 0
+    const rate = discMode === 'rate' ? parseFloat(lineDiscRateIn.replace(',', '.')) || 0 : 0
+    const amt = discMode === 'amt' ? parseFloat(lineDiscAmtIn.replace(',', '.')) || 0 : 0
     const maxPct = posSettings.maxLineDiscountPct ?? 100
     if (rate > maxPct) {
       alert(`Maksimum satır indirimi %${maxPct}`)
@@ -417,6 +420,8 @@ export default function POSScreen({
     setNumBuf('')
     setCancelMode(false)
     setDocDiscountMode(false)
+    setDocDiscMode('rate')
+    setDocDiscInput('')
     setDocDiscountRate(0)
     setDocDiscountAmt(0)
     setLineDiscountTarget(null)
@@ -945,52 +950,70 @@ export default function POSScreen({
       </div>
 
       {/* Satır indirimi modal */}
-      {lineDiscountTarget && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 14, padding: 24, width: 360, maxWidth: '92vw' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Satır İndirimi</div>
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 12, color: '#757575', display: 'block', marginBottom: 4 }}>Yüzde (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={posSettings.maxLineDiscountPct ?? 100}
-                placeholder="0"
-                value={lineDiscRateIn}
-                onChange={e => setLineDiscRateIn(e.target.value)}
-                style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
-              />
-            </div>
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 12, color: '#757575', display: 'block', marginBottom: 4 }}>Tutar (₺)</label>
-              <input
-                type="number"
-                min={0}
-                placeholder="0,00"
-                value={lineDiscAmtIn}
-                onChange={e => setLineDiscAmtIn(e.target.value)}
-                style={{ width: '100%', border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box' }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                type="button"
-                onClick={() => setLineDiscountTarget(null)}
-                style={{ flex: 1, background: '#F5F5F5', border: '1px solid #E0E0E0', borderRadius: 8, padding: 10, cursor: 'pointer', fontSize: 13 }}
-              >
-                İptal
-              </button>
-              <button
-                type="button"
-                onClick={() => applyLineDiscount()}
-                style={{ flex: 1, background: '#E65100', border: 'none', borderRadius: 8, padding: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'white' }}
-              >
-                Uygula
-              </button>
+      {lineDiscountTarget && (() => {
+        const targetItem = cart.find(c => c.id === lineDiscountTarget)
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+            <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Satır İndirimi</div>
+                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{targetItem?.name}</div>
+                </div>
+                <button onClick={() => { setLineDiscountTarget(null); setLineDiscRateIn(''); setLineDiscAmtIn('') }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {[{ key: 'rate', label: 'Yüzde (%)' }, { key: 'amt', label: 'Tutar (₺)' }].map(m => (
+                  <button key={m.key} type="button"
+                    onClick={() => { setDiscMode(m.key as 'rate' | 'amt'); setLineDiscRateIn(''); setLineDiscAmtIn('') }}
+                    style={{ flex: 1, padding: '8px', borderRadius: 8, border: '2px solid', borderColor: discMode === m.key ? '#E65100' : '#E0E0E0', background: discMode === m.key ? '#FFF3E0' : 'white', color: discMode === m.key ? '#E65100' : '#6B7280', fontWeight: discMode === m.key ? 700 : 400, fontSize: 13, cursor: 'pointer' }}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 32, fontWeight: 700, color: '#E65100', letterSpacing: 2, minHeight: 56 }}>
+                {discMode === 'rate' ? `${lineDiscRateIn || '0'} %` : `${lineDiscAmtIn || '0'} ₺`}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                  <button key={k} type="button"
+                    onClick={() => {
+                      const setter = discMode === 'rate' ? setLineDiscRateIn : setLineDiscAmtIn
+                      const val = discMode === 'rate' ? lineDiscRateIn : lineDiscAmtIn
+                      if (k === '⌫') { setter(val.slice(0, -1)); return }
+                      if (k === ',') {
+                        if (val.includes(',')) return
+                        setter(val === '' ? '0,' : val + ',')
+                        return
+                      }
+                      if (val.replace(',', '').length < 6) setter(val + k)
+                    }}
+                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 18, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
+                    {k}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
+                <button type="button"
+                  onClick={() => { setLineDiscRateIn(''); setLineDiscAmtIn('') }}
+                  style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                  C
+                </button>
+                <button type="button"
+                  onClick={() => { applyLineDiscount(); setDiscMode('rate') }}
+                  style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#E65100', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
+                  Uygula
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* ── MODALLER ── */}
 
@@ -1262,7 +1285,7 @@ export default function POSScreen({
                 ? (rowIdx % 2 === 0 ? '#fffdfd' : '#fff8f8')
                 : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
               const pills: ReactNode[] = []
-              pills.push(
+              if (posSettings.showCode && item.code?.trim()) pills.push(
                 <span key="kod" style={{
                   display: 'inline-flex', alignItems: 'center',
                   padding: '0 5px', height: 16, borderRadius: 3,
@@ -1362,16 +1385,14 @@ export default function POSScreen({
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{
-                      display: 'flex', gap: 3, marginBottom: 4, overflow: 'hidden', flexWrap: 'nowrap',
-                    }}>
-                      {pills}
-                    </div>
-                    <div style={{
-                      fontSize: cartSettings.fsUrunAdi, fontWeight: 500,
+                      fontSize: cartSettings.fsUrunAdi, fontWeight: 600,
                       color: cancelMode ? '#dc2626' : '#111',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      lineHeight: 1.3,
+                      lineHeight: 1.3, marginBottom: 3,
                     }}>{item.name}</div>
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                      {pills}
+                    </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
                     {!cancelMode && (
@@ -1379,27 +1400,27 @@ export default function POSScreen({
                         type="button"
                         onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
                         style={{
-                          width: 18, height: 18, border: '1px solid #e5e7eb',
-                          background: '#ffffff', borderRadius: 6, cursor: 'pointer',
-                          fontSize: 11, display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', color: '#374151',
+                          width: 28, height: 28, border: '1px solid #e5e7eb',
+                          background: '#ffffff', borderRadius: 7, cursor: 'pointer',
+                          fontSize: 16, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', color: '#374151', fontWeight: 600,
                         }}
                       >−</button>
                     )}
                     <span style={{
-                      fontSize: cartSettings.fsMiktar, fontWeight: 600,
+                      fontSize: cartSettings.fsMiktar, fontWeight: 700,
                       color: cancelMode ? '#dc2626' : '#374151',
-                      minWidth: 16, textAlign: 'center',
+                      minWidth: 24, textAlign: 'center',
                     }}>{item.quantity}</span>
                     {!cancelMode && (
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
                         style={{
-                          width: 18, height: 18, border: '1px solid #e5e7eb',
-                          background: '#ffffff', borderRadius: 6, cursor: 'pointer',
-                          fontSize: 11, display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', color: '#374151',
+                          width: 28, height: 28, border: '1px solid #e5e7eb',
+                          background: '#ffffff', borderRadius: 7, cursor: 'pointer',
+                          fontSize: 16, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', color: '#374151', fontWeight: 600,
                         }}
                       >+</button>
                     )}
@@ -1433,7 +1454,13 @@ export default function POSScreen({
                 <>
                   <button
                     type="button"
-                    onClick={() => setDocDiscountMode(m => !m)}
+                    onClick={() => {
+                      setDocDiscountMode(m => !m)
+                      setDocDiscMode('rate')
+                      setDocDiscInput('')
+                      setDocDiscountRate(0)
+                      setDocDiscountAmt(0)
+                    }}
                     style={{
                       fontSize: 11, color: '#E65100', background: 'none', border: 'none',
                       cursor: 'pointer', padding: '2px 0', display: 'block', marginBottom: 4,
@@ -1443,25 +1470,62 @@ export default function POSScreen({
                     {docDiscountMode ? 'İndirimi Kapat' : '+ Belge İndirimi'}
                   </button>
                   {docDiscountMode && (
-                    <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        min={0}
-                        max={posSettings.maxDocDiscountPct ?? 100}
-                        placeholder="% indirim"
-                        value={docDiscountRate || ''}
-                        onChange={e => { setDocDiscountRate(parseFloat(e.target.value) || 0); setDocDiscountAmt(0) }}
-                        style={{ flex: 1, border: '1px solid #FFB74D', borderRadius: 6, padding: '4px 8px', fontSize: 12, outline: 'none', minWidth: 0 }}
-                      />
-                      <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>veya</span>
-                      <input
-                        type="number"
-                        min={0}
-                        placeholder="₺ indirim"
-                        value={docDiscountAmt || ''}
-                        onChange={e => { setDocDiscountAmt(parseFloat(e.target.value) || 0); setDocDiscountRate(0) }}
-                        style={{ flex: 1, border: '1px solid #FFB74D', borderRadius: 6, padding: '4px 8px', fontSize: 12, outline: 'none', minWidth: 0 }}
-                      />
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                        {[{ key: 'rate', label: 'Yüzde (%)' }, { key: 'amt', label: 'Tutar (₺)' }].map(m => (
+                          <button key={m.key} type="button"
+                            onClick={() => { setDocDiscMode(m.key as 'rate' | 'amt'); setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
+                            style={{ flex: 1, padding: '7px', borderRadius: 8, border: '2px solid', borderColor: docDiscMode === m.key ? '#E65100' : '#E0E0E0', background: docDiscMode === m.key ? '#FFF3E0' : 'white', color: docDiscMode === m.key ? '#E65100' : '#6B7280', fontWeight: docDiscMode === m.key ? 700 : 500, fontSize: 12, cursor: 'pointer' }}>
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ textAlign: 'center', padding: '6px 0 10px', fontSize: 24, fontWeight: 700, color: '#E65100', minHeight: 40 }}>
+                        {docDiscMode === 'rate' ? `${docDiscInput || '0'} %` : `${docDiscInput || '0'} ₺`}
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                        {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                          <button key={k} type="button"
+                            onClick={() => {
+                              if (k === '⌫') { setDocDiscInput(v => v.slice(0, -1)); return }
+                              if (k === ',') {
+                                setDocDiscInput(v => {
+                                  if (v.includes(',')) return v
+                                  return v === '' ? '0,' : v + ','
+                                })
+                                return
+                              }
+                              setDocDiscInput(v => (v.replace(',', '').length < 6 ? v + k : v))
+                            }}
+                            style={{ padding: '10px 0', borderRadius: 8, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 16, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
+                            {k}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 6, marginTop: 6 }}>
+                        <button type="button"
+                          onClick={() => { setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
+                          style={{ padding: '10px', borderRadius: 8, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                          C
+                        </button>
+                        <button type="button"
+                          onClick={() => {
+                            const val = parseFloat(docDiscInput.replace(',', '.')) || 0
+                            if (docDiscMode === 'rate') {
+                              setDocDiscountRate(val)
+                              setDocDiscountAmt(0)
+                            } else {
+                              setDocDiscountAmt(val)
+                              setDocDiscountRate(0)
+                            }
+                          }}
+                          style={{ padding: '10px', borderRadius: 8, border: 'none', background: '#E65100', fontSize: 13, fontWeight: 700, color: 'white', cursor: 'pointer' }}>
+                          Uygula
+                        </button>
+                      </div>
                     </div>
                   )}
                 </>
@@ -1623,14 +1687,22 @@ export default function POSScreen({
           </div>
 
           {/* Arama */}
-          <div style={{ padding: '4px 8px', flexShrink: 0, borderBottom: '1px solid #f5f5f5', height: 32 }}>
+          <div style={{ padding: '8px', flexShrink: 0, borderBottom: '1px solid #f5f5f5' }}>
             <input
               ref={searchRef}
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') setSearchQ('') }}
-              placeholder={numBuf ? `${numBuf} adet × ara...` : 'Ara veya barkod okut...'}
-              style={{ width: '100%', border: `1px solid ${numBuf ? '#FFB300' : '#e5e7eb'}`, borderRadius: 6, padding: '3px 8px', fontSize: 11, outline: 'none', background: numBuf ? '#FFF8E1' : '#f9fafb', height: '100%' }}
+              placeholder="Barkod veya ürün ara..."
+              style={{
+                width: '100%',
+                border: '1px solid #E0E0E0',
+                borderRadius: 9,
+                padding: '10px 14px',
+                fontSize: 15,
+                outline: 'none',
+                background: 'white',
+              }}
             />
           </div>
 
