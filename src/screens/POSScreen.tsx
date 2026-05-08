@@ -597,16 +597,22 @@ export default function POSScreen({
         const seq = await window.electron.db.nextPavoSequence()
         const orderNo = nextReceiptNo().padStart(17, '0')
         const round2 = (n: number) => parseFloat(n.toFixed(2))
-        const pavoItems = cart.map(c => ({
+        const pavoItems = cart.map(c => {
+          // Pavo'ya indirimli satır fiyatını gönder:
+          // birim = net satır / miktar, ardından gross/total bu birimden türetilir.
+          // Böylece quantity * unitPrice = grossPrice koşulu korunur.
+          const discountedUnitPrice = c.quantity > 0 ? round2(c.netTotal / c.quantity) : 0
+          return {
           name: c.name,
           unitName: c.unit ?? 'Adet',
           vatRate: c.vatRate,
           quantity: c.quantity,
-          unitPrice: round2(c.price),
+          unitPrice: discountedUnitPrice,
           // Pavo validasyonu: quantity * unitPrice mutlaka grossPrice ile uyumlu olmalı.
-          grossPrice: round2(c.quantity * c.price),
-          totalPrice: round2(c.quantity * c.price),
-        }))
+          grossPrice: round2(c.quantity * discountedUnitPrice),
+          totalPrice: round2(c.quantity * discountedUnitPrice),
+        }
+        })
 
         deviceResult = await pavoCompleteSale(
           pavoSettings,
