@@ -160,9 +160,9 @@ async function openCustomerWindow() {
     width: targetBounds?.width ?? 1024,
     height: targetBounds?.height ?? 768,
     autoHideMenuBar: true,
-    fullscreen: !isDev && Boolean(external),
+    fullscreen: Boolean(external),
     kiosk: !isDev && Boolean(external),
-    frame: isDev,
+    frame: external ? false : isDev,
     show: false,
     ...(icon ? { icon } : {}),
     webPreferences: {
@@ -181,7 +181,16 @@ async function openCustomerWindow() {
     await customerWindow.loadFile(target.filePath, { query: target.query })
   }
 
-  customerWindow.once('ready-to-show', () => customerWindow?.show())
+  customerWindow.once('ready-to-show', () => {
+    if (!customerWindow) return
+    if (external && targetBounds) {
+      customerWindow.setBounds(targetBounds)
+      customerWindow.setFullScreen(true)
+    } else {
+      customerWindow.maximize()
+    }
+    customerWindow.show()
+  })
   customerWindow.on('closed', () => {
     customerWindow = null
   })
