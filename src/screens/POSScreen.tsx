@@ -9,7 +9,7 @@ import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 
-const CART_GRID = '42px 1fr 72px 82px'
+const CART_GRID = '96px 1fr 72px 82px'
 
 function hexToSoft(hex: string): string {
   try {
@@ -620,9 +620,6 @@ export default function POSScreen({
           }
           : undefined
         const pavoItems = cart.map(c => {
-          // Pavo'ya indirimli satır fiyatını gönder:
-          // birim = net satır / miktar, ardından gross/total bu birimden türetilir.
-          // Böylece quantity * unitPrice = grossPrice koşulu korunur.
           const discountedUnitPrice = c.quantity > 0 ? round2(c.netTotal / c.quantity) : 0
           return {
           name: c.name,
@@ -630,7 +627,6 @@ export default function POSScreen({
           vatRate: c.vatRate,
           quantity: c.quantity,
           unitPrice: discountedUnitPrice,
-          // Pavo validasyonu: quantity * unitPrice mutlaka grossPrice ile uyumlu olmalı.
           grossPrice: round2(c.quantity * discountedUnitPrice),
           totalPrice: round2(c.quantity * discountedUnitPrice),
         }
@@ -1510,29 +1506,26 @@ export default function POSScreen({
                     (e.currentTarget as HTMLDivElement).style.background = rowBg
                   }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
-                    <div style={{
-                      minWidth: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      border: '1px solid #d1d5db',
-                      background: '#f9fafb',
-                      color: '#6b7280',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      marginTop: 2,
-                    }}>
-                      {rowIdx + 1}
-                    </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <div style={{
+                        minWidth: 24,
+                        height: 24,
+                        borderRadius: 7,
+                        border: '1px solid #d1d5db',
+                        background: '#f9fafb',
+                        color: '#4b5563',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700,
+                      }}>
+                        {rowIdx + 1}
+                      </div>
                     {cancelMode ? (
                       <div style={{
-                        width: 20, height: 20, borderRadius: 6,
+                        width: 24, height: 24, borderRadius: 7,
                         background: '#FFEBEE', border: '1.5px solid #EF9A9A',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 9, fontWeight: 700, color: '#C62828', marginTop: 2,
+                        fontSize: 10, fontWeight: 700, color: '#C62828',
                       }}>İ</div>
                     ) : posSettings.allowLineDiscount ? (
                       <button
@@ -1542,17 +1535,26 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
-                          width: 30, height: 30, borderRadius: 9,
-                          background: '#FFF3E0', border: '1.5px solid #FFB74D',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 17, fontWeight: 700, color: '#E65100', marginTop: 2,
-                          cursor: 'pointer', padding: 0,
+                          height: 30,
+                          borderRadius: 8,
+                          border: '1.5px solid #FFB74D',
+                          background: '#FFF3E0',
+                          color: '#E65100',
+                          padding: '0 8px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
                         }}
                         title="Satır indirimi"
                       >
-                        🏷
+                        🏷️ İndirim
                       </button>
                     ) : null}
+                    </div>
                   </div>
                   <div style={{ minWidth: 0 }}>
                     <div style={{
@@ -1562,7 +1564,9 @@ export default function POSScreen({
                       wordBreak: 'break-word',
                       lineHeight: 1.3, marginBottom: 3,
                     }}>{item.name}</div>
-                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                    <div style={{
+                      display: 'flex', gap: 3, flexWrap: 'wrap',
+                    }}>
                       {pills}
                     </div>
                   </div>
@@ -1677,7 +1681,7 @@ export default function POSScreen({
                 </div>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', padding: '2px 0' }}>
-                <span>KDV</span>
+                <span>KDV Tutarı</span>
                 <span>{fmt(toplamKdv)}</span>
               </div>
             </div>
