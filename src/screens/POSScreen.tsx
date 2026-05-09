@@ -1135,7 +1135,19 @@ export default function POSScreen({
           <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #FECACA', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
             <div style={{ background: '#FEF2F2', borderBottom: '1px solid #FECACA', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <AppLogo height={22} />
+                <div style={{
+                  height: 28,
+                  minWidth: 54,
+                  borderRadius: 8,
+                  padding: '0 8px',
+                  background: '#111827',
+                  border: '1px solid #374151',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}>
+                  <AppLogo height={20} />
+                </div>
                 <span style={{ fontSize: 14, fontWeight: 700, color: '#991B1B' }}>{errorPopup.title}</span>
               </div>
               <button onClick={() => setErrorPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: '#B91C1C', cursor: 'pointer' }}>✕</button>
