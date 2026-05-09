@@ -9,7 +9,7 @@ import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 
-const CART_GRID = '96px 1fr 72px 82px'
+const CART_GRID = '84px 1fr 72px 82px'
 
 function hexToSoft(hex: string): string {
   try {
@@ -1467,7 +1467,7 @@ export default function POSScreen({
                   fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
                   background: '#FCE4EC', color: '#880E4F', border: '1px solid #F8BBD0',
                 }}>
-                  {dr > 0 ? `-%${dr}` : `-${fmt(da)}`}
+                  {dr > 0 ? `-%${dr} indirim` : `-${fmt(da)} indirim`}
                 </span>,
               )
               if (cartSettings.showKdv) pills.push(
@@ -1509,14 +1509,10 @@ export default function POSScreen({
                   <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                       <div style={{
-                        minWidth: 24,
-                        height: 24,
-                        borderRadius: 7,
-                        border: '1px solid #d1d5db',
-                        background: '#f9fafb',
-                        color: '#4b5563',
+                        minWidth: 14,
+                        color: '#6b7280',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 700,
+                        fontSize: 13, fontWeight: 700,
                       }}>
                         {rowIdx + 1}
                       </div>
@@ -1535,23 +1531,24 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
-                          height: 30,
+                          minWidth: 38,
+                          height: 34,
                           borderRadius: 8,
-                          border: '1.5px solid #FFB74D',
-                          background: '#FFF3E0',
+                          border: '1px solid #FFE0B2',
+                          background: '#FFF8E1',
                           color: '#E65100',
-                          padding: '0 8px',
+                          padding: '3px 5px',
                           display: 'inline-flex',
+                          flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          fontSize: 12,
-                          fontWeight: 700,
                           cursor: 'pointer',
-                          whiteSpace: 'nowrap',
+                          lineHeight: 1,
                         }}
                         title="Satır indirimi"
                       >
-                        🏷️ İndirim
+                        <span style={{ fontSize: 13, lineHeight: 1 }}>🏷️</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, marginTop: 2 }}>indirim</span>
                       </button>
                     ) : null}
                     </div>
