@@ -3,6 +3,7 @@ import ActivationScreen   from './screens/ActivationScreen'
 import CashierLoginScreen from './screens/CashierLoginScreen'
 import DashboardScreen    from './screens/DashboardScreen'
 import POSScreen          from './screens/POSScreen'
+import CustomerDisplayScreen from './screens/CustomerDisplayScreen'
 import AppLogo            from './components/AppLogo'
 import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
@@ -28,6 +29,11 @@ const DEFAULT_CART_SETTINGS: CartSettings = {
 }
 
 export default function App() {
+  const isCustomerDisplay = new URLSearchParams(window.location.search).get('screen') === 'customer'
+  if (isCustomerDisplay) {
+    return <CustomerDisplayScreen />
+  }
+
   const [state, setState]               = useState<AppState>('loading')
   const [companyId, setCompanyId]       = useState<string | null>(null)
   const [terminalId, setTerminalId]     = useState<string | null>(null)

@@ -1,6 +1,34 @@
 export {}
 
 declare global {
+  interface SecondScreenCartItem {
+    name: string
+    qty: number
+    lineTotal: number
+  }
+
+  interface SecondScreenDiscount {
+    label: string
+    amount: number
+    scope: 'line' | 'document'
+  }
+
+  interface SecondScreenPayload {
+    mode: 'cart_and_btpos_gif'
+    items: SecondScreenCartItem[]
+    discounts: SecondScreenDiscount[]
+    totals: {
+      subtotal: number
+      discountTotal: number
+      grandTotal: number
+      totalQty: number
+    }
+    branding: {
+      btposGif: string
+    }
+    updatedAt: string
+  }
+
   interface CartSettings {
     showBarkod: boolean
     showBirim: boolean
@@ -38,6 +66,13 @@ declare global {
         isFullscreen:     () => Promise<boolean>
         toggleFullscreen: () => Promise<void>
         toggleDevTools:   () => Promise<void>
+      }
+      secondScreen: {
+        open: () => Promise<{ success: boolean; error?: string }>
+        update: (payload: SecondScreenPayload) => Promise<{ success: boolean; error?: string }>
+        close: () => Promise<{ success: boolean; error?: string }>
+        getLatest: () => Promise<SecondScreenPayload | null>
+        onData: (listener: (payload: SecondScreenPayload) => void) => () => void
       }
       db: {
         saveProducts:       (products: unknown[]) => Promise<number>

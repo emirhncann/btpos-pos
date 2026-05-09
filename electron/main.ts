@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog, screen } from 'electron'
 import { exec } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
@@ -54,6 +54,8 @@ function mergeCartSettings(raw: unknown): CartSettingsMain {
 }
 
 let mainWindow: BrowserWindow | null = null
+let customerWindow: BrowserWindow | null = null
+let latestSecondScreenPayload: unknown = null
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -130,6 +132,67 @@ function createWindow() {
     if (!mainWindow) return
     mainWindow.setFullScreen(!mainWindow.isFullScreen())
   })
+}
+
+function getCustomerDisplayUrl(): { devUrl?: string; filePath?: string; query: Record<string, string> } {
+  return {
+    devUrl: process.env.VITE_DEV_SERVER_URL,
+    filePath: join(__dirname, '../dist/index.html'),
+    query: { screen: 'customer' },
+  }
+}
+
+async function openCustomerWindow() {
+  if (customerWindow && !customerWindow.isDestroyed()) {
+    customerWindow.show()
+    customerWindow.focus()
+    return
+  }
+
+  const displays = screen.getAllDisplays()
+  const external = displays.find(d => d.id !== screen.getPrimaryDisplay().id) ?? null
+  const targetBounds = external?.bounds
+  const icon = resolveAppIconPath()
+
+  customerWindow = new BrowserWindow({
+    x: targetBounds?.x,
+    y: targetBounds?.y,
+    width: targetBounds?.width ?? 1024,
+    height: targetBounds?.height ?? 768,
+    autoHideMenuBar: true,
+    fullscreen: !isDev && Boolean(external),
+    kiosk: !isDev && Boolean(external),
+    frame: isDev,
+    show: false,
+    ...(icon ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  const target = getCustomerDisplayUrl()
+  if (isDev && target.devUrl) {
+    const url = new URL(target.devUrl)
+    url.searchParams.set('screen', 'customer')
+    await customerWindow.loadURL(url.toString())
+  } else if (target.filePath) {
+    await customerWindow.loadFile(target.filePath, { query: target.query })
+  }
+
+  customerWindow.once('ready-to-show', () => customerWindow?.show())
+  customerWindow.on('closed', () => {
+    customerWindow = null
+  })
+  customerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+}
+
+function pushSecondScreenPayload(payload: unknown) {
+  latestSecondScreenPayload = payload
+  if (customerWindow && !customerWindow.isDestroyed()) {
+    customerWindow.webContents.send('secondScreen:data', payload)
+  }
 }
 
 if (process.platform === 'win32') {
@@ -239,6 +302,38 @@ app.whenReady().then(async () => {
   ipcMain.handle('window:toggleDevTools', () => {
     toggleDevTools()
   })
+
+  ipcMain.handle('secondScreen:open', async () => {
+    try {
+      await openCustomerWindow()
+      if (latestSecondScreenPayload && customerWindow && !customerWindow.isDestroyed()) {
+        customerWindow.webContents.send('secondScreen:data', latestSecondScreenPayload)
+      }
+      return { success: true as const }
+    } catch (error) {
+      return { success: false as const, error: String(error) }
+    }
+  })
+  ipcMain.handle('secondScreen:update', async (_e, payload: unknown) => {
+    try {
+      pushSecondScreenPayload(payload)
+      return { success: true as const }
+    } catch (error) {
+      return { success: false as const, error: String(error) }
+    }
+  })
+  ipcMain.handle('secondScreen:close', () => {
+    try {
+      if (customerWindow && !customerWindow.isDestroyed()) {
+        customerWindow.close()
+      }
+      customerWindow = null
+      return { success: true as const }
+    } catch (error) {
+      return { success: false as const, error: String(error) }
+    }
+  })
+  ipcMain.handle('secondScreen:getLatest', () => latestSecondScreenPayload)
 
   ipcMain.handle('store:get', (_e, key) => store.get(key))
   ipcMain.handle('store:set', (_e, key, value) => store.set(key, value))
@@ -506,6 +601,9 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  if (customerWindow && !customerWindow.isDestroyed()) {
+    customerWindow.close()
+  }
   globalShortcut.unregisterAll()
   if (process.platform !== 'darwin') app.quit()
 })

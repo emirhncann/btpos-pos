@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld('electron', {
     toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
     toggleDevTools: () => ipcRenderer.invoke('window:toggleDevTools'),
   },
+  secondScreen: {
+    open: () => ipcRenderer.invoke('secondScreen:open'),
+    update: (payload: SecondScreenPayload) => ipcRenderer.invoke('secondScreen:update', payload),
+    close: () => ipcRenderer.invoke('secondScreen:close'),
+    getLatest: () => ipcRenderer.invoke('secondScreen:getLatest'),
+    onData: (listener: (payload: SecondScreenPayload) => void) => {
+      const handler = (_event: unknown, payload: SecondScreenPayload) => listener(payload)
+      ipcRenderer.on('secondScreen:data', handler)
+      return () => ipcRenderer.removeListener('secondScreen:data', handler)
+    },
+  },
   db: {
     saveProducts:       (products: unknown[])                => ipcRenderer.invoke('db:saveProducts', products),
     getProducts:        ()                                   => ipcRenderer.invoke('db:getProducts'),

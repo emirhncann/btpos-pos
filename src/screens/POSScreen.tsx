@@ -548,6 +548,7 @@ export default function POSScreen({
 
   /* ── Ödeme — ara toplam, satır/belge indirimi, KDV, genel toplam ── */
   const araToplamBrut = cart.reduce((s, c) => s + c.price * c.quantity, 0)
+  const totalQty = cart.reduce((s, c) => s + c.quantity, 0)
   const satirIndirimi = cart.reduce((s, c) => {
     const brut = c.price * c.quantity
     const lt = c.lineTotal ?? brut
@@ -574,6 +575,58 @@ export default function POSScreen({
       : commandRecentlyReceived
       ? 'merkezMailPulse 1.2s ease-in-out infinite'
       : 'merkezMailIdle 2.6s ease-in-out infinite'
+
+  useEffect(() => {
+    void window.electron.secondScreen.open().catch(() => {})
+    return () => {
+      void window.electron.secondScreen.close().catch(() => {})
+    }
+  }, [])
+
+  useEffect(() => {
+    const discounts: SecondScreenDiscount[] = []
+    for (const item of cart) {
+      const brut = item.price * item.quantity
+      const satirIskonto = Math.max(0, parseFloat((brut - item.netTotal).toFixed(2)))
+      if (satirIskonto > 0) {
+        discounts.push({
+          label: item.name,
+          amount: satirIskonto,
+          scope: 'line',
+        })
+      }
+    }
+
+    if (docDiscountCalc > 0) {
+      discounts.push({
+        label: 'Belge indirimi',
+        amount: docDiscountCalc,
+        scope: 'document',
+      })
+    }
+
+    const payload: SecondScreenPayload = {
+      mode: 'cart_and_btpos_gif',
+      items: cart.map(item => ({
+        name: item.name,
+        qty: item.quantity,
+        lineTotal: item.netTotal,
+      })),
+      discounts,
+      totals: {
+        subtotal: lineSubtotal,
+        discountTotal: toplamIndirim,
+        grandTotal,
+        totalQty,
+      },
+      branding: {
+        btposGif: 'logo.gif',
+      },
+      updatedAt: new Date().toISOString(),
+    }
+
+    void window.electron.secondScreen.update(payload).catch(() => {})
+  }, [cart, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
 
   async function completeSale(forcedLines?: PaymentLine[]) {
     const lines = forcedLines ?? paymentLines
@@ -1132,25 +1185,25 @@ export default function POSScreen({
 
       {errorPopup && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #FECACA', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
-            <div style={{ background: '#FEF2F2', borderBottom: '1px solid #FECACA', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #374151', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+            <div style={{ background: '#111827', borderBottom: '1px solid #374151', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
                   height: 28,
                   minWidth: 54,
                   borderRadius: 8,
                   padding: '0 8px',
-                  background: '#111827',
-                  border: '1px solid #374151',
+                  background: 'transparent',
+                  border: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
                   <AppLogo height={20} />
                 </div>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#991B1B' }}>{errorPopup.title}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#FCA5A5' }}>{errorPopup.title}</span>
               </div>
-              <button onClick={() => setErrorPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: '#B91C1C', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setErrorPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: '#FCA5A5', cursor: 'pointer' }}>✕</button>
             </div>
             <div style={{ padding: '14px 16px 6px', fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
               {errorPopup.message}
