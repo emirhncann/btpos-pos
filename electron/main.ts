@@ -143,15 +143,30 @@ function getCustomerDisplayUrl(): { devUrl?: string; filePath?: string; query: R
 }
 
 async function openCustomerWindow() {
+  const displays = screen.getAllDisplays()
+  const primary = screen.getPrimaryDisplay()
+  const external = displays.find(d =>
+    d.id !== primary.id ||
+    d.bounds.x !== primary.bounds.x ||
+    d.bounds.y !== primary.bounds.y ||
+    d.bounds.width !== primary.bounds.width ||
+    d.bounds.height !== primary.bounds.height,
+  ) ?? null
+  const targetBounds = external?.bounds
+
   if (customerWindow && !customerWindow.isDestroyed()) {
+    if (external && targetBounds) {
+      customerWindow.setBounds(targetBounds)
+      customerWindow.setFullScreen(true)
+      customerWindow.setKiosk(true)
+      customerWindow.setAlwaysOnTop(true, 'screen-saver')
+    } else {
+      customerWindow.maximize()
+    }
     customerWindow.show()
     customerWindow.focus()
     return
   }
-
-  const displays = screen.getAllDisplays()
-  const external = displays.find(d => d.id !== screen.getPrimaryDisplay().id) ?? null
-  const targetBounds = external?.bounds
   const icon = resolveAppIconPath()
 
   customerWindow = new BrowserWindow({
@@ -161,9 +176,13 @@ async function openCustomerWindow() {
     height: targetBounds?.height ?? 768,
     autoHideMenuBar: true,
     fullscreen: Boolean(external),
-    kiosk: !isDev && Boolean(external),
+    kiosk: Boolean(external),
     frame: external ? false : isDev,
     show: false,
+    alwaysOnTop: Boolean(external),
+    resizable: !external,
+    minimizable: !external,
+    maximizable: !external,
     ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
@@ -186,6 +205,8 @@ async function openCustomerWindow() {
     if (external && targetBounds) {
       customerWindow.setBounds(targetBounds)
       customerWindow.setFullScreen(true)
+      customerWindow.setKiosk(true)
+      customerWindow.setAlwaysOnTop(true, 'screen-saver')
     } else {
       customerWindow.maximize()
     }
