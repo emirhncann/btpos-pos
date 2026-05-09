@@ -49,15 +49,29 @@ export default function CustomerDisplayScreen() {
     return () => cancelAnimationFrame(id)
   }, [payload.items.length, payload.updatedAt])
 
+  const stripColor = '#0f172a'
+
   return (
     <div style={{
       height: '100vh',
       display: 'grid',
-      gridTemplateRows: '1fr minmax(100px, 22vh)',
+      gridTemplateRows: 'minmax(72px, 18vh) 1fr 10px',
       background: '#f1f5f9',
       color: '#0f172a',
       fontFamily: 'Inter, system-ui, sans-serif',
     }}>
+      <div style={{
+        borderBottom: '1px solid #1e293b',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: stripColor,
+        flexShrink: 0,
+        padding: '8px 16px',
+      }}>
+        <img src={logoGif} alt="BTPOS Logo" style={{ maxHeight: 'min(100px, 16vh)', width: 'auto', objectFit: 'contain' }} />
+      </div>
+
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) minmax(240px, 22%)',
@@ -172,16 +186,14 @@ export default function CustomerDisplayScreen() {
         </aside>
       </div>
 
-      <div style={{
-        borderTop: '1px solid #1e293b',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#0f172a',
-        flexShrink: 0,
-      }}>
-        <img src={logoGif} alt="BTPOS Logo" style={{ maxHeight: 'min(120px, 18vh)', width: 'auto', objectFit: 'contain' }} />
-      </div>
+      <div
+        aria-hidden
+        style={{
+          background: stripColor,
+          minHeight: 10,
+          flexShrink: 0,
+        }}
+      />
     </div>
   )
 }
