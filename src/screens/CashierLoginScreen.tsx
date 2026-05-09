@@ -22,11 +22,14 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
+  const [showNumpad, setShowNumpad] = useState(false)
+  const [numpadTarget, setNumpadTarget] = useState<'code' | 'password'>('password')
 
   // Barkod buffer — hızlı tuş basımını yakalar
   const barcodeBuffer   = useRef('')
   const barcodeTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const codeRef         = useRef<HTMLInputElement>(null)
+  const passwordRef     = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     codeRef.current?.focus()
@@ -109,6 +112,36 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
     }
   }
 
+  function handleNumpadKey(key: string) {
+    if (key === 'KAPAT') {
+      setShowNumpad(false)
+      return
+    }
+
+    const value = numpadTarget === 'code' ? code : password
+    const setter = numpadTarget === 'code' ? setCode : setPassword
+
+    if (key === 'C') {
+      setter('')
+      return
+    }
+    if (key === '⌫') {
+      setter(value.slice(0, -1))
+      return
+    }
+    if (key === 'GIRIS') {
+      void handleLogin()
+      return
+    }
+    if (key === 'ILERI') {
+      setNumpadTarget('password')
+      passwordRef.current?.focus()
+      return
+    }
+    if (value.length >= 24) return
+    setter(value + key)
+  }
+
   return (
     <div className="flex h-screen items-center justify-center bg-gray-950">
       <div className="w-full max-w-sm bg-gray-900 rounded-2xl p-8 shadow-2xl border border-gray-800">
@@ -157,13 +190,28 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
 
         {posSettings.loginWithCode && mode === 'kod' && (
           <div className="space-y-4">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNumpad(true)
+                  setNumpadTarget(code ? 'password' : 'code')
+                }}
+                className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700"
+              >
+                Klavye
+              </button>
+            </div>
             <div>
-              <label className="text-sm text-gray-400 mb-1 block">Kasiyer Kodu</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm text-gray-400 block">Kasiyer Kodu</label>
+              </div>
               <input
                 ref={codeRef}
                 type="text"
                 value={code}
                 onChange={e => setCode(e.target.value)}
+                onFocus={() => setNumpadTarget('code')}
                 onKeyDown={e => e.key === 'Enter' && (password
                   ? void handleLogin()
                   : document.getElementById('cashier-pw')?.focus()
@@ -173,12 +221,16 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
               />
             </div>
             <div>
-              <label className="text-sm text-gray-400 mb-1 block">Şifre</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm text-gray-400 block">Şifre</label>
+              </div>
               <input
                 id="cashier-pw"
+                ref={passwordRef}
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
+                onFocus={() => setNumpadTarget('password')}
                 onKeyDown={e => e.key === 'Enter' && void handleLogin()}
                 placeholder="••••••"
                 className="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
@@ -238,6 +290,55 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
           </div>
         )}
       </div>
+
+      {showNumpad && (
+        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-end justify-center p-3">
+          <div className="w-full max-w-xs bg-gray-900 border border-gray-700 rounded-xl p-3">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm text-gray-300">
+                Sayısal Klavye - {numpadTarget === 'code' ? 'Kasiyer Kodu' : 'Şifre'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowNumpad(false)}
+                className="text-gray-400 hover:text-white text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3', 'C', '0', '⌫'].map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => handleNumpadKey(k)}
+                  className="py-3 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-semibold"
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              <button
+                type="button"
+                onClick={() => handleNumpadKey('KAPAT')}
+                className="py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-white font-semibold"
+              >
+                Kapat
+              </button>
+              <button
+                type="button"
+                onClick={() => handleNumpadKey(numpadTarget === 'code' ? 'ILERI' : 'GIRIS')}
+                className="py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold"
+              >
+                {numpadTarget === 'code' ? '→ Ileri' : 'Giris'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
