@@ -577,13 +577,6 @@ export default function POSScreen({
       : 'merkezMailIdle 2.6s ease-in-out infinite'
 
   useEffect(() => {
-    void window.electron.secondScreen.open().catch(() => {})
-    return () => {
-      void window.electron.secondScreen.close().catch(() => {})
-    }
-  }, [])
-
-  useEffect(() => {
     const discounts: SecondScreenDiscount[] = []
     for (const item of cart) {
       const brut = item.price * item.quantity

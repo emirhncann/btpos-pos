@@ -182,6 +182,30 @@ export default function App() {
     if (!pollTerminalId) setHasDeferredCommand(false)
   }, [pollTerminalId])
 
+  useEffect(() => {
+    if (showSplash) return
+    const shouldKeepSecondScreen = state === 'dashboard' || state === 'pos'
+    if (!shouldKeepSecondScreen) {
+      void window.electron.secondScreen.close().catch(() => {})
+      return
+    }
+
+    void window.electron.secondScreen.open()
+      .then(() => {
+        if (state !== 'dashboard') return
+        const payload: SecondScreenPayload = {
+          mode: 'cart_and_btpos_gif',
+          items: [],
+          discounts: [],
+          totals: { subtotal: 0, discountTotal: 0, grandTotal: 0, totalQty: 0 },
+          branding: { btposGif: 'logo.gif' },
+          updatedAt: new Date().toISOString(),
+        }
+        return window.electron.secondScreen.update(payload)
+      })
+      .catch(() => {})
+  }, [state, showSplash])
+
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
     const storedCompanyId  = await window.electron.store.get('company_id') as string | null
