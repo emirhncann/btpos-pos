@@ -1,1 +1,89 @@
-"use strict";const r=require("electron");r.contextBridge.exposeInMainWorld("electron",{store:{get:e=>r.ipcRenderer.invoke("store:get",e),set:(e,n)=>r.ipcRenderer.invoke("store:set",e,n),getCartSettings:()=>r.ipcRenderer.invoke("store:getCartSettings"),setCartSettings:e=>r.ipcRenderer.invoke("store:setCartSettings",e)},device:{uid:()=>r.ipcRenderer.invoke("device:uid"),info:()=>r.ipcRenderer.invoke("device:info")},app:{version:()=>r.ipcRenderer.invoke("app:version"),restart:()=>r.ipcRenderer.invoke("app:restart"),openKeyboard:()=>r.ipcRenderer.invoke("app:openKeyboard"),selectFolder:()=>r.ipcRenderer.invoke("app:selectFolder"),reinitDb:e=>r.ipcRenderer.invoke("app:reinitDb",e)},window:{isFullscreen:()=>r.ipcRenderer.invoke("window:isFullscreen"),toggleFullscreen:()=>r.ipcRenderer.invoke("window:toggleFullscreen"),toggleDevTools:()=>r.ipcRenderer.invoke("window:toggleDevTools")},secondScreen:{open:()=>r.ipcRenderer.invoke("secondScreen:open"),update:e=>r.ipcRenderer.invoke("secondScreen:update",e),close:()=>r.ipcRenderer.invoke("secondScreen:close"),getLatest:()=>r.ipcRenderer.invoke("secondScreen:getLatest"),onData:e=>{const n=(i,d)=>e(d);return r.ipcRenderer.on("secondScreen:data",n),()=>r.ipcRenderer.removeListener("secondScreen:data",n)}},db:{saveProducts:e=>r.ipcRenderer.invoke("db:saveProducts",e),getProducts:()=>r.ipcRenderer.invoke("db:getProducts"),saveSale:(e,n,i)=>r.ipcRenderer.invoke("db:saveSale",e,n,i),getSales:(e,n)=>r.ipcRenderer.invoke("db:getSales",e,n),saveCashiers:e=>r.ipcRenderer.invoke("db:saveCashiers",e),verifyCashier:(e,n)=>r.ipcRenderer.invoke("db:verifyCashier",e,n),verifyCashierByCard:e=>r.ipcRenderer.invoke("db:verifyCashierByCard",e),getAllCashiers:()=>r.ipcRenderer.invoke("db:getAllCashiers"),getCashiers:()=>r.ipcRenderer.invoke("db:getCashiers"),holdDocument:e=>r.ipcRenderer.invoke("db:holdDocument",e),getHeldDocuments:e=>r.ipcRenderer.invoke("db:getHeldDocuments",e),deleteHeldDocument:e=>r.ipcRenderer.invoke("db:deleteHeldDocument",e),savePluGroups:e=>r.ipcRenderer.invoke("db:savePluGroups",e),getPluGroups:(e,n,i)=>r.ipcRenderer.invoke("db:getPluGroups",e,n,i),savePosSettings:(e,n)=>r.ipcRenderer.invoke("db:savePosSettings",e,n),getPosSettings:e=>r.ipcRenderer.invoke("db:getPosSettings",e),saveCommandHistory:e=>r.ipcRenderer.invoke("db:saveCommandHistory",e),getCommandHistory:e=>r.ipcRenderer.invoke("db:getCommandHistory",e),syncProductsAcid:(e,n)=>r.ipcRenderer.invoke("db:syncProductsAcid",e,n??"full"),syncPluGroupsAcid:(e,n)=>r.ipcRenderer.invoke("db:syncPluGroupsAcid",e,n??"full"),syncCashiersAcid:(e,n,i)=>r.ipcRenderer.invoke("db:syncCashiersAcid",e,n,i??"full"),syncCustomersAcid:(e,n,i)=>r.ipcRenderer.invoke("db:syncCustomersAcid",e,n,i??"full"),getCustomers:(e,n)=>r.ipcRenderer.invoke("db:getCustomers",e,n),getCustomerById:(e,n)=>r.ipcRenderer.invoke("db:getCustomerById",e,n),getPendingInvoices:e=>r.ipcRenderer.invoke("db:getPendingInvoices",e),markInvoiceSent:(e,n)=>r.ipcRenderer.invoke("db:markInvoiceSent",e,n),markInvoiceError:(e,n)=>r.ipcRenderer.invoke("db:markInvoiceError",e,n),getSaleItems:e=>r.ipcRenderer.invoke("db:getSaleItems",e),saveSalePayments:e=>r.ipcRenderer.invoke("db:saveSalePayments",e),getSalePayments:e=>r.ipcRenderer.invoke("db:getSalePayments",e),getCardTotalsByBank:e=>r.ipcRenderer.invoke("db:getCardTotalsByBank",e),getCashTotal:e=>r.ipcRenderer.invoke("db:getCashTotal",e),getProductByCode:e=>r.ipcRenderer.invoke("db:getProductByCode",e),getProductIdByCode:e=>r.ipcRenderer.invoke("db:getProductIdByCode",e),upsertCustomer:e=>r.ipcRenderer.invoke("db:upsertCustomer",e),enqueueOperation:e=>r.ipcRenderer.invoke("db:enqueueOperation",e),getPendingOperations:e=>r.ipcRenderer.invoke("db:getPendingOperations",e),getAllOperations:(e,n)=>r.ipcRenderer.invoke("db:getAllOperations",e,n),markOperationProcessing:e=>r.ipcRenderer.invoke("db:markOperationProcessing",e),markOperationSuccess:e=>r.ipcRenderer.invoke("db:markOperationSuccess",e),markOperationFailed:(e,n)=>r.ipcRenderer.invoke("db:markOperationFailed",e,n),retryOperation:e=>r.ipcRenderer.invoke("db:retryOperation",e),deleteOperation:e=>r.ipcRenderer.invoke("db:deleteOperation",e),getPaymentDeviceSettings:e=>r.ipcRenderer.invoke("db:getPaymentDeviceSettings",e),upsertPaymentDeviceSettings:e=>r.ipcRenderer.invoke("db:upsertPaymentDeviceSettings",e),nextPavoSequence:()=>r.ipcRenderer.invoke("db:nextPavoSequence"),updatePavoSequence:e=>r.ipcRenderer.invoke("db:updatePavoSequence",e),getUnitPavoCode:e=>r.ipcRenderer.invoke("db:getUnitPavoCode",e),upsertUnitMapping:e=>r.ipcRenderer.invoke("db:upsertUnitMapping",e),getAllUnitMappings:e=>r.ipcRenderer.invoke("db:getAllUnitMappings",e)}});
+"use strict";
+const electron = require("electron");
+electron.contextBridge.exposeInMainWorld("electron", {
+  store: {
+    get: (key) => electron.ipcRenderer.invoke("store:get", key),
+    set: (key, value) => electron.ipcRenderer.invoke("store:set", key, value),
+    getCartSettings: () => electron.ipcRenderer.invoke("store:getCartSettings"),
+    setCartSettings: (s) => electron.ipcRenderer.invoke("store:setCartSettings", s)
+  },
+  device: {
+    uid: () => electron.ipcRenderer.invoke("device:uid"),
+    info: () => electron.ipcRenderer.invoke("device:info")
+  },
+  app: {
+    version: () => electron.ipcRenderer.invoke("app:version"),
+    restart: () => electron.ipcRenderer.invoke("app:restart"),
+    openKeyboard: () => electron.ipcRenderer.invoke("app:openKeyboard"),
+    selectFolder: () => electron.ipcRenderer.invoke("app:selectFolder"),
+    reinitDb: (p) => electron.ipcRenderer.invoke("app:reinitDb", p)
+  },
+  window: {
+    isFullscreen: () => electron.ipcRenderer.invoke("window:isFullscreen"),
+    toggleFullscreen: () => electron.ipcRenderer.invoke("window:toggleFullscreen"),
+    toggleDevTools: () => electron.ipcRenderer.invoke("window:toggleDevTools")
+  },
+  secondScreen: {
+    open: () => electron.ipcRenderer.invoke("secondScreen:open"),
+    update: (payload) => electron.ipcRenderer.invoke("secondScreen:update", payload),
+    close: () => electron.ipcRenderer.invoke("secondScreen:close"),
+    getLatest: () => electron.ipcRenderer.invoke("secondScreen:getLatest"),
+    onData: (listener) => {
+      const handler = (_event, payload) => listener(payload);
+      electron.ipcRenderer.on("secondScreen:data", handler);
+      return () => electron.ipcRenderer.removeListener("secondScreen:data", handler);
+    }
+  },
+  db: {
+    saveProducts: (products) => electron.ipcRenderer.invoke("db:saveProducts", products),
+    getProducts: () => electron.ipcRenderer.invoke("db:getProducts"),
+    saveSale: (sale, items, device) => electron.ipcRenderer.invoke("db:saveSale", sale, items, device),
+    getSales: (dateFrom, dateTo) => electron.ipcRenderer.invoke("db:getSales", dateFrom, dateTo),
+    saveCashiers: (cashiers) => electron.ipcRenderer.invoke("db:saveCashiers", cashiers),
+    verifyCashier: (code, password) => electron.ipcRenderer.invoke("db:verifyCashier", code, password),
+    verifyCashierByCard: (cardNumber) => electron.ipcRenderer.invoke("db:verifyCashierByCard", cardNumber),
+    getAllCashiers: () => electron.ipcRenderer.invoke("db:getAllCashiers"),
+    getCashiers: () => electron.ipcRenderer.invoke("db:getCashiers"),
+    holdDocument: (doc) => electron.ipcRenderer.invoke("db:holdDocument", doc),
+    getHeldDocuments: (companyId) => electron.ipcRenderer.invoke("db:getHeldDocuments", companyId),
+    deleteHeldDocument: (id) => electron.ipcRenderer.invoke("db:deleteHeldDocument", id),
+    savePluGroups: (groups) => electron.ipcRenderer.invoke("db:savePluGroups", groups),
+    getPluGroups: (companyId, wpId, cashierId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId, cashierId),
+    savePosSettings: (settings, cashierId) => electron.ipcRenderer.invoke("db:savePosSettings", settings, cashierId),
+    getPosSettings: (cashierId) => electron.ipcRenderer.invoke("db:getPosSettings", cashierId),
+    saveCommandHistory: (row) => electron.ipcRenderer.invoke("db:saveCommandHistory", row),
+    getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
+    syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),
+    syncPluGroupsAcid: (groups, mode) => electron.ipcRenderer.invoke("db:syncPluGroupsAcid", groups, mode ?? "full"),
+    syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full"),
+    syncCustomersAcid: (items, companyId, mode) => electron.ipcRenderer.invoke("db:syncCustomersAcid", items, companyId, mode ?? "full"),
+    getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query),
+    getCustomerById: (companyId, id) => electron.ipcRenderer.invoke("db:getCustomerById", companyId, id),
+    getPendingInvoices: (onlyAnonymous) => electron.ipcRenderer.invoke("db:getPendingInvoices", onlyAnonymous),
+    markInvoiceSent: (saleId, invoiceId) => electron.ipcRenderer.invoke("db:markInvoiceSent", saleId, invoiceId),
+    markInvoiceError: (saleId, error) => electron.ipcRenderer.invoke("db:markInvoiceError", saleId, error),
+    getSaleItems: (saleId) => electron.ipcRenderer.invoke("db:getSaleItems", saleId),
+    saveSalePayments: (payments) => electron.ipcRenderer.invoke("db:saveSalePayments", payments),
+    getSalePayments: (saleId) => electron.ipcRenderer.invoke("db:getSalePayments", saleId),
+    getCardTotalsByBank: (saleIds) => electron.ipcRenderer.invoke("db:getCardTotalsByBank", saleIds),
+    getCashTotal: (saleIds) => electron.ipcRenderer.invoke("db:getCashTotal", saleIds),
+    getProductByCode: (code) => electron.ipcRenderer.invoke("db:getProductByCode", code),
+    getProductIdByCode: (code) => electron.ipcRenderer.invoke("db:getProductIdByCode", code),
+    upsertCustomer: (row) => electron.ipcRenderer.invoke("db:upsertCustomer", row),
+    enqueueOperation: (params) => electron.ipcRenderer.invoke("db:enqueueOperation", params),
+    getPendingOperations: (companyId) => electron.ipcRenderer.invoke("db:getPendingOperations", companyId),
+    getAllOperations: (companyId, limit) => electron.ipcRenderer.invoke("db:getAllOperations", companyId, limit),
+    markOperationProcessing: (id) => electron.ipcRenderer.invoke("db:markOperationProcessing", id),
+    markOperationSuccess: (id) => electron.ipcRenderer.invoke("db:markOperationSuccess", id),
+    markOperationFailed: (id, error) => electron.ipcRenderer.invoke("db:markOperationFailed", id, error),
+    retryOperation: (id) => electron.ipcRenderer.invoke("db:retryOperation", id),
+    deleteOperation: (id) => electron.ipcRenderer.invoke("db:deleteOperation", id),
+    getPaymentDeviceSettings: (provider) => electron.ipcRenderer.invoke("db:getPaymentDeviceSettings", provider),
+    upsertPaymentDeviceSettings: (row) => electron.ipcRenderer.invoke("db:upsertPaymentDeviceSettings", row),
+    nextPavoSequence: () => electron.ipcRenderer.invoke("db:nextPavoSequence"),
+    updatePavoSequence: (seq) => electron.ipcRenderer.invoke("db:updatePavoSequence", seq),
+    getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),
+    upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
+    getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId)
+  }
+});

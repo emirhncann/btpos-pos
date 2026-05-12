@@ -156,7 +156,7 @@ export async function pavoCompleteSale(
   const itemsTotal = saleItems.reduce((sum, item) => sum + Number(item.TotalPriceAmount ?? 0), 0)
   const priceEffectAmount = Math.max(0, parseFloat((itemsTotal - amount).toFixed(2)))
   const computedPriceEffect = priceEffectAmount > 0
-    ? { Type: 1, Rate: 0, Amount: priceEffectAmount }
+    ? { Type: 2, Rate: 0, Amount: priceEffectAmount }
     : undefined
   const priceEffect = explicitPriceEffect ?? computedPriceEffect
 
