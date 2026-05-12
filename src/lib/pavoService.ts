@@ -17,6 +17,11 @@ export interface PavoSaleItem {
   unitPrice: number
   grossPrice: number
   totalPrice: number
+  priceEffect?: {
+    Type: number
+    Rate: number
+    Amount: number | null
+  }
 }
 
 const TAX_GROUP: Record<number, string> = {
@@ -97,6 +102,7 @@ export async function pavoCompleteSale(
   settings: PavoSettings,
   seq: number,
   orderNo: string,
+  grossAmount: number,
   amount: number,
   items: PavoSaleItem[],
   payments: Array<{
@@ -144,6 +150,7 @@ export async function pavoCompleteSale(
       UnitPriceAmount:  i.unitPrice,
       GrossPriceAmount: i.grossPrice,
       TotalPriceAmount: i.totalPrice,
+      ...(i.priceEffect ? { PriceEffect: i.priceEffect } : {}),
     }
   }))
   const itemsTotal = saleItems.reduce((sum, item) => sum + Number(item.TotalPriceAmount ?? 0), 0)
@@ -160,7 +167,7 @@ export async function pavoCompleteSale(
       RefererAppVersion: '1.0.0',
       OrderNo: orderNo,
       MainDocumentType: 1,
-      GrossPrice: amount,
+      GrossPrice: grossAmount,
       TotalPrice: amount,
       CurrencyCode: 'TRY',
       ExchangeRate: 1,

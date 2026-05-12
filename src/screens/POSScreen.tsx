@@ -676,22 +676,31 @@ export default function POSScreen({
           }
           : undefined
         const pavoItems = cart.map(c => {
-          const discountedUnitPrice = c.quantity > 0 ? round2(c.netTotal / c.quantity) : 0
+          const brut = round2(c.price * c.quantity)
+          const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
           return {
-          name: c.name,
-          unitName: c.unit ?? 'Adet',
-          vatRate: c.vatRate,
-          quantity: c.quantity,
-          unitPrice: discountedUnitPrice,
-          grossPrice: round2(c.quantity * discountedUnitPrice),
-          totalPrice: round2(c.quantity * discountedUnitPrice),
-        }
+            name: c.name,
+            unitName: c.unit ?? 'Adet',
+            vatRate: c.vatRate,
+            quantity: c.quantity,
+            unitPrice: c.price,
+            grossPrice: brut,
+            totalPrice: round2(c.netTotal),
+            priceEffect: hasLineDiscount
+              ? {
+                  Type: 1,
+                  Rate: c.discountRate > 0 ? round2(c.discountRate) : 0,
+                  Amount: c.discountRate > 0 ? null : round2(c.discountAmount),
+                }
+              : undefined,
+          }
         })
 
         deviceResult = await pavoCompleteSale(
           pavoSettings,
           seq,
           orderNo,
+          round2(araToplamBrut),
           grandTotal,
           pavoItems,
           pavoPaymentsFinal,
