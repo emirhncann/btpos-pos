@@ -410,6 +410,16 @@ export default function POSScreen({
       showErrorPopup('İndirim Limiti', `Maksimum satır indirimi %${maxPct}`)
       return
     }
+    if (amt > 0) {
+      const target = cart.find(c => c.id === lineDiscountTarget)
+      if (target && target.lineTotal > 0) {
+        const effectivePct = (amt / target.lineTotal) * 100
+        if (effectivePct > maxPct) {
+          showErrorPopup('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum %${maxPct}`)
+          return
+        }
+      }
+    }
     setCart(prev => prev.map(c => {
       if (c.id !== lineDiscountTarget) return c
       const netTotal = calcLineDiscount(c.lineTotal, rate, amt)
@@ -1163,6 +1173,14 @@ export default function POSScreen({
                     setDocDiscountRate(val)
                     setDocDiscountAmt(0)
                   } else {
+                    const maxPct = posSettings.maxDocDiscountPct ?? 100
+                    if (lineSubtotal > 0) {
+                      const effectivePct = (val / lineSubtotal) * 100
+                      if (effectivePct > maxPct) {
+                        showErrorPopup('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum belge indirimi %${maxPct}`)
+                        return
+                      }
+                    }
                     setDocDiscountAmt(val)
                     setDocDiscountRate(0)
                   }
