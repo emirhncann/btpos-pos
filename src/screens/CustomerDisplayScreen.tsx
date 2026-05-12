@@ -169,18 +169,18 @@ export default function CustomerDisplayScreen() {
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto' }}>
             <div style={{ borderRadius: 10, padding: 12, background: '#ffffff', border: '1px solid #e2e8f0' }}>
-              <div style={{ color: '#64748b', fontSize: 12 }}>Ara toplam</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', textAlign: 'right' }}>{fmt(payload.totals.subtotal)}</div>
+              <div style={{ color: '#64748b', fontSize: 'clamp(10px, 0.8vw, 14px)' }}>Ara toplam</div>
+              <div style={{ fontSize: 'clamp(14px, 1.5vw, 24px)', fontWeight: 700, color: '#0f172a', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.subtotal)}</div>
             </div>
             {showDiscountTotal && (
               <div style={{ borderRadius: 10, padding: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                <div style={{ color: '#991b1b', fontSize: 12 }}>Toplam indirim</div>
-                <div style={{ fontSize: 22, fontWeight: 700, color: '#dc2626', textAlign: 'right' }}>{fmt(payload.totals.discountTotal)}</div>
+                <div style={{ color: '#991b1b', fontSize: 'clamp(10px, 0.8vw, 14px)' }}>Toplam indirim</div>
+                <div style={{ fontSize: 'clamp(14px, 1.5vw, 24px)', fontWeight: 700, color: '#dc2626', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.discountTotal)}</div>
               </div>
             )}
             <div style={{ borderRadius: 10, padding: 14, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-              <div style={{ color: '#1d4ed8', fontSize: 12, fontWeight: 600 }}>Genel toplam</div>
-              <div style={{ fontSize: 48, fontWeight: 800, color: '#1e40af', textAlign: 'right' }}>{fmt(payload.totals.grandTotal)}</div>
+              <div style={{ color: '#1d4ed8', fontSize: 'clamp(10px, 0.8vw, 14px)', fontWeight: 600 }}>Genel toplam</div>
+              <div style={{ fontSize: 'clamp(18px, 2.5vw, 48px)', fontWeight: 800, color: '#1e40af', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.grandTotal)}</div>
             </div>
           </div>
         </aside>
