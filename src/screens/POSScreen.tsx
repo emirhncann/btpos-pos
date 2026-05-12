@@ -670,7 +670,7 @@ export default function POSScreen({
         const round2 = (n: number) => parseFloat(n.toFixed(2))
         const salePriceEffect = docDiscountCalc > 0
           ? {
-            Type: 1,
+            Type: 2,
             Rate: docDiscountRate > 0 ? round2(docDiscountRate) : 0,
             Amount: docDiscountRate > 0 ? 0 : round2(docDiscountCalc),
           }
