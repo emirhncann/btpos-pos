@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
-import { notificationPhoneDigitCount, pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
+import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import AppLogo from '../components/AppLogo'
@@ -10,6 +10,35 @@ import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 
 const CART_GRID = '84px 1fr 72px 82px'
+
+/** SMS cep: 10 hane, 5 ile başlar; gösterim 555 555 55 55 */
+const SMS_MOBILE_LEN = 10
+
+function normalizeTrMobileForSms(raw: string): string {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('90')) d = d.slice(2)
+  while (d.startsWith('0')) d = d.slice(1)
+  d = d.slice(0, SMS_MOBILE_LEN)
+  if (d.length > 0 && d[0] !== '5') return ''
+  return d
+}
+
+function formatTrMobileSmsDisplay(digits: string): string {
+  const x = digits.replace(/\D/g, '').slice(0, SMS_MOBILE_LEN)
+  if (!x) return '—'
+  let out = x.slice(0, 3)
+  if (x.length > 3) out += ' ' + x.slice(3, 6)
+  if (x.length > 6) out += ' ' + x.slice(6, 8)
+  if (x.length > 8) out += ' ' + x.slice(8, 10)
+  return out
+}
+
+function appendTrMobileSmsDigit(prev: string, k: string): string {
+  const d = prev.replace(/\D/g, '').slice(0, SMS_MOBILE_LEN)
+  if (d.length >= SMS_MOBILE_LEN) return d
+  if (d.length === 0) return k === '5' ? '5' : ''
+  return d + k
+}
 
 function hexToSoft(hex: string): string {
   try {
@@ -172,7 +201,7 @@ export default function POSScreen({
 
   useEffect(() => {
     const p = selectedCustomer?.phone?.trim()
-    if (p) setSmsPhoneInput(p)
+    if (p) setSmsPhoneInput(normalizeTrMobileForSms(p))
     else setSmsPhoneInput('')
   }, [selectedCustomer?.id, selectedCustomer?.phone])
 
@@ -711,11 +740,13 @@ export default function POSScreen({
           }
         })
 
-        const notifyPhone = (smsPhoneInput.trim() || selectedCustomer?.phone?.trim() || '')
-        if (sendSms && notificationPhoneDigitCount(notifyPhone) < 10) {
-          const msg = notifyPhone.trim() === ''
-            ? 'SMS bildirimi için geçerli bir telefon numarası girin veya cari seçin.'
-            : 'Telefon numarası en az 10 rakam içermelidir.'
+        const notifyPhone =
+          normalizeTrMobileForSms(smsPhoneInput)
+          || normalizeTrMobileForSms(selectedCustomer?.phone ?? '')
+        if (sendSms && notifyPhone.length !== SMS_MOBILE_LEN) {
+          const msg = notifyPhone.length === 0
+            ? 'SMS için 5 ile başlayan 10 haneli cep numarası girin veya cari seçin.'
+            : 'Cep numarası 5 ile başlamalı ve 10 hane olmalı (ör. 555 555 55 55).'
           showErrorPopup('SMS Bildirimi', msg)
           return
         }
@@ -1234,7 +1265,7 @@ export default function POSScreen({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>SMS bildirimi</div>
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Numarayı tuş takımıyla girin (en az 10 rakam)</div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>5 ile başlayan 10 hane — 555 555 55 55</div>
               </div>
               <button
                 type="button"
@@ -1243,24 +1274,37 @@ export default function POSScreen({
               >✕</button>
             </div>
 
-            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 28, fontWeight: 700, color: '#1565C0', letterSpacing: 1, minHeight: 52, wordBreak: 'break-all' }}>
-              {smsPhoneDraft ? smsPhoneDraft.replace(/(\d{3})(?=\d)/g, '$1 ') : '—'}
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 26, fontWeight: 700, color: '#1565C0', letterSpacing: 0.5, minHeight: 52, wordBreak: 'break-all' }}>
+              {formatTrMobileSmsDisplay(smsPhoneDraft)}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    setSmsPhoneDraft(prev => {
-                      const d = prev.replace(/\D/g, '')
-                      return d.length < 15 ? d + k : d
-                    })
-                  }}
-                  style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer' }}
-                >{k}</button>
-              ))}
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
+                const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
+                const disabledFirst = firstEmpty && k !== '5'
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    disabled={disabledFirst}
+                    onClick={() => {
+                      if (disabledFirst) return
+                      setSmsPhoneDraft(prev => appendTrMobileSmsDigit(prev, k))
+                    }}
+                    style={{
+                      padding: '14px 0',
+                      borderRadius: 10,
+                      border: '1px solid #E5E7EB',
+                      background: '#F9FAFB',
+                      fontSize: 18,
+                      fontWeight: 600,
+                      color: '#111827',
+                      cursor: disabledFirst ? 'default' : 'pointer',
+                      opacity: disabledFirst ? 0.38 : 1,
+                    }}
+                  >{k}</button>
+                )
+              })}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
               <button
@@ -1270,15 +1314,25 @@ export default function POSScreen({
               >C</button>
               <button
                 type="button"
-                onClick={() => setSmsPhoneDraft(prev => {
-                  const d = prev.replace(/\D/g, '')
-                  return d.length < 15 ? d + '0' : d
-                })}
-                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+                disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
+                onClick={() => {
+                  setSmsPhoneDraft(prev => appendTrMobileSmsDigit(prev, '0'))
+                }}
+                style={{
+                  padding: '14px 0',
+                  borderRadius: 10,
+                  border: '1px solid #E5E7EB',
+                  background: '#F9FAFB',
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: '#111827',
+                  cursor: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 'default' : 'pointer',
+                  opacity: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 0.38 : 1,
+                }}
               >0</button>
               <button
                 type="button"
-                onClick={() => setSmsPhoneDraft(v => v.slice(0, -1))}
+                onClick={() => setSmsPhoneDraft(prev => prev.replace(/\D/g, '').slice(0, -1))}
                 style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#FEF2F2', fontSize: 18, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}
               >⌫</button>
             </div>
@@ -1299,9 +1353,9 @@ export default function POSScreen({
               <button
                 type="button"
                 onClick={() => {
-                  const digits = smsPhoneDraft.replace(/\D/g, '')
-                  if (notificationPhoneDigitCount(digits) < 10) {
-                    showErrorPopup('SMS Bildirimi', 'En az 10 rakam girin veya SMS Kapat ile bildirimi kapatın.')
+                  const digits = normalizeTrMobileForSms(smsPhoneDraft)
+                  if (digits.length !== SMS_MOBILE_LEN) {
+                    showErrorPopup('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın veya SMS Kapat kullanın.')
                     return
                   }
                   setSmsPhoneInput(digits)
@@ -1919,7 +1973,7 @@ export default function POSScreen({
               onClick={() => {
                 setDocDiscountMode(false)
                 const base = (smsPhoneInput.trim() || selectedCustomer?.phone?.trim() || '')
-                setSmsPhoneDraft(base.replace(/\D/g, ''))
+                setSmsPhoneDraft(normalizeTrMobileForSms(base))
                 setSmsPhonePanelOpen(true)
                 setMenuOpen(false)
               }}
