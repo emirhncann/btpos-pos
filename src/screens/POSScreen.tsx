@@ -241,6 +241,12 @@ export default function POSScreen({
     setIslemlerOpen(false)
   }, [])
 
+  /** Cari seç + SMS/mail doldur; cari arama panelini kapat (sprint selectCustomer) */
+  const selectCustomer = useCallback((c: CustomerRow) => {
+    applyCustomerSelection(c)
+    setShowCustomer(false)
+  }, [applyCustomerSelection])
+
   useEffect(() => {
     if (!showCustomer || !companyId) return
     window.electron.db.getCustomers(companyId, customerQ)
@@ -1672,7 +1678,7 @@ export default function POSScreen({
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {customers.map(c => (
                   <div key={c.id}
-                    onClick={() => { applyCustomerSelection(c); setShowCustomer(false); setCustomerQ('') }}
+                    onClick={() => { selectCustomer(c); setCustomerQ('') }}
                     style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF'}
                     onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'white'}
@@ -1772,7 +1778,7 @@ export default function POSScreen({
                   district:   customer.district ?? '',
                   postalCode: customer.postalCode ?? '',
                 }, customer.name)
-                applyCustomerSelection({
+                selectCustomer({
                   id:         newId,
                   companyId,
                   code:       '',
@@ -2165,7 +2171,7 @@ export default function POSScreen({
           position: 'relative',
         }}>
 
-          {/* ── SATIR 1: SMS + Mail — toggle sol, numara/mail sağda modal ── */}
+          {/* SMS butonu — toggle sol, numara sağa tıklayınca modal */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, flexShrink: 0 }}>
 
             <div style={{ borderRadius: 8, border: '1.5px solid',
