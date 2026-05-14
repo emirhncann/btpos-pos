@@ -331,6 +331,7 @@ declare global {
     postalCode: string
     city:       string
     district:   string
+    email?:     string | null
     syncedAt?: string
   }
 

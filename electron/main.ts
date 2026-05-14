@@ -291,6 +291,11 @@ app.whenReady().then(async () => {
   if (!spCols.includes('cashier_id')) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_id TEXT`)
   if (!spCols.includes('cashier_name')) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_name TEXT`)
 
+  const custCols = (db.prepare('PRAGMA table_info(customers)').all() as { name: string }[]).map(c => c.name)
+  if (!custCols.includes('email')) db.exec(`ALTER TABLE customers ADD COLUMN email TEXT`)
+  const custTempCols = (db.prepare('PRAGMA table_info(customers_temp)').all() as { name: string }[]).map(c => c.name)
+  if (!custTempCols.includes('email')) db.exec(`ALTER TABLE customers_temp ADD COLUMN email TEXT`)
+
   createWindow()
 
   ipcMain.handle('app:selectFolder', async () => {

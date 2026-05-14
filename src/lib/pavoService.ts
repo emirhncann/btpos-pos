@@ -9,10 +9,28 @@ export interface PavoSettings {
   printWidth: '58mm' | '80mm'
 }
 
-/** Pavo CompleteSale: SendPhoneNotification true iken NotificationPhone zorunlu. */
-export interface PavoPhoneNotify {
-  send: boolean
-  phone?: string | null
+/** Pavo CompleteSale: SMS + e-posta bildirimi */
+export interface PavoSaleNotifyOptions {
+  sendSms?: boolean
+  smsPhone?: string | null
+  sendEmail?: boolean
+  mailAddr?: string | null
+}
+
+function normalizeTrMobilePavo(raw: string): string {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('90')) d = d.slice(2)
+  while (d.startsWith('0')) d = d.slice(1)
+  d = d.slice(0, 10)
+  if (d.length > 0 && d[0] !== '5') return ''
+  return d
+}
+
+function isValidNotificationEmail(s: string): boolean {
+  const t = s.trim()
+  if (t.length < 5 || !t.includes('@')) return false
+  const [a, b] = t.split('@')
+  return Boolean(a && b && b.includes('.'))
 }
 
 export function notificationPhoneDigitCount(s: string): number {
@@ -127,11 +145,16 @@ export async function pavoCompleteSale(
     Amount: number
   },
   customer?: CustomerRow | null,
-  phoneNotify?: PavoPhoneNotify | null,
+  notify?: PavoSaleNotifyOptions | null,
 ): Promise<PaymentDeviceResult> {
   let customerParty: Record<string, unknown> | undefined
   if (customer) {
     const parts = (customer.name ?? '').split(' ')
+    const partyMail = (() => {
+      const m = String(notify?.mailAddr ?? '').trim()
+      if (notify?.sendEmail && isValidNotificationEmail(m)) return m
+      return String(customer.email ?? '').trim()
+    })()
     customerParty = {
       CustomerType: customer.isPerson ? 1 : 2,
       FirstName:    customer.isPerson ? (parts[0] ?? '') : '',
@@ -141,7 +164,7 @@ export async function pavoCompleteSale(
       TaxOfficeCode: '',
       TaxNumber:    customer.taxNo ?? '',
       Phone:        customer.phone ?? '',
-      EMail:        '',
+      EMail:        partyMail,
       Country:      'Türkiye',
       City:         customer.city ?? '',
       District:     customer.district ?? '',
@@ -171,9 +194,11 @@ export async function pavoCompleteSale(
     : undefined
   const priceEffect = explicitPriceEffect ?? computedPriceEffect
 
-  const phoneTrim = (phoneNotify?.phone ?? '').trim()
-  const sendRequested = Boolean(phoneNotify?.send)
-  const sendPhoneNotification = sendRequested && notificationPhoneDigitCount(phoneTrim) >= 10
+  const phoneNorm = normalizeTrMobilePavo(String(notify?.smsPhone ?? ''))
+  const sendPhoneNotification = Boolean(notify?.sendSms) && phoneNorm.length === 10
+
+  const mailTrim = String(notify?.mailAddr ?? '').trim()
+  const sendEmailNotification = Boolean(notify?.sendEmail) && isValidNotificationEmail(mailTrim)
 
   const body = {
     TransactionHandle: transactionHandle(settings, seq),
@@ -187,8 +212,9 @@ export async function pavoCompleteSale(
       CurrencyCode: 'TRY',
       ExchangeRate: 1,
       SendPhoneNotification: sendPhoneNotification,
-      ...(sendPhoneNotification ? { NotificationPhone: phoneTrim } : {}),
-      SendEMailNotification: false,
+      ...(sendPhoneNotification ? { NotificationPhone: phoneNorm } : {}),
+      SendEMailNotification: sendEmailNotification,
+      ...(sendEmailNotification ? { NotificationEMail: mailTrim } : {}),
       ShowCreditCardMenu: false,
       SelectedSlots: ['rf', 'icc', 'manual'],
       AllowDismissCardRead: false,

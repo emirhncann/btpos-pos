@@ -55,6 +55,7 @@ export const api = {
         postalCode: String(c.postalCode ?? c.postal_code ?? ''),
         city:       String(c.city ?? ''),
         district:   String(c.district ?? ''),
+        email:      String(c.emailAddress ?? c.email ?? c.Email ?? ''),
       }
     })
   },

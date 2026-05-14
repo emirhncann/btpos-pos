@@ -381,6 +381,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'customers_temp', 'postal_code', 'postal_code TEXT NOT NULL DEFAULT \'\'')
   addColumnIfMissing(sqlite, 'customers_temp', 'city',        'city        TEXT NOT NULL DEFAULT \'\'')
   addColumnIfMissing(sqlite, 'customers_temp', 'district',    'district    TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'email',       'email       TEXT')
+  addColumnIfMissing(sqlite, 'customers_temp', 'email',       'email       TEXT')
 
   addColumnIfMissing(sqlite, 'sales', 'customer_id', 'customer_id TEXT')
   addColumnIfMissing(sqlite, 'sales', 'customer_name', 'customer_name TEXT')

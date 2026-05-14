@@ -1310,6 +1310,7 @@ export interface CustomerRow {
   postalCode: string
   city:       string
   district:   string
+  email:      string
   syncedAt?: string
 }
 
@@ -1331,6 +1332,7 @@ function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
     postalCode: String(r.postal_code ?? ''),
     city:       String(r.city ?? ''),
     district:   String(r.district ?? ''),
+    email:      String(r.email ?? ''),
     syncedAt:  r.synced_at != null ? String(r.synced_at) : undefined,
   }
 }
@@ -1355,9 +1357,9 @@ export function syncCustomersAcid(
 
     const ins = db.prepare(`
       INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance,
-        is_person, first_name, last_name, postal_code, city, district, synced_at)
+        is_person, first_name, last_name, postal_code, city, district, email, synced_at)
       VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance,
-        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @syncedAt)
+        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @email, @syncedAt)
     `)
 
     for (const c of items) {
@@ -1376,6 +1378,7 @@ export function syncCustomersAcid(
         postalCode: c.postalCode ?? '',
         city:       c.city       ?? '',
         district:   c.district   ?? '',
+        email:      c.email      ?? '',
         syncedAt:  now,
       })
       inserted++
@@ -1423,10 +1426,10 @@ export function getCustomers(companyId: string, query?: string): CustomerRow[] {
     const rows = db.prepare(`
       SELECT * FROM customers
       WHERE company_id = ?
-        AND (LOWER(name) LIKE ? OR LOWER(code) LIKE ? OR LOWER(phone) LIKE ? OR LOWER(tax_no) LIKE ?)
+        AND (LOWER(name) LIKE ? OR LOWER(code) LIKE ? OR LOWER(phone) LIKE ? OR LOWER(tax_no) LIKE ? OR LOWER(IFNULL(email,'')) LIKE ?)
       ORDER BY name
       LIMIT 100
-    `).all(companyId, q, q, q, q) as Record<string, unknown>[]
+    `).all(companyId, q, q, q, q, q) as Record<string, unknown>[]
     return rows.map(mapCustomerRow)
   }
   const rows = db.prepare(`
@@ -1479,11 +1482,12 @@ export function upsertCustomer(row: CustomerRow): void {
   const synced = row.syncedAt ?? new Date().toISOString()
   db.prepare(`
     INSERT INTO customers (id, company_id, code, name, phone, tax_no, address, balance,
-      is_person, first_name, last_name, postal_code, city, district, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      is_person, first_name, last_name, postal_code, city, district, email, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name=excluded.name, phone=excluded.phone, tax_no=excluded.tax_no,
       address=excluded.address, city=excluded.city, district=excluded.district,
+      email=excluded.email,
       synced_at=excluded.synced_at
   `).run(
     row.id,
@@ -1500,6 +1504,7 @@ export function upsertCustomer(row: CustomerRow): void {
     row.postalCode,
     row.city,
     row.district,
+    row.email ?? '',
     synced,
   )
 }

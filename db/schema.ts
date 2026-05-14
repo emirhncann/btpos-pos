@@ -134,6 +134,7 @@ export const customers = sqliteTable('customers', {
   postalCode: text('postal_code').notNull().default(''),
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
+  email:      text('email'),
   syncedAt:  text('synced_at').notNull(),
 })
 
@@ -152,6 +153,7 @@ export const customersTemp = sqliteTable('customers_temp', {
   postalCode: text('postal_code').notNull().default(''),
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
+  email:      text('email'),
   syncedAt:  text('synced_at').notNull(),
 })
 

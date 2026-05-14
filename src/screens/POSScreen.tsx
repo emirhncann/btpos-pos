@@ -33,6 +33,13 @@ function formatTrMobileSmsDisplay(digits: string): string {
   return out
 }
 
+function isValidNotifyEmail(s: string): boolean {
+  const t = s.trim()
+  if (t.length < 5 || !t.includes('@')) return false
+  const [a, b] = t.split('@')
+  return Boolean(a && b && b.includes('.'))
+}
+
 function appendTrMobileSmsDigit(prev: string, k: string): string {
   const d = prev.replace(/\D/g, '').slice(0, SMS_MOBILE_LEN)
   if (d.length >= SMS_MOBILE_LEN) return d
@@ -169,7 +176,9 @@ export default function POSScreen({
   const [newCustPrefill, setNewCustPrefill] = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
   const [sendSms, setSendSms] = useState(false)
-  const [smsPhoneInput, setSmsPhoneInput] = useState('')
+  const [sendEmail, setSendEmail] = useState(false)
+  const [smsPhone, setSmsPhone] = useState('')
+  const [mailAddr, setMailAddr] = useState('')
   const [smsPhonePanelOpen, setSmsPhonePanelOpen] = useState(false)
   const [smsPhoneDraft, setSmsPhoneDraft] = useState('')
   const [invoiceType, setInvoiceType] = useState<'e_archive' | 'paper'>('e_archive')
@@ -199,11 +208,34 @@ export default function POSScreen({
     onToast: handleQueueToast,
   })
 
-  useEffect(() => {
-    const p = selectedCustomer?.phone?.trim()
-    if (p) setSmsPhoneInput(normalizeTrMobileForSms(p))
-    else setSmsPhoneInput('')
-  }, [selectedCustomer?.id, selectedCustomer?.phone])
+  const applyCustomerSelection = useCallback((c: CustomerRow | null) => {
+    setSelectedCustomer(c)
+    if (!c) {
+      setSendSms(false)
+      setSendEmail(false)
+      setSmsPhone('')
+      setMailAddr('')
+      setSmsPhonePanelOpen(false)
+      setSmsPhoneDraft('')
+      return
+    }
+    const ph = normalizeTrMobileForSms(c.phone ?? '')
+    if (ph.length === SMS_MOBILE_LEN) {
+      setSmsPhone(ph)
+      setSendSms(true)
+    } else {
+      setSmsPhone('')
+      setSendSms(false)
+    }
+    const em = (c.email ?? '').trim()
+    if (em) {
+      setMailAddr(em)
+      setSendEmail(true)
+    } else {
+      setMailAddr('')
+      setSendEmail(false)
+    }
+  }, [])
 
   useEffect(() => {
     if (!showCustomer || !companyId) return
@@ -490,12 +522,8 @@ export default function POSScreen({
     setDocDiscountRate(0)
     setDocDiscountAmt(0)
     setLineDiscountTarget(null)
-    setSelectedCustomer(null)
+    applyCustomerSelection(null)
     setMenuOpen(false)
-    setSendSms(false)
-    setSmsPhoneInput('')
-    setSmsPhonePanelOpen(false)
-    setSmsPhoneDraft('')
   }
 
   function handleNumKey(k: string) {
@@ -740,14 +768,19 @@ export default function POSScreen({
           }
         })
 
-        const notifyPhone =
-          normalizeTrMobileForSms(smsPhoneInput)
+        const smsNorm =
+          normalizeTrMobileForSms(smsPhone)
           || normalizeTrMobileForSms(selectedCustomer?.phone ?? '')
-        if (sendSms && notifyPhone.length !== SMS_MOBILE_LEN) {
-          const msg = notifyPhone.length === 0
+        if (sendSms && smsNorm.length !== SMS_MOBILE_LEN) {
+          const msg = smsNorm.length === 0
             ? 'SMS için 5 ile başlayan 10 haneli cep numarası girin veya cari seçin.'
             : 'Cep numarası 5 ile başlamalı ve 10 hane olmalı (ör. 555 555 55 55).'
           showErrorPopup('SMS Bildirimi', msg)
+          return
+        }
+
+        if (sendEmail && !isValidNotifyEmail(mailAddr)) {
+          showErrorPopup('E-posta bildirimi', 'Geçerli bir e-posta girin veya Mail bildirimini kapatın.')
           return
         }
 
@@ -761,7 +794,12 @@ export default function POSScreen({
           pavoPaymentsFinal,
           salePriceEffect,
           selectedCustomer,
-          { send: sendSms, phone: notifyPhone || null },
+          {
+            sendSms: sendSms && smsNorm.length === SMS_MOBILE_LEN,
+            smsPhone: smsNorm || '',
+            sendEmail: sendEmail && isValidNotifyEmail(mailAddr),
+            mailAddr: mailAddr.trim(),
+          },
         )
 
         if (!deviceResult.success) {
@@ -891,7 +929,6 @@ export default function POSScreen({
         })
       }
       setLastReceipt(receiptNo)
-      setSelectedCustomer(null)
       setPaymentMode(false)
       setPaymentLines([])
       setActiveMethod(null)
@@ -1003,7 +1040,7 @@ export default function POSScreen({
               gap: 4,
             }}>
               👤 {selectedCustomer.name}
-              <button type="button" onClick={() => setSelectedCustomer(null)} style={{ background: 'none', border: 'none', color: cancelMode ? '#fecaca' : '#93c5fd', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+              <button type="button" onClick={() => applyCustomerSelection(null)} style={{ background: 'none', border: 'none', color: cancelMode ? '#fecaca' : '#93c5fd', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
             </span>
           )}
         </div>
@@ -1342,7 +1379,7 @@ export default function POSScreen({
                 type="button"
                 onClick={() => {
                   setSendSms(false)
-                  setSmsPhoneInput('')
+                  setSmsPhone('')
                   setSmsPhoneDraft('')
                   setSmsPhonePanelOpen(false)
                 }}
@@ -1358,7 +1395,7 @@ export default function POSScreen({
                     showErrorPopup('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın veya SMS Kapat kullanın.')
                     return
                   }
-                  setSmsPhoneInput(digits)
+                  setSmsPhone(digits)
                   setSendSms(true)
                   setSmsPhonePanelOpen(false)
                 }}
@@ -1479,7 +1516,7 @@ export default function POSScreen({
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {customers.map(c => (
                   <div key={c.id}
-                    onClick={() => { setSelectedCustomer(c); setShowCustomer(false); setCustomerQ('') }}
+                    onClick={() => { applyCustomerSelection(c); setShowCustomer(false); setCustomerQ('') }}
                     style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF'}
                     onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'white'}
@@ -1554,6 +1591,7 @@ export default function POSScreen({
                   code:       '',
                   name:       customer.name,
                   phone:      customer.phone ?? '',
+                  email:      customer.email ?? '',
                   taxNo:      customer.taxNo ?? '',
                   address:    customer.address ?? '',
                   balance:    0,
@@ -1578,12 +1616,13 @@ export default function POSScreen({
                   district:   customer.district ?? '',
                   postalCode: customer.postalCode ?? '',
                 }, customer.name)
-                setSelectedCustomer({
+                applyCustomerSelection({
                   id:         newId,
                   companyId,
                   code:       '',
                   name:       customer.name,
                   phone:      customer.phone ?? '',
+                  email:      customer.email ?? '',
                   taxNo:      customer.taxNo ?? '',
                   address:    customer.address ?? '',
                   balance:    0,
@@ -1965,14 +2004,14 @@ export default function POSScreen({
             <span style={{ fontSize: 9 }}>{menuOpen ? '▴' : '▾'}</span>
           </button>
 
-          {pavoSettings && (
+          {pavoSettings && !selectedCustomer && (
             <button
               type="button"
               title="SMS bildirimi"
               aria-label="SMS bildirimi"
               onClick={() => {
                 setDocDiscountMode(false)
-                const base = (smsPhoneInput.trim() || selectedCustomer?.phone?.trim() || '')
+                const base = smsPhone.trim()
                 setSmsPhoneDraft(normalizeTrMobileForSms(base))
                 setSmsPhonePanelOpen(true)
                 setMenuOpen(false)
@@ -2199,6 +2238,115 @@ export default function POSScreen({
                 style={{ background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '2px 8px', cursor: safePage >= totalPages - 1 ? 'default' : 'pointer', fontSize: 9, color: '#6b7280', opacity: safePage >= totalPages - 1 ? 0.3 : 1, height: 20 }}>
                 Sonraki →
               </button>
+            </div>
+          )}
+
+          {selectedCustomer && pavoSettings && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              padding: '8px 10px',
+              background: '#F8FAFF',
+              border: '1px solid #C7D7FF',
+              borderRadius: 10,
+              flexShrink: 0,
+              marginBottom: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setSendSms(p => !p)}
+                  style={{
+                    flexShrink: 0,
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    background: sendSms ? '#1565C0' : '#E0E0E0',
+                    position: 'relative',
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: sendSms ? 18 : 2,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    background: 'white',
+                    transition: 'left 0.15s',
+                  }}
+                  />
+                </button>
+                <span style={{ fontSize: 11, color: '#6B7280', flexShrink: 0 }}>SMS</span>
+                <input
+                  value={smsPhone}
+                  onChange={e => setSmsPhone(e.target.value)}
+                  disabled={!sendSms}
+                  placeholder="5xx…"
+                  style={{
+                    flex: 1,
+                    border: '1px solid #E0E0E0',
+                    borderRadius: 6,
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    outline: 'none',
+                    background: sendSms ? 'white' : '#F5F5F5',
+                    color: sendSms ? '#111' : '#9CA3AF',
+                    minWidth: 0,
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setSendEmail(p => !p)}
+                  style={{
+                    flexShrink: 0,
+                    width: 36,
+                    height: 20,
+                    borderRadius: 10,
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    background: sendEmail ? '#1565C0' : '#E0E0E0',
+                    position: 'relative',
+                  }}
+                >
+                  <span style={{
+                    position: 'absolute',
+                    top: 2,
+                    left: sendEmail ? 18 : 2,
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    background: 'white',
+                    transition: 'left 0.15s',
+                  }}
+                  />
+                </button>
+                <span style={{ fontSize: 11, color: '#6B7280', flexShrink: 0 }}>Mail</span>
+                <input
+                  value={mailAddr}
+                  onChange={e => setMailAddr(e.target.value)}
+                  disabled={!sendEmail}
+                  placeholder="E-posta"
+                  style={{
+                    flex: 1,
+                    border: '1px solid #E0E0E0',
+                    borderRadius: 6,
+                    padding: '4px 8px',
+                    fontSize: 12,
+                    outline: 'none',
+                    background: sendEmail ? 'white' : '#F5F5F5',
+                    color: sendEmail ? '#111' : '#9CA3AF',
+                    minWidth: 0,
+                  }}
+                />
+              </div>
             </div>
           )}
 

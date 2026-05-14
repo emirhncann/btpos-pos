@@ -10,6 +10,7 @@ function customerRowToInvoicePayload(c: CustomerRow) {
     taxNo:      c.taxNo      || undefined,
     address:    c.address    || undefined,
     phone:      c.phone      || undefined,
+    email:      c.email      || undefined,
     postalCode: c.postalCode || undefined,
     city:       c.city       || undefined,
     district:   c.district   || undefined,
