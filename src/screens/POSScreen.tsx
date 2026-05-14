@@ -166,7 +166,7 @@ export default function POSScreen({
   const [lineDiscountTarget, setLineDiscountTarget] = useState<string | null>(null)
   const [lineDiscRateIn, setLineDiscRateIn]   = useState('')
   const [lineDiscAmtIn, setLineDiscAmtIn]     = useState('')
-  const [menuOpen, setMenuOpen]           = useState(false)
+  const [islemlerOpen, setIslemlerOpen] = useState(false)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
   const [showCustomer, setShowCustomer]   = useState(false)
@@ -217,6 +217,7 @@ export default function POSScreen({
       setMailAddr('')
       setSmsPhonePanelOpen(false)
       setSmsPhoneDraft('')
+      setIslemlerOpen(false)
       return
     }
     const ph = normalizeTrMobileForSms(c.phone ?? '')
@@ -235,6 +236,7 @@ export default function POSScreen({
       setMailAddr('')
       setSendEmail(false)
     }
+    setIslemlerOpen(false)
   }, [])
 
   useEffect(() => {
@@ -523,7 +525,7 @@ export default function POSScreen({
     setDocDiscountAmt(0)
     setLineDiscountTarget(null)
     applyCustomerSelection(null)
-    setMenuOpen(false)
+    setIslemlerOpen(false)
   }
 
   function handleNumKey(k: string) {
@@ -593,7 +595,6 @@ export default function POSScreen({
   }
 
   /* ── Menü işlemleri ── */
-  function closeMenu() { setMenuOpen(false) }
 
   async function holdDoc() {
     if (!cart.length) return
@@ -607,7 +608,7 @@ export default function POSScreen({
     })
     clearCart()
     loadHeld()
-    closeMenu()
+    setIslemlerOpen(false)
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
@@ -619,7 +620,7 @@ export default function POSScreen({
 
   async function loadCustomers() {
     setShowCustomer(true)
-    closeMenu()
+    setIslemlerOpen(false)
     try {
       const list = await window.electron.db.getCustomers(companyId)
       setCustomers(list)
@@ -1821,6 +1822,7 @@ export default function POSScreen({
                         onClick={e => {
                           e.stopPropagation()
                           setSmsPhonePanelOpen(false)
+                          setIslemlerOpen(false)
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
@@ -1926,6 +1928,7 @@ export default function POSScreen({
                         return
                       }
                       setSmsPhonePanelOpen(false)
+                      setIslemlerOpen(false)
                       const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
                       setDocDiscMode(openMode)
                       setDocDiscInput(
@@ -1993,16 +1996,205 @@ export default function POSScreen({
         </div>
 
         {/* ② NUMPAD + MENÜ — %16 (PLU’dan pay) */}
-        <div style={{ width: '16%', flexShrink: 0, boxSizing: 'border-box', background: '#f8f9fa', display: 'flex', flexDirection: 'column', padding: 10, gap: 8, borderRight: '1px solid #e0e0e0', overflow: 'hidden' }}>
+        <div style={{
+          width: '16%', flexShrink: 0, boxSizing: 'border-box', background: '#f8f9fa',
+          display: 'flex', flexDirection: 'column', padding: 10, gap: 8, borderRight: '1px solid #e0e0e0',
+          overflow: 'hidden', position: 'relative',
+        }}>
 
-          {/* İşlemler menüsü — üstte */}
-          <button
-            onClick={() => setMenuOpen(m => !m)}
-            style={{ border: `1.5px solid ${selectedCustomer ? '#a5d6a7' : '#e5e7eb'}`, borderRadius: 8, background: selectedCustomer ? '#e8f5e9' : 'white', cursor: 'pointer', padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: selectedCustomer ? '#2e7d32' : '#374151', flexShrink: 0 }}
-          >
-            <span>{selectedCustomer ? `👤 ${selectedCustomer.name.split(' ')[0]}` : 'İşlemler'}</span>
-            <span style={{ fontSize: 9 }}>{menuOpen ? '▴' : '▾'}</span>
-          </button>
+          {selectedCustomer && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setSendSms(p => !p)}
+                style={{
+                  padding: '6% 4%', borderRadius: 8, border: '1.5px solid',
+                  borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
+                  background: sendSms ? '#E8F5E9' : '#FAFAFA',
+                  color: sendSms ? '#2E7D32' : '#9CA3AF',
+                  fontWeight: 600, fontSize: 'clamp(8px, 0.8vw, 11px)',
+                  cursor: 'pointer', textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 2,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(12px, 1.2vw, 16px)' }}>
+                  {sendSms ? '📱✓' : '📱'}
+                </span>
+                <span style={{
+                  whiteSpace: 'nowrap', overflow: 'hidden',
+                  textOverflow: 'ellipsis', width: '100%', textAlign: 'center' as const,
+                }}>
+                  {smsPhone || 'SMS'}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSendEmail(p => !p)}
+                style={{
+                  padding: '6% 4%', borderRadius: 8, border: '1.5px solid',
+                  borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
+                  background: sendEmail ? '#EFF6FF' : '#FAFAFA',
+                  color: sendEmail ? '#1565C0' : '#9CA3AF',
+                  fontWeight: 600, fontSize: 'clamp(8px, 0.8vw, 11px)',
+                  cursor: 'pointer', textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 2,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(12px, 1.2vw, 16px)' }}>
+                  {sendEmail ? '✉️✓' : '✉️'}
+                </span>
+                <span style={{
+                  whiteSpace: 'nowrap', overflow: 'hidden',
+                  textOverflow: 'ellipsis', width: '100%', textAlign: 'center' as const,
+                }}>
+                  {mailAddr || 'E-Posta'}
+                </span>
+              </button>
+            </div>
+          )}
+
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+              <button
+                type="button"
+                onClick={() => setIslemlerOpen(p => !p)}
+                style={{
+                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
+                  borderColor: islemlerOpen ? '#1565C0' : '#E5E7EB',
+                  background: islemlerOpen ? '#EFF6FF' : 'white',
+                  color: islemlerOpen ? '#1565C0' : '#374151',
+                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
+                  cursor: 'pointer', textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 3,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>☰</span>
+                <span>İşlemler</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowHeld(true); setIslemlerOpen(false) }}
+                style={{
+                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
+                  borderColor: heldDocs.length > 0 ? '#F59E0B' : '#E5E7EB',
+                  background: heldDocs.length > 0 ? '#FFFBEB' : 'white',
+                  color: heldDocs.length > 0 ? '#B45309' : '#374151',
+                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
+                  cursor: 'pointer', textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 3,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>📄</span>
+                <span>Belge{heldDocs.length > 0 ? ` (${heldDocs.length})` : ''}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (cart.length === 0) return
+                  setCancelMode(m => !m)
+                  setIslemlerOpen(false)
+                }}
+                disabled={cart.length === 0}
+                style={{
+                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
+                  borderColor: cancelMode ? '#DC2626' : '#E5E7EB',
+                  background: cancelMode ? '#FEF2F2' : 'white',
+                  color: cancelMode ? '#DC2626' : cart.length === 0 ? '#D1D5DB' : '#374151',
+                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
+                  cursor: cart.length === 0 ? 'default' : 'pointer',
+                  textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 3,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>✕</span>
+                <span>{cancelMode ? 'İptali Kapat' : 'Ürün İptal'}</span>
+              </button>
+              <button
+                type="button"
+                disabled
+                style={{
+                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid #F3F4F6',
+                  background: '#FAFAFA', color: '#D1D5DB',
+                  fontWeight: 500, fontSize: 'clamp(9px, 0.9vw, 12px)',
+                  cursor: 'default', textAlign: 'center' as const,
+                  display: 'flex', flexDirection: 'column' as const,
+                  alignItems: 'center', gap: 3,
+                }}
+              >
+                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>·</span>
+                <span>—</span>
+              </button>
+            </div>
+
+            {islemlerOpen && (
+              <>
+                <div
+                  role="presentation"
+                  style={{ position: 'fixed', inset: 0, zIndex: 9990 }}
+                  onClick={() => setIslemlerOpen(false)}
+                />
+                <div style={{
+                  position: 'absolute', top: 0, left: '100%', marginLeft: 6, zIndex: 9991,
+                  background: 'white', border: '1px solid #E5E7EB', borderRadius: 10,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 200, overflow: 'hidden',
+                }}>
+                  {[
+                    {
+                      label: '👤 Müşteri Seç',
+                      action: () => { void loadCustomers() },
+                      disabled: false,
+                      danger: false,
+                    },
+                    {
+                      label: '👤+ Müşteri Ekle',
+                      action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setIslemlerOpen(false) },
+                      disabled: false,
+                      danger: false,
+                    },
+                    {
+                      label: '⏸ Belgeyi Beklet',
+                      action: () => { void holdDoc() },
+                      disabled: cart.length === 0,
+                      danger: false,
+                    },
+                    {
+                      label: selectedCustomer ? `👤 ${selectedCustomer.name} — Çıkar` : '—',
+                      action: () => { applyCustomerSelection(null); setIslemlerOpen(false) },
+                      disabled: !selectedCustomer,
+                      danger: true,
+                    },
+                  ].map((item, i) => (
+                    <div
+                      key={i}
+                      onClick={item.disabled ? undefined : item.action}
+                      style={{
+                        padding: '11px 14px', cursor: item.disabled ? 'default' : 'pointer',
+                        fontSize: 13, fontWeight: 500,
+                        borderBottom: i < 3 ? '1px solid #F5F5F5' : 'none',
+                        color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
+                        background: 'white',
+                      }}
+                      onMouseEnter={e => {
+                        if (!item.disabled) {
+                          (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        (e.currentTarget as HTMLDivElement).style.background = 'white'
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
 
           {pavoSettings && !selectedCustomer && (
             <button
@@ -2014,7 +2206,7 @@ export default function POSScreen({
                 const base = smsPhone.trim()
                 setSmsPhoneDraft(normalizeTrMobileForSms(base))
                 setSmsPhonePanelOpen(true)
-                setMenuOpen(false)
+                setIslemlerOpen(false)
               }}
               style={{
                 flexShrink: 0,
@@ -2049,45 +2241,36 @@ export default function POSScreen({
             </button>
           )}
 
-          {menuOpen && (
-            <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 9, overflow: 'hidden', flexShrink: 0 }}>
-              {[
-                { label: '👤 Müşteri Seç',      action: loadCustomers,                               danger: false, disabled: false },
-                { label: '👤+ Müşteri Ekle',    action: () => { setNewCustPrefill(''); setAddCustomerModal(true); closeMenu() }, danger: false, disabled: false },
-                { label: '⏸ Belgeyi Beklet',    action: holdDoc,                                     danger: false, disabled: cart.length === 0 },
-                { label: `▶ Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`,
-                  action: () => { setShowHeld(true); closeMenu() },  danger: false, disabled: false },
-                { label: cancelMode ? '✕ Modu Kapat' : '✕ İptal Modu',
-                  action: () => { if (!cancelMode && cart.length === 0) return; setCancelMode(m => !m); closeMenu() },
-                  danger: true,  disabled: false, active: cancelMode },
-              ].map((item, i) => (
-                <div key={i}
-                  onClick={item.disabled ? undefined : item.action}
-                  style={{ padding: '9px 11px', display: 'flex', alignItems: 'center', gap: 8, cursor: item.disabled ? 'default' : 'pointer', fontSize: 11, fontWeight: 'active' in item && item.active ? 600 : 500, borderBottom: i < 4 ? '1px solid #f5f5f5' : 'none', color: 'active' in item && item.active ? '#dc2626' : item.danger ? '#dc2626' : '#374151', background: 'active' in item && item.active ? '#fff5f5' : 'white', opacity: item.disabled ? 0.4 : 1, transition: 'background 0.1s' }}
-                  onMouseEnter={e => { if (!item.disabled) (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#fff5f5' : '#f3f4f6' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'active' in item && item.active ? '#fff5f5' : 'white' }}
-                >
-                  {item.label}
-                </div>
-              ))}
-            </div>
-          )}
-
           <div style={{ height: 1, background: '#e5e7eb', flexShrink: 0 }} />
 
-          {/* Boşluk — seçili gösterge + numerik altta */}
           <div style={{ flex: 1, minHeight: 0 }} />
 
-          {/* Miktar göstergesi (adet seçili) — tek gösterge */}
-          <div style={{ borderRadius: 10, padding: '10px 8px', textAlign: 'center', border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`, background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0 }}>
-            <span style={{ fontSize: 'clamp(22px, 1.8vw + 12px, 34px)', fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706', display: 'block', lineHeight: 1 }}>{numBuf || '—'}</span>
-            <span style={{ fontSize: 12, color: '#6b7280', marginTop: 4, display: 'block', fontWeight: 500 }}>
-              {numBuf.includes(',') ? 'miktar' : 'adet'} seçili
+          <div style={{
+            borderRadius: 8, padding: '5px 6px', textAlign: 'center',
+            border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`,
+            background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0,
+          }}>
+            <span style={{
+              fontSize: 'clamp(15px, 1.2vw + 8px, 22px)',
+              fontWeight: 700,
+              color: numBuf ? '#2e7d32' : '#d97706',
+              display: 'block', lineHeight: 1,
+            }}>{numBuf || '—'}</span>
+            <span style={{ fontSize: 9, color: '#6b7280', display: 'block', marginTop: 1 }}>
+              {numBuf.includes(',') ? 'miktar' : 'adet'}
             </span>
           </div>
 
-          {/* Numpad — büyük dokunma alanı (yaşlı kullanıcı dostu, min ~52px) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, flexShrink: 0, width: '100%' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: '3%',
+            flexShrink: 0,
+            width: '100%',
+            flex: 1,
+            minHeight: 0,
+            alignContent: 'stretch',
+          }}>
             {[
               { key: '7' }, { key: '8' }, { key: '9' },
               { key: '4' }, { key: '5' }, { key: '6' },
@@ -2106,8 +2289,8 @@ export default function POSScreen({
                   width: '100%',
                   minWidth: 0,
                   boxSizing: 'border-box',
-                  minHeight: 52,
-                  height: 'clamp(52px, 5.5vw, 84px)',
+                  aspectRatio: span ? 'auto' : '1.2 / 1',
+                  minHeight: span ? 'clamp(30px, 11%, 48px)' : undefined,
                   border: '2px solid',
                   borderRadius: 10,
                   cursor: 'pointer',
@@ -2117,14 +2300,14 @@ export default function POSScreen({
                   justifyContent: 'center',
                   userSelect: 'none' as const,
                   background: key === 'C' ? '#fff5f5' : key === '⌫' ? '#fffbeb' : 'white',
-                  color:      key === 'C' ? '#dc2626' : key === '⌫' ? '#d97706' : '#1f2937',
+                  color: key === 'C' ? '#dc2626' : key === '⌫' ? '#d97706' : '#1f2937',
                   borderColor: key === 'C' ? '#fecdd3' : key === '⌫' ? '#fde68a' : '#d1d5db',
                   gridColumn: span ? `span ${span}` : undefined,
-                  fontSize: key === 'C' ? 'clamp(14px, 1vw + 8px, 20px)' : 'clamp(22px, 1.7vw + 12px, 36px)',
+                  fontSize: 'clamp(16px, 1.4vw + 8px, 28px)',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                 }}
-              >{key === 'C' ? 'Tümünü Sil' : key}</button>
+              >{key === 'C' ? 'Temizle' : key}</button>
             ))}
           </div>
         </div>
@@ -2238,115 +2421,6 @@ export default function POSScreen({
                 style={{ background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '2px 8px', cursor: safePage >= totalPages - 1 ? 'default' : 'pointer', fontSize: 9, color: '#6b7280', opacity: safePage >= totalPages - 1 ? 0.3 : 1, height: 20 }}>
                 Sonraki →
               </button>
-            </div>
-          )}
-
-          {selectedCustomer && pavoSettings && (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              padding: '8px 10px',
-              background: '#F8FAFF',
-              border: '1px solid #C7D7FF',
-              borderRadius: 10,
-              flexShrink: 0,
-              marginBottom: 8,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setSendSms(p => !p)}
-                  style={{
-                    flexShrink: 0,
-                    width: 36,
-                    height: 20,
-                    borderRadius: 10,
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: 0,
-                    background: sendSms ? '#1565C0' : '#E0E0E0',
-                    position: 'relative',
-                  }}
-                >
-                  <span style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: sendSms ? 18 : 2,
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: 'white',
-                    transition: 'left 0.15s',
-                  }}
-                  />
-                </button>
-                <span style={{ fontSize: 11, color: '#6B7280', flexShrink: 0 }}>SMS</span>
-                <input
-                  value={smsPhone}
-                  onChange={e => setSmsPhone(e.target.value)}
-                  disabled={!sendSms}
-                  placeholder="5xx…"
-                  style={{
-                    flex: 1,
-                    border: '1px solid #E0E0E0',
-                    borderRadius: 6,
-                    padding: '4px 8px',
-                    fontSize: 12,
-                    outline: 'none',
-                    background: sendSms ? 'white' : '#F5F5F5',
-                    color: sendSms ? '#111' : '#9CA3AF',
-                    minWidth: 0,
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setSendEmail(p => !p)}
-                  style={{
-                    flexShrink: 0,
-                    width: 36,
-                    height: 20,
-                    borderRadius: 10,
-                    border: 'none',
-                    cursor: 'pointer',
-                    padding: 0,
-                    background: sendEmail ? '#1565C0' : '#E0E0E0',
-                    position: 'relative',
-                  }}
-                >
-                  <span style={{
-                    position: 'absolute',
-                    top: 2,
-                    left: sendEmail ? 18 : 2,
-                    width: 16,
-                    height: 16,
-                    borderRadius: '50%',
-                    background: 'white',
-                    transition: 'left 0.15s',
-                  }}
-                  />
-                </button>
-                <span style={{ fontSize: 11, color: '#6B7280', flexShrink: 0 }}>Mail</span>
-                <input
-                  value={mailAddr}
-                  onChange={e => setMailAddr(e.target.value)}
-                  disabled={!sendEmail}
-                  placeholder="E-posta"
-                  style={{
-                    flex: 1,
-                    border: '1px solid #E0E0E0',
-                    borderRadius: 6,
-                    padding: '4px 8px',
-                    fontSize: 12,
-                    outline: 'none',
-                    background: sendEmail ? 'white' : '#F5F5F5',
-                    color: sendEmail ? '#111' : '#9CA3AF',
-                    minWidth: 0,
-                  }}
-                />
-              </div>
             </div>
           )}
 
