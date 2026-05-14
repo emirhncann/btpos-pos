@@ -129,6 +129,37 @@ function localISOString(): string {
   return local.toISOString().replace('Z', '').slice(0, 26)
 }
 
+type MenuPopupItem = {
+  label: string
+  action: () => void
+  disabled?: boolean
+  danger?: boolean
+}
+
+function MenuItem({ item, last }: { item: MenuPopupItem; last: boolean }) {
+  return (
+    <div
+      onClick={item.disabled ? undefined : item.action}
+      style={{
+        padding: '12px 16px', cursor: item.disabled ? 'default' : 'pointer',
+        fontSize: 13, fontWeight: 500,
+        borderBottom: last ? 'none' : '1px solid #F5F5F5',
+        color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
+        opacity: item.disabled ? 0.5 : 1,
+        userSelect: 'none',
+      }}
+      onMouseEnter={e => {
+        if (!item.disabled)
+          (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
+      }}
+      onMouseLeave={e => {
+        (e.currentTarget as HTMLDivElement).style.background = 'white'
+      }}>
+      {item.label}
+    </div>
+  )
+}
+
 export default function POSScreen({
   companyId, cashier, allProducts,
   pluGroups, posSettings,
@@ -166,7 +197,9 @@ export default function POSScreen({
   const [lineDiscountTarget, setLineDiscountTarget] = useState<string | null>(null)
   const [lineDiscRateIn, setLineDiscRateIn]   = useState('')
   const [lineDiscAmtIn, setLineDiscAmtIn]     = useState('')
-  const [islemlerOpen, setIslemlerOpen] = useState(false)
+  const [menuOpen, setMenuOpen] = useState<'islemler' | 'belge' | 'musteri' | 'fiyatgor' | null>(null)
+  const [fiyatGorQ, setFiyatGorQ] = useState('')
+  const [fiyatGorItem, setFiyatGorItem] = useState<ProductRow | null>(null)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
   const [showCustomer, setShowCustomer]   = useState(false)
@@ -221,7 +254,7 @@ export default function POSScreen({
       setMailModalOpen(false)
       setSmsPhonePanelOpen(false)
       setSmsPhoneDraft('')
-      setIslemlerOpen(false)
+      setMenuOpen(null)
       return
     }
     if (c.phone?.trim()) {
@@ -238,7 +271,7 @@ export default function POSScreen({
       setMailAddr('')
       setSendEmail(false)
     }
-    setIslemlerOpen(false)
+    setMenuOpen(null)
   }, [])
 
   /** Cari seç + SMS/mail doldur; cari arama panelini kapat (sprint selectCustomer) */
@@ -533,7 +566,7 @@ export default function POSScreen({
     setDocDiscountAmt(0)
     setLineDiscountTarget(null)
     applyCustomerSelection(null)
-    setIslemlerOpen(false)
+    setMenuOpen(null)
   }
 
   function handleNumKey(k: string) {
@@ -616,7 +649,6 @@ export default function POSScreen({
     })
     clearCart()
     loadHeld()
-    setIslemlerOpen(false)
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
@@ -628,7 +660,7 @@ export default function POSScreen({
 
   async function loadCustomers() {
     setShowCustomer(true)
-    setIslemlerOpen(false)
+    setMenuOpen(null)
     try {
       const list = await window.electron.db.getCustomers(companyId)
       setCustomers(list)
@@ -2013,7 +2045,7 @@ export default function POSScreen({
                         onClick={e => {
                           e.stopPropagation()
                           setSmsPhonePanelOpen(false)
-                          setIslemlerOpen(false)
+                          setMenuOpen(null)
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
@@ -2119,7 +2151,7 @@ export default function POSScreen({
                         return
                       }
                       setSmsPhonePanelOpen(false)
-                      setIslemlerOpen(false)
+                      setMenuOpen(null)
                       const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
                       setDocDiscMode(openMode)
                       setDocDiscInput(
@@ -2265,130 +2297,281 @@ export default function POSScreen({
 
           </div>
 
-          {/* ── SATIR 2+3: 4 buton 2×2 ── */}
+          {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler ── */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
 
-            <button
-              type="button"
-              onClick={() => setIslemlerOpen(p => !p)}
-              style={{
-                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: islemlerOpen ? '#1565C0' : '#E5E7EB',
-                background: islemlerOpen ? '#EFF6FF' : 'white',
-                color: islemlerOpen ? '#1565C0' : '#374151',
+            {/* 1 — Menü */}
+            <button type="button" onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
+              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: menuOpen === 'islemler' ? '#1565C0' : '#E5E7EB',
+                background: menuOpen === 'islemler' ? '#EFF6FF' : 'white',
+                color: menuOpen === 'islemler' ? '#1565C0' : '#374151',
                 fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
-              }}
-            >
-              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>☰</span>
-              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>İşlemler</span>
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+              <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>☰</span>
+              <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Menü</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setShowHeld(true)}
-              style={{
-                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: heldDocs.length > 0 ? '#F59E0B' : '#E5E7EB',
-                background: heldDocs.length > 0 ? '#FFFBEB' : 'white',
-                color: heldDocs.length > 0 ? '#B45309' : '#374151',
+            {/* 2 — Belge */}
+            <button type="button" onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
+              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: menuOpen === 'belge' ? '#7C3AED' : '#E5E7EB',
+                background: menuOpen === 'belge' ? '#F5F3FF' : 'white',
+                color: menuOpen === 'belge' ? '#7C3AED' : '#374151',
                 fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
-              }}
-            >
-              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>📄</span>
-              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>
-                Belge{heldDocs.length > 0 ? ` (${heldDocs.length})` : ''}
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+              <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>📄</span>
+              <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Belge</span>
+            </button>
+
+            {/* 3 — Müşteri */}
+            <button type="button" onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
+              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: menuOpen === 'musteri' ? '#2E7D32' : '#E5E7EB',
+                background: menuOpen === 'musteri' ? '#E8F5E9' : 'white',
+                color: selectedCustomer ? '#2E7D32' : menuOpen === 'musteri' ? '#2E7D32' : '#374151',
+                fontWeight: 600, cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+              <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>👤</span>
+              <span style={{ fontSize: 'clamp(8px,0.7vw,11px)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center' }}>
+                {selectedCustomer ? selectedCustomer.name.split(' ')[0] : 'Müşteri'}
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => { if (cart.length > 0) setCancelMode(m => !m) }}
-              disabled={cart.length === 0}
-              style={{
-                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: cancelMode ? '#DC2626' : '#E5E7EB',
-                background: cancelMode ? '#FEF2F2' : 'white',
-                color: cancelMode ? '#DC2626' : cart.length === 0 ? '#D1D5DB' : '#374151',
-                fontWeight: 600, cursor: cart.length === 0 ? 'default' : 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
-              }}
-            >
-              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>✕</span>
-              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>
-                {cancelMode ? 'Kapat' : 'Ürün İptal'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              disabled
-              style={{
-                padding: '8% 2%', borderRadius: 8, border: '1.5px solid #F3F4F6',
-                background: '#FAFAFA', color: '#D1D5DB', cursor: 'default',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
-              }}
-            >
-              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>·</span>
-              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>—</span>
+            {/* 4 — Fiyat Gör */}
+            <button type="button" onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
+              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: menuOpen === 'fiyatgor' ? '#D97706' : '#E5E7EB',
+                background: menuOpen === 'fiyatgor' ? '#FFFBEB' : 'white',
+                color: menuOpen === 'fiyatgor' ? '#D97706' : '#374151',
+                fontWeight: 600, cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+              <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
+              <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Fiyat Gör</span>
             </button>
 
           </div>
 
-          {/* ── İşlemler popup ── */}
-          {islemlerOpen && (
+          {menuOpen && menuOpen !== 'fiyatgor' && (
             <>
               <div
                 role="presentation"
                 style={{ position: 'fixed', inset: 0, zIndex: 9990 }}
-                onClick={() => setIslemlerOpen(false)}
+                onClick={() => setMenuOpen(null)}
               />
               <div style={{
                 position: 'absolute', top: 0, left: '102%',
                 zIndex: 9991, background: 'white',
-                border: '1px solid #E5E7EB', borderRadius: 10,
+                border: '1px solid #E5E7EB', borderRadius: 12,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                minWidth: 200, overflow: 'hidden',
+                minWidth: 210, overflow: 'hidden',
               }}>
-                {[
-                  { label: '👤 Müşteri Seç', action: () => { void loadCustomers(); setIslemlerOpen(false) }, disabled: false, danger: false },
-                  { label: '👤+ Müşteri Ekle', action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setIslemlerOpen(false) }, disabled: false, danger: false },
-                  { label: '⏸ Belgeyi Beklet', action: () => { void holdDoc(); setIslemlerOpen(false) }, disabled: cart.length === 0, danger: false },
-                  { label: `📄 Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, action: () => { setShowHeld(true); setIslemlerOpen(false) }, disabled: false, danger: false },
+
+                {menuOpen === 'islemler' && [
                   {
-                    label: selectedCustomer ? `❌ ${selectedCustomer.name.split(' ')[0]} — Çıkar` : '❌ Cari Çıkar',
+                    label: '💰 Cari Tahsilat',
+                    action: () => { setMenuOpen(null) },
+                    disabled: !selectedCustomer,
+                  },
+                  {
+                    label: '💸 Cari Ödeme',
+                    action: () => { setMenuOpen(null) },
+                    disabled: !selectedCustomer,
+                  },
+                  {
+                    label: '🚫 Belge İptal',
+                    action: () => { clearCart(); setMenuOpen(null) },
+                    disabled: cart.length === 0,
+                    danger: true,
+                  },
+                  {
+                    label: '⏸ Beklemeye Al',
+                    action: () => { void holdDoc(); setMenuOpen(null) },
+                    disabled: cart.length === 0,
+                  },
+                  {
+                    label: `📂 Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`,
+                    action: () => { setShowHeld(true); setMenuOpen(null) },
+                    disabled: false,
+                  },
+                  {
+                    label: '% Belge İndirim',
+                    action: () => {
+                      setSmsPhonePanelOpen(false)
+                      setMenuOpen(null)
+                      const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
+                      setDocDiscMode(openMode)
+                      setDocDiscInput(
+                        openMode === 'rate'
+                          ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
+                          : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
+                      )
+                      setDocDiscountMode(true)
+                    },
+                    disabled: cart.length === 0,
+                  },
+                  {
+                    label: cancelMode ? '✓ Ürün İptal (kapat)' : '✕ Ürün İptal',
+                    action: () => { if (cart.length > 0) setCancelMode(m => !m); setMenuOpen(null) },
+                    disabled: cart.length === 0,
+                  },
+                ].map((item, i, arr) => (
+                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
+                ))}
+
+                {menuOpen === 'belge' && [
+                  {
+                    label: '↩️ İade Al',
+                    action: () => { setMenuOpen(null) },
+                    disabled: false,
+                  },
+                ].map((item, i, arr) => (
+                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
+                ))}
+
+                {menuOpen === 'musteri' && [
+                  {
+                    label: '👤+ Müşteri Ekle',
+                    action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setMenuOpen(null) },
+                    disabled: false,
+                  },
+                  {
+                    label: '🔍 Müşteri Seç',
+                    action: () => { void loadCustomers(); setMenuOpen(null) },
+                    disabled: false,
+                  },
+                  {
+                    label: '✏️ Müşteri Düzenle',
+                    action: () => { setMenuOpen(null) },
+                    disabled: !selectedCustomer,
+                  },
+                  {
+                    label: selectedCustomer ? `❌ ${selectedCustomer.name.split(' ')[0]} — Çıkar` : '❌ Müşteri Çıkar',
                     action: () => {
                       applyCustomerSelection(null)
-                      setIslemlerOpen(false)
+                      setMenuOpen(null)
                     },
                     disabled: !selectedCustomer,
                     danger: true,
                   },
                 ].map((item, i, arr) => (
-                  <div
-                    key={i}
-                    onClick={item.disabled ? undefined : item.action}
-                    style={{
-                      padding: '11px 16px', cursor: item.disabled ? 'default' : 'pointer',
-                      fontSize: 13, fontWeight: 500,
-                      borderBottom: i < arr.length - 1 ? '1px solid #F5F5F5' : 'none',
-                      color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
-                      opacity: item.disabled ? 0.5 : 1,
-                      background: 'white',
-                    }}
-                    onMouseEnter={e => {
-                      if (!item.disabled) {
-                        (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLDivElement).style.background = 'white'
-                    }}
-                  >{item.label}</div>
+                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
                 ))}
+
               </div>
             </>
+          )}
+
+          {menuOpen === 'fiyatgor' && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
+              background: 'rgba(0,0,0,0.45)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => setMenuOpen(null)}>
+              <div onClick={e => e.stopPropagation()}
+                style={{ background: 'white', borderRadius: 16, padding: 24,
+                  width: 'min(480px, 92vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>🔍 Fiyat Gör</div>
+                  <button type="button" onClick={() => setMenuOpen(null)}
+                    style={{ background: 'none', border: 'none', fontSize: 20,
+                      cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
+                </div>
+
+                <input
+                  autoFocus
+                  value={fiyatGorQ}
+                  onChange={e => {
+                    const v = e.target.value
+                    setFiyatGorQ(v)
+                    setFiyatGorItem(null)
+                    const t = v.trim()
+                    const found = t
+                      ? allProducts.find(p =>
+                          (p.barcode?.trim() === t) || (p.code?.trim() === t))
+                      : undefined
+                    if (found) setFiyatGorItem(found)
+                  }}
+                  placeholder="Barkod okut veya ürün adı gir..."
+                  style={{ padding: '12px 14px', fontSize: 15, borderRadius: 10,
+                    border: '1.5px solid #E5E7EB', outline: 'none', width: '100%',
+                    boxSizing: 'border-box' as const }}
+                />
+
+                {!fiyatGorItem && fiyatGorQ.length > 1 && (
+                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex',
+                    flexDirection: 'column', gap: 4, border: '1px solid #F3F4F6',
+                    borderRadius: 10, padding: 4 }}>
+                    {allProducts
+                      .filter(p =>
+                        (p.name?.toLowerCase().includes(fiyatGorQ.toLowerCase()) ?? false) ||
+                        (p.code?.toLowerCase().includes(fiyatGorQ.toLowerCase()) ?? false)
+                      )
+                      .slice(0, 20)
+                      .map(p => (
+                        <div key={p.id}
+                          role="presentation"
+                          onClick={() => setFiyatGorItem(p)}
+                          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F9FAFB' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: '#111' }}>{p.name}</div>
+                            <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace' }}>{p.code}</div>
+                          </div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: '#1565C0' }}>
+                            {p.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
+                {fiyatGorItem && (
+                  <div style={{ padding: '16px', borderRadius: 12, background: '#F0F9FF',
+                    border: '1.5px solid #BAE6FD', display: 'flex',
+                    justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#111' }}>{fiyatGorItem.name}</div>
+                      <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2, fontFamily: 'monospace' }}>
+                        {fiyatGorItem.code ?? ''}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                        KDV: %{fiyatGorItem.vatRate}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1565C0' }}>
+                      {fiyatGorItem.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <button type="button" onClick={() => setMenuOpen(null)}
+                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 500,
+                      borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: 'white', cursor: 'pointer', color: '#374151' }}>
+                    Kapat
+                  </button>
+                  <button type="button"
+                    disabled={!fiyatGorItem}
+                    onClick={() => {
+                      if (fiyatGorItem) {
+                        addToCartWithQty(fiyatGorItem, 1)
+                        setMenuOpen(null)
+                      }
+                    }}
+                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 700,
+                      borderRadius: 10, border: 'none', cursor: fiyatGorItem ? 'pointer' : 'default',
+                      background: fiyatGorItem ? '#1565C0' : '#E5E7EB',
+                      color: fiyatGorItem ? 'white' : '#9CA3AF' }}>
+                    Fişe Ekle
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* ── Adet göstergesi — ince ── */}
