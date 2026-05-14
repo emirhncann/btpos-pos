@@ -1995,325 +1995,267 @@ export default function POSScreen({
           </div>
         </div>
 
-        {/* ② NUMPAD + MENÜ — %16 (PLU’dan pay) */}
+        {/* ② NUMPAD KOLON — %22 */}
         <div style={{
-          width: '16%', flexShrink: 0, boxSizing: 'border-box', background: '#f8f9fa',
-          display: 'flex', flexDirection: 'column', padding: 10, gap: 8, borderRight: '1px solid #e0e0e0',
-          overflow: 'hidden', position: 'relative',
+          width: '22%',
+          flexShrink: 0,
+          boxSizing: 'border-box',
+          background: '#f8f9fa',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '1.5%',
+          gap: '1.5%',
+          borderRight: '1px solid #e0e0e0',
+          overflow: 'visible',
+          position: 'relative',
         }}>
 
-          {selectedCustomer && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => setSendSms(p => !p)}
-                style={{
-                  padding: '6% 4%', borderRadius: 8, border: '1.5px solid',
-                  borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
-                  background: sendSms ? '#E8F5E9' : '#FAFAFA',
-                  color: sendSms ? '#2E7D32' : '#9CA3AF',
-                  fontWeight: 600, fontSize: 'clamp(8px, 0.8vw, 11px)',
-                  cursor: 'pointer', textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 2,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(12px, 1.2vw, 16px)' }}>
-                  {sendSms ? '📱✓' : '📱'}
-                </span>
-                <span style={{
-                  whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', width: '100%', textAlign: 'center' as const,
-                }}>
-                  {smsPhone || 'SMS'}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSendEmail(p => !p)}
-                style={{
-                  padding: '6% 4%', borderRadius: 8, border: '1.5px solid',
-                  borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
-                  background: sendEmail ? '#EFF6FF' : '#FAFAFA',
-                  color: sendEmail ? '#1565C0' : '#9CA3AF',
-                  fontWeight: 600, fontSize: 'clamp(8px, 0.8vw, 11px)',
-                  cursor: 'pointer', textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 2,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(12px, 1.2vw, 16px)' }}>
-                  {sendEmail ? '✉️✓' : '✉️'}
-                </span>
-                <span style={{
-                  whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', width: '100%', textAlign: 'center' as const,
-                }}>
-                  {mailAddr || 'E-Posta'}
-                </span>
-              </button>
-            </div>
-          )}
-
-          <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
-              <button
-                type="button"
-                onClick={() => setIslemlerOpen(p => !p)}
-                style={{
-                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
-                  borderColor: islemlerOpen ? '#1565C0' : '#E5E7EB',
-                  background: islemlerOpen ? '#EFF6FF' : 'white',
-                  color: islemlerOpen ? '#1565C0' : '#374151',
-                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
-                  cursor: 'pointer', textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 3,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>☰</span>
-                <span>İşlemler</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowHeld(true); setIslemlerOpen(false) }}
-                style={{
-                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
-                  borderColor: heldDocs.length > 0 ? '#F59E0B' : '#E5E7EB',
-                  background: heldDocs.length > 0 ? '#FFFBEB' : 'white',
-                  color: heldDocs.length > 0 ? '#B45309' : '#374151',
-                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
-                  cursor: 'pointer', textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 3,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>📄</span>
-                <span>Belge{heldDocs.length > 0 ? ` (${heldDocs.length})` : ''}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (cart.length === 0) return
-                  setCancelMode(m => !m)
-                  setIslemlerOpen(false)
-                }}
-                disabled={cart.length === 0}
-                style={{
-                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid',
-                  borderColor: cancelMode ? '#DC2626' : '#E5E7EB',
-                  background: cancelMode ? '#FEF2F2' : 'white',
-                  color: cancelMode ? '#DC2626' : cart.length === 0 ? '#D1D5DB' : '#374151',
-                  fontWeight: 600, fontSize: 'clamp(9px, 0.9vw, 12px)',
-                  cursor: cart.length === 0 ? 'default' : 'pointer',
-                  textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 3,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>✕</span>
-                <span>{cancelMode ? 'İptali Kapat' : 'Ürün İptal'}</span>
-              </button>
-              <button
-                type="button"
-                disabled
-                style={{
-                  padding: '8% 4%', borderRadius: 8, border: '1.5px solid #F3F4F6',
-                  background: '#FAFAFA', color: '#D1D5DB',
-                  fontWeight: 500, fontSize: 'clamp(9px, 0.9vw, 12px)',
-                  cursor: 'default', textAlign: 'center' as const,
-                  display: 'flex', flexDirection: 'column' as const,
-                  alignItems: 'center', gap: 3,
-                }}
-              >
-                <span style={{ fontSize: 'clamp(14px, 1.4vw, 20px)' }}>·</span>
-                <span>—</span>
-              </button>
-            </div>
-
-            {islemlerOpen && (
-              <>
-                <div
-                  role="presentation"
-                  style={{ position: 'fixed', inset: 0, zIndex: 9990 }}
-                  onClick={() => setIslemlerOpen(false)}
-                />
-                <div style={{
-                  position: 'absolute', top: 0, left: '100%', marginLeft: 6, zIndex: 9991,
-                  background: 'white', border: '1px solid #E5E7EB', borderRadius: 10,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)', minWidth: 200, overflow: 'hidden',
-                }}>
-                  {[
-                    {
-                      label: '👤 Müşteri Seç',
-                      action: () => { void loadCustomers() },
-                      disabled: false,
-                      danger: false,
-                    },
-                    {
-                      label: '👤+ Müşteri Ekle',
-                      action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setIslemlerOpen(false) },
-                      disabled: false,
-                      danger: false,
-                    },
-                    {
-                      label: '⏸ Belgeyi Beklet',
-                      action: () => { void holdDoc() },
-                      disabled: cart.length === 0,
-                      danger: false,
-                    },
-                    {
-                      label: selectedCustomer ? `👤 ${selectedCustomer.name} — Çıkar` : '—',
-                      action: () => { applyCustomerSelection(null); setIslemlerOpen(false) },
-                      disabled: !selectedCustomer,
-                      danger: true,
-                    },
-                  ].map((item, i) => (
-                    <div
-                      key={i}
-                      onClick={item.disabled ? undefined : item.action}
-                      style={{
-                        padding: '11px 14px', cursor: item.disabled ? 'default' : 'pointer',
-                        fontSize: 13, fontWeight: 500,
-                        borderBottom: i < 3 ? '1px solid #F5F5F5' : 'none',
-                        color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
-                        background: 'white',
-                      }}
-                      onMouseEnter={e => {
-                        if (!item.disabled) {
-                          (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
-                        }
-                      }}
-                      onMouseLeave={e => {
-                        (e.currentTarget as HTMLDivElement).style.background = 'white'
-                      }}
-                    >
-                      {item.label}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          {pavoSettings && !selectedCustomer && (
+          {/* ── SATIR 1: SMS + Mail — her zaman göster ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
             <button
               type="button"
-              title="SMS bildirimi"
-              aria-label="SMS bildirimi"
-              onClick={() => {
-                setDocDiscountMode(false)
-                const base = smsPhone.trim()
-                setSmsPhoneDraft(normalizeTrMobileForSms(base))
-                setSmsPhonePanelOpen(true)
-                setIslemlerOpen(false)
-              }}
+              onClick={() => setSendSms(p => !p)}
               style={{
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                position: 'relative',
-                width: '100%',
-                minHeight: 44,
-                border: sendSms ? '2px solid #1565C0' : '1.5px solid #e5e7eb',
-                borderRadius: 8,
-                background: sendSms ? '#e3f2fd' : 'white',
-                cursor: 'pointer',
-                padding: '8px',
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
+                background: sendSms ? '#E8F5E9' : selectedCustomer ? 'white' : '#FAFAFA',
+                color: sendSms ? '#2E7D32' : selectedCustomer ? '#374151' : '#D1D5DB',
+                fontWeight: 600, cursor: selectedCustomer ? 'pointer' : 'default',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
               }}
             >
-              <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden>📱</span>
-              {sendSms && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    right: 6,
-                    top: 6,
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: '#1565C0',
-                    border: '1px solid #fff',
-                  }}
-                />
-              )}
+              <span style={{ fontSize: 'clamp(12px, 1.4vw, 20px)' }}>{sendSms ? '📱✓' : '📱'}</span>
+              <span style={{
+                fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                width: '100%', textAlign: 'center' as const,
+              }}>
+                {selectedCustomer ? (smsPhone || 'SMS yok') : 'SMS'}
+              </span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setSendEmail(p => !p)}
+              style={{
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
+                background: sendEmail ? '#EFF6FF' : selectedCustomer ? 'white' : '#FAFAFA',
+                color: sendEmail ? '#1565C0' : selectedCustomer ? '#374151' : '#D1D5DB',
+                fontWeight: 600, cursor: selectedCustomer ? 'pointer' : 'default',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
+              }}
+            >
+              <span style={{ fontSize: 'clamp(12px, 1.4vw, 20px)' }}>{sendEmail ? '✉️✓' : '✉️'}</span>
+              <span style={{
+                fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                width: '100%', textAlign: 'center' as const,
+              }}>
+                {selectedCustomer ? (mailAddr || 'Mail yok') : 'Mail'}
+              </span>
+            </button>
+          </div>
+
+          {/* ── SATIR 2+3: 4 buton 2×2 ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
+
+            <button
+              type="button"
+              onClick={() => setIslemlerOpen(p => !p)}
+              style={{
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: islemlerOpen ? '#1565C0' : '#E5E7EB',
+                background: islemlerOpen ? '#EFF6FF' : 'white',
+                color: islemlerOpen ? '#1565C0' : '#374151',
+                fontWeight: 600, cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
+              }}
+            >
+              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>☰</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>İşlemler</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowHeld(true)}
+              style={{
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: heldDocs.length > 0 ? '#F59E0B' : '#E5E7EB',
+                background: heldDocs.length > 0 ? '#FFFBEB' : 'white',
+                color: heldDocs.length > 0 ? '#B45309' : '#374151',
+                fontWeight: 600, cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
+              }}
+            >
+              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>📄</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>
+                Belge{heldDocs.length > 0 ? ` (${heldDocs.length})` : ''}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { if (cart.length > 0) setCancelMode(m => !m) }}
+              disabled={cart.length === 0}
+              style={{
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
+                borderColor: cancelMode ? '#DC2626' : '#E5E7EB',
+                background: cancelMode ? '#FEF2F2' : 'white',
+                color: cancelMode ? '#DC2626' : cart.length === 0 ? '#D1D5DB' : '#374151',
+                fontWeight: 600, cursor: cart.length === 0 ? 'default' : 'pointer',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
+              }}
+            >
+              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>✕</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>
+                {cancelMode ? 'Kapat' : 'Ürün İptal'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              disabled
+              style={{
+                padding: '8% 2%', borderRadius: 8, border: '1.5px solid #F3F4F6',
+                background: '#FAFAFA', color: '#D1D5DB', cursor: 'default',
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%',
+              }}
+            >
+              <span style={{ fontSize: 'clamp(14px, 1.4vw, 22px)' }}>·</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)' }}>—</span>
+            </button>
+
+          </div>
+
+          {/* ── İşlemler popup ── */}
+          {islemlerOpen && (
+            <>
+              <div
+                role="presentation"
+                style={{ position: 'fixed', inset: 0, zIndex: 9990 }}
+                onClick={() => setIslemlerOpen(false)}
+              />
+              <div style={{
+                position: 'absolute', top: 0, left: '102%',
+                zIndex: 9991, background: 'white',
+                border: '1px solid #E5E7EB', borderRadius: 10,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+                minWidth: 200, overflow: 'hidden',
+              }}>
+                {[
+                  { label: '👤 Müşteri Seç', action: () => { void loadCustomers(); setIslemlerOpen(false) }, disabled: false, danger: false },
+                  { label: '👤+ Müşteri Ekle', action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setIslemlerOpen(false) }, disabled: false, danger: false },
+                  { label: '⏸ Belgeyi Beklet', action: () => { void holdDoc(); setIslemlerOpen(false) }, disabled: cart.length === 0, danger: false },
+                  { label: `📄 Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, action: () => { setShowHeld(true); setIslemlerOpen(false) }, disabled: false, danger: false },
+                  {
+                    label: selectedCustomer ? `❌ ${selectedCustomer.name.split(' ')[0]} — Çıkar` : '❌ Cari Çıkar',
+                    action: () => {
+                      applyCustomerSelection(null)
+                      setIslemlerOpen(false)
+                    },
+                    disabled: !selectedCustomer,
+                    danger: true,
+                  },
+                ].map((item, i, arr) => (
+                  <div
+                    key={i}
+                    onClick={item.disabled ? undefined : item.action}
+                    style={{
+                      padding: '11px 16px', cursor: item.disabled ? 'default' : 'pointer',
+                      fontSize: 13, fontWeight: 500,
+                      borderBottom: i < arr.length - 1 ? '1px solid #F5F5F5' : 'none',
+                      color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
+                      opacity: item.disabled ? 0.5 : 1,
+                      background: 'white',
+                    }}
+                    onMouseEnter={e => {
+                      if (!item.disabled) {
+                        (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
+                      }
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLDivElement).style.background = 'white'
+                    }}
+                  >{item.label}</div>
+                ))}
+              </div>
+            </>
           )}
 
-          <div style={{ height: 1, background: '#e5e7eb', flexShrink: 0 }} />
-
-          <div style={{ flex: 1, minHeight: 0 }} />
-
+          {/* ── Adet göstergesi — ince ── */}
           <div style={{
-            borderRadius: 8, padding: '5px 6px', textAlign: 'center',
+            borderRadius: 7, padding: '3% 4%', textAlign: 'center',
             border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`,
             background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0,
           }}>
             <span style={{
-              fontSize: 'clamp(15px, 1.2vw + 8px, 22px)',
-              fontWeight: 700,
-              color: numBuf ? '#2e7d32' : '#d97706',
+              fontSize: 'clamp(13px, 1.1vw + 6px, 20px)',
+              fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706',
               display: 'block', lineHeight: 1,
             }}>{numBuf || '—'}</span>
-            <span style={{ fontSize: 9, color: '#6b7280', display: 'block', marginTop: 1 }}>
+            <span style={{ fontSize: 'clamp(8px, 0.6vw, 10px)', color: '#6b7280', display: 'block', marginTop: 2 }}>
               {numBuf.includes(',') ? 'miktar' : 'adet'}
             </span>
           </div>
 
+          {/* ── Numpad ── */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(3, 1fr)',
             gap: '3%',
-            flexShrink: 0,
-            width: '100%',
             flex: 1,
             minHeight: 0,
-            alignContent: 'stretch',
           }}>
             {[
-              { key: '7' }, { key: '8' }, { key: '9' },
-              { key: '4' }, { key: '5' }, { key: '6' },
-              { key: '1' }, { key: '2' }, { key: '3' },
-              { key: ',' }, { key: '0' }, { key: '⌫' },
-              { key: 'C', span: 3 },
-            ].map(({ key, span }) => (
+              '7', '8', '9',
+              '4', '5', '6',
+              '1', '2', '3',
+              ',', '0', '⌫',
+            ].map(k => (
               <button
-                key={key}
+                key={k}
                 type="button"
-                onMouseDown={e => {
-                  e.preventDefault()
-                  handleNumKey(key)
-                }}
+                onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
                 style={{
-                  width: '100%',
-                  minWidth: 0,
+                  width: '100%', minWidth: 0,
                   boxSizing: 'border-box',
-                  aspectRatio: span ? 'auto' : '1.2 / 1',
-                  minHeight: span ? 'clamp(30px, 11%, 48px)' : undefined,
-                  border: '2px solid',
-                  borderRadius: 10,
+                  aspectRatio: '1 / 1',
+                  border: '1.5px solid',
+                  borderRadius: 9,
                   cursor: 'pointer',
                   fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                   userSelect: 'none' as const,
-                  background: key === 'C' ? '#fff5f5' : key === '⌫' ? '#fffbeb' : 'white',
-                  color: key === 'C' ? '#dc2626' : key === '⌫' ? '#d97706' : '#1f2937',
-                  borderColor: key === 'C' ? '#fecdd3' : key === '⌫' ? '#fde68a' : '#d1d5db',
-                  gridColumn: span ? `span ${span}` : undefined,
-                  fontSize: 'clamp(16px, 1.4vw + 8px, 28px)',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
+                  background: k === '⌫' ? '#fffbeb' : 'white',
+                  color: k === '⌫' ? '#d97706' : '#1f2937',
+                  borderColor: k === '⌫' ? '#fde68a' : '#d1d5db',
+                  fontSize: 'clamp(16px, 1.6vw + 6px, 30px)',
                 }}
-              >{key === 'C' ? 'Temizle' : key}</button>
+              >{k}</button>
             ))}
+
+            <button
+              type="button"
+              onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
+              style={{
+                gridColumn: 'span 3',
+                width: '100%', boxSizing: 'border-box',
+                padding: '4% 0',
+                border: '1.5px solid #fecdd3',
+                borderRadius: 9, cursor: 'pointer',
+                fontWeight: 700, fontSize: 'clamp(12px, 1.1vw + 4px, 18px)',
+                background: '#fff5f5', color: '#dc2626',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                userSelect: 'none' as const,
+              }}
+            >Temizle</button>
           </div>
+
         </div>
 
-        {/* ③ PLU — %35 */}
-        <div style={{ width: '35%', flexShrink: 0, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0', minWidth: 0 }}>
+        {/* ③ PLU — %29 */}
+        <div style={{ width: '29%', flexShrink: 0, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0', minWidth: 0 }}>
 
           {/* PLU başlık */}
           <div style={{ padding: '7px 10px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 6, height: 36, flexShrink: 0, background: '#f8f9fa' }}>
