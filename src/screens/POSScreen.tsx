@@ -141,6 +141,8 @@ export default function POSScreen({
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
   const [sendSms, setSendSms] = useState(false)
   const [smsPhoneInput, setSmsPhoneInput] = useState('')
+  const [smsPhonePanelOpen, setSmsPhonePanelOpen] = useState(false)
+  const [smsPhoneDraft, setSmsPhoneDraft] = useState('')
   const [invoiceType, setInvoiceType] = useState<'e_archive' | 'paper'>('e_archive')
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
@@ -463,6 +465,8 @@ export default function POSScreen({
     setMenuOpen(false)
     setSendSms(false)
     setSmsPhoneInput('')
+    setSmsPhonePanelOpen(false)
+    setSmsPhoneDraft('')
   }
 
   function handleNumKey(k: string) {
@@ -1224,6 +1228,95 @@ export default function POSScreen({
         </div>
       )}
 
+      {smsPhonePanelOpen && pavoSettings && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>SMS bildirimi</div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Numarayı tuş takımıyla girin (en az 10 rakam)</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSmsPhonePanelOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+              >✕</button>
+            </div>
+
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 28, fontWeight: 700, color: '#1565C0', letterSpacing: 1, minHeight: 52, wordBreak: 'break-all' }}>
+              {smsPhoneDraft ? smsPhoneDraft.replace(/(\d{3})(?=\d)/g, '$1 ') : '—'}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setSmsPhoneDraft(prev => {
+                      const d = prev.replace(/\D/g, '')
+                      return d.length < 15 ? d + k : d
+                    })
+                  }}
+                  style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+                >{k}</button>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => setSmsPhoneDraft('')}
+                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
+              >C</button>
+              <button
+                type="button"
+                onClick={() => setSmsPhoneDraft(prev => {
+                  const d = prev.replace(/\D/g, '')
+                  return d.length < 15 ? d + '0' : d
+                })}
+                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer' }}
+              >0</button>
+              <button
+                type="button"
+                onClick={() => setSmsPhoneDraft(v => v.slice(0, -1))}
+                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#FEF2F2', fontSize: 18, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}
+              >⌫</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setSendSms(false)
+                  setSmsPhoneInput('')
+                  setSmsPhoneDraft('')
+                  setSmsPhonePanelOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
+              >
+                SMS Kapat
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const digits = smsPhoneDraft.replace(/\D/g, '')
+                  if (notificationPhoneDigitCount(digits) < 10) {
+                    showErrorPopup('SMS Bildirimi', 'En az 10 rakam girin veya SMS Kapat ile bildirimi kapatın.')
+                    return
+                  }
+                  setSmsPhoneInput(digits)
+                  setSendSms(true)
+                  setSmsPhonePanelOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#1565C0', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}
+              >
+                Tamam
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {errorPopup && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #374151', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
@@ -1634,6 +1727,7 @@ export default function POSScreen({
                         type="button"
                         onClick={e => {
                           e.stopPropagation()
+                          setSmsPhonePanelOpen(false)
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
@@ -1738,6 +1832,7 @@ export default function POSScreen({
                         setDocDiscountMode(false)
                         return
                       }
+                      setSmsPhonePanelOpen(false)
                       const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
                       setDocDiscMode(openMode)
                       setDocDiscInput(
@@ -1817,36 +1912,48 @@ export default function POSScreen({
           </button>
 
           {pavoSettings && (
-            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 2px 2px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#374151', userSelect: 'none' as const }}>
-                <input
-                  type="checkbox"
-                  checked={sendSms}
-                  onChange={e => setSendSms(e.target.checked)}
-                  style={{ width: 16, height: 16, accentColor: '#1565C0', cursor: 'pointer' }}
-                />
-                SMS bildir
-              </label>
+            <button
+              type="button"
+              title="SMS bildirimi"
+              aria-label="SMS bildirimi"
+              onClick={() => {
+                setDocDiscountMode(false)
+                const base = (smsPhoneInput.trim() || selectedCustomer?.phone?.trim() || '')
+                setSmsPhoneDraft(base.replace(/\D/g, ''))
+                setSmsPhonePanelOpen(true)
+                setMenuOpen(false)
+              }}
+              style={{
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+                width: '100%',
+                minHeight: 44,
+                border: sendSms ? '2px solid #1565C0' : '1.5px solid #e5e7eb',
+                borderRadius: 8,
+                background: sendSms ? '#e3f2fd' : 'white',
+                cursor: 'pointer',
+                padding: '8px',
+              }}
+            >
+              <span style={{ fontSize: 22, lineHeight: 1 }} aria-hidden>📱</span>
               {sendSms && (
-                <input
-                  type="tel"
-                  inputMode="tel"
-                  autoComplete="tel"
-                  placeholder="5xx xxx xx xx"
-                  value={smsPhoneInput}
-                  onChange={e => setSmsPhoneInput(e.target.value)}
+                <span
                   style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '8px 10px',
-                    fontSize: 12,
-                    borderRadius: 8,
-                    border: '1px solid #d1d5db',
-                    outline: 'none',
+                    position: 'absolute',
+                    right: 6,
+                    top: 6,
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: '#1565C0',
+                    border: '1px solid #fff',
                   }}
                 />
               )}
-            </div>
+            </button>
           )}
 
           {menuOpen && (
