@@ -1423,8 +1423,9 @@ export default function POSScreen({
           alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setSmsModalOpen(false)}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 16,
-              padding: 20, width: 300, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            style={{ background: 'white', borderRadius: 16, padding: 20,
+              width: 'min(320px, 90vw)',
+              display: 'flex', flexDirection: 'column', gap: 12 }}>
 
             {/* Başlık */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1448,7 +1449,7 @@ export default function POSScreen({
             </div>
 
             {/* Numpad */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'clamp(6px,1.5vw,12px)' }}>
               {['7','8','9','4','5','6','1','2','3','+','0','⌫'].map(k => (
                 <button key={k} type="button"
                   onMouseDown={e => {
@@ -1456,26 +1457,29 @@ export default function POSScreen({
                     if (k === '⌫') setSmsPhone(p => p.slice(0,-1))
                     else setSmsPhone(p => p + k)
                   }}
-                  style={{ padding: '14px 0', fontSize: k === '⌫' ? 18 : 20,
-                    fontWeight: 500, borderRadius: 10, border: '1px solid #E5E7EB',
-                    background: 'white', cursor: 'pointer',
-                    color: k === '⌫' ? '#EF4444' : '#111' }}>
+                  style={{
+                    padding: 'clamp(12px,2.5vw,18px) 0',
+                    fontSize: k === '⌫' ? 'clamp(16px,2vw,22px)' : 'clamp(18px,2.5vw,26px)',
+                    fontWeight: 500, borderRadius: 10,
+                    border: '1px solid #E5E7EB', background: 'white', cursor: 'pointer',
+                    color: k === '⌫' ? '#EF4444' : '#111',
+                  }}>
                   {k}
                 </button>
               ))}
             </div>
 
             {/* C + Uygula */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 'clamp(6px,1.5vw,12px)' }}>
               <button type="button" onMouseDown={e => { e.preventDefault(); setSmsPhone('') }}
-                style={{ padding: '14px 0', fontSize: 15, fontWeight: 500,
-                  borderRadius: 10, border: '1px solid #E5E7EB',
+                style={{ padding: 'clamp(12px,2vw,16px) 0', fontSize: 'clamp(13px,1.6vw,16px)',
+                  fontWeight: 500, borderRadius: 10, border: '1px solid #E5E7EB',
                   background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
                 C
               </button>
               <button type="button" onClick={() => { setSendSms(true); setSmsModalOpen(false) }}
-                style={{ padding: '14px 0', fontSize: 15, fontWeight: 600,
-                  borderRadius: 10, border: 'none',
+                style={{ padding: 'clamp(12px,2vw,16px) 0', fontSize: 'clamp(13px,1.6vw,16px)',
+                  fontWeight: 600, borderRadius: 10, border: 'none',
                   background: '#E65100', color: 'white', cursor: 'pointer' }}>
                 Uygula
               </button>
@@ -1490,8 +1494,9 @@ export default function POSScreen({
           alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setMailModalOpen(false)}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 16,
-              padding: 20, width: 340, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            style={{ background: 'white', borderRadius: 16, padding: 20,
+              width: 'min(480px, 94vw)',
+              display: 'flex', flexDirection: 'column', gap: 8 }}>
 
             {/* Başlık */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1507,27 +1512,46 @@ export default function POSScreen({
             </div>
 
             {/* Gösterge */}
-            <div style={{ textAlign: 'center', padding: '14px 0',
+            <div style={{ textAlign: 'center', padding: '12px 0',
               fontSize: 18, fontWeight: 600, color: '#E65100', letterSpacing: 1,
-              minHeight: 56, borderTop: '1px solid #F3F4F6',
+              minHeight: 48, borderTop: '1px solid #F3F4F6',
               borderBottom: '1px solid #F3F4F6', wordBreak: 'break-all' }}>
               {mailAddr || '—'}
             </div>
 
-            {/* QWERTY klavye */}
+            {/* Sayı satırı */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10,1fr)', gap: 'clamp(3px,1%,8px)' }}>
+              {['1','2','3','4','5','6','7','8','9','0'].map(k => (
+                <button key={k} type="button"
+                  onMouseDown={e => { e.preventDefault(); setMailAddr(p => p + k) }}
+                  style={{ padding: 'clamp(8px,2vw,14px) 0',
+                    fontSize: 'clamp(13px,1.6vw,18px)', fontWeight: 500,
+                    borderRadius: 8, border: '1px solid #E5E7EB',
+                    background: '#F9FAFB', cursor: 'pointer', color: '#111' }}>
+                  {k}
+                </button>
+              ))}
+            </div>
+
+            {/* QWERTY satır 1–3 */}
             {[
               ['q','w','e','r','t','y','u','i','o','p'],
               ['a','s','d','f','g','h','j','k','l'],
               ['z','x','c','v','b','n','m'],
             ].map((row, ri) => (
-              <div key={ri} style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+              <div key={ri} style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${row.length},1fr)`,
+                gap: 'clamp(3px,1%,8px)',
+                padding: ri === 1 ? '0 5%' : ri === 2 ? '0 10%' : '0',
+              }}>
                 {row.map(k => (
                   <button key={k} type="button"
                     onMouseDown={e => { e.preventDefault(); setMailAddr(p => p + k) }}
-                    style={{ flex: 1, maxWidth: 32, padding: '10px 0',
-                      fontSize: 13, fontWeight: 500, borderRadius: 6,
-                      border: '1px solid #E5E7EB', background: 'white',
-                      cursor: 'pointer', color: '#111' }}>
+                    style={{ padding: 'clamp(10px,2.5vw,18px) 0',
+                      fontSize: 'clamp(14px,1.8vw,20px)', fontWeight: 500,
+                      borderRadius: 8, border: '1px solid #E5E7EB',
+                      background: 'white', cursor: 'pointer', color: '#111' }}>
                     {k}
                   </button>
                 ))}
@@ -1535,14 +1559,14 @@ export default function POSScreen({
             ))}
 
             {/* Alt satır: @ . _ Temizle ⌫ */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: 4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: 'clamp(3px,1%,8px)' }}>
               {[
-                { k: '@', color: '#E65100' },
+                { k: '@',       style: { border: '1.5px solid #E65100', background: '#FFF3E0', color: '#E65100', fontWeight: 600 } },
                 { k: '.' },
                 { k: '_' },
-                { k: 'C', label: 'Temizle' },
-                { k: '⌫', color: '#EF4444' },
-              ].map(({ k, label, color }) => (
+                { k: 'C', label: 'Temizle', style: { background: '#F9FAFB' } },
+                { k: '⌫',       style: { color: '#EF4444', background: '#F9FAFB' } },
+              ].map(({ k, label, style: s }) => (
                 <button key={k} type="button"
                   onMouseDown={e => {
                     e.preventDefault()
@@ -1550,10 +1574,15 @@ export default function POSScreen({
                     else if (k === '⌫') setMailAddr(p => p.slice(0,-1))
                     else setMailAddr(p => p + k)
                   }}
-                  style={{ padding: '10px 0', fontSize: 13, fontWeight: 500,
-                    borderRadius: 6, border: '1px solid #E5E7EB',
-                    background: 'white', cursor: 'pointer',
-                    color: color ?? '#111' }}>
+                  style={Object.assign(
+                    {
+                      padding: 'clamp(10px,2.5vw,18px) 0',
+                      fontSize: 'clamp(13px,1.6vw,18px)', fontWeight: 500,
+                      borderRadius: 8, border: '1px solid #E5E7EB',
+                      background: 'white', cursor: 'pointer', color: '#111',
+                    },
+                    s ?? {},
+                  )}>
                   {label ?? k}
                 </button>
               ))}
@@ -1561,7 +1590,8 @@ export default function POSScreen({
 
             {/* Uygula */}
             <button type="button" onClick={() => { setSendEmail(true); setMailModalOpen(false) }}
-              style={{ width: '100%', padding: '14px 0', fontSize: 15, fontWeight: 600,
+              style={{ width: '100%', padding: 'clamp(12px,2vw,18px) 0',
+                fontSize: 'clamp(14px,1.6vw,18px)', fontWeight: 600,
                 borderRadius: 10, border: 'none',
                 background: '#E65100', color: 'white', cursor: 'pointer' }}>
               Uygula
@@ -2171,72 +2201,63 @@ export default function POSScreen({
           position: 'relative',
         }}>
 
-          {/* SMS butonu — toggle sol, numara sağa tıklayınca modal */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, flexShrink: 0 }}>
 
+            {/* SMS */}
             <div style={{ borderRadius: 8, border: '1.5px solid',
               borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
               background: sendSms ? '#E8F5E9' : '#FAFAFA',
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               gap: 4, padding: '6% 4%', overflow: 'hidden' }}>
-
-              {/* Toggle */}
               <button type="button" onClick={() => setSendSms(p => !p)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  display: 'flex', alignItems: 'center', gap: 4 }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                  padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <div style={{ width: 28, height: 16, borderRadius: 8,
                   background: sendSms ? '#2E7D32' : '#D1D5DB',
-                  position: 'relative', transition: 'background 0.15s', flexShrink: 0 }}>
+                  position: 'relative', flexShrink: 0 }}>
                   <div style={{ position: 'absolute', top: 2,
                     left: sendSms ? 14 : 2, width: 12, height: 12,
-                    borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s' }} />
+                    borderRadius: '50%', background: 'white' }} />
                 </div>
                 <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
               </button>
-
-              {/* Numara — tıklayınca modal */}
               <button type="button" onClick={() => setSmsModalOpen(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  width: '100%', textAlign: 'center' }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                  padding: 0, width: '100%', textAlign: 'center' as const }}>
                 <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
                   color: sendSms ? '#2E7D32' : '#9CA3AF',
                   whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', display: 'block', width: '100%' }}>
+                  textOverflow: 'ellipsis', display: 'block' }}>
                   {smsPhone || 'SMS'}
                 </span>
               </button>
             </div>
 
+            {/* Mail */}
             <div style={{ borderRadius: 8, border: '1.5px solid',
               borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
               background: sendEmail ? '#EFF6FF' : '#FAFAFA',
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               gap: 4, padding: '6% 4%', overflow: 'hidden' }}>
-
-              {/* Toggle */}
               <button type="button" onClick={() => setSendEmail(p => !p)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  display: 'flex', alignItems: 'center', gap: 4 }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                  padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
                 <div style={{ width: 28, height: 16, borderRadius: 8,
                   background: sendEmail ? '#1565C0' : '#D1D5DB',
-                  position: 'relative', transition: 'background 0.15s', flexShrink: 0 }}>
+                  position: 'relative', flexShrink: 0 }}>
                   <div style={{ position: 'absolute', top: 2,
                     left: sendEmail ? 14 : 2, width: 12, height: 12,
-                    borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s' }} />
+                    borderRadius: '50%', background: 'white' }} />
                 </div>
                 <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
               </button>
-
-              {/* Mail — tıklayınca modal */}
               <button type="button" onClick={() => setMailModalOpen(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                  width: '100%', textAlign: 'center' }}>
+                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                  padding: 0, width: '100%', textAlign: 'center' as const }}>
                 <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
                   color: sendEmail ? '#1565C0' : '#9CA3AF',
                   whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', display: 'block', width: '100%' }}>
+                  textOverflow: 'ellipsis', display: 'block' }}>
                   {mailAddr || 'Mail'}
                 </span>
               </button>
