@@ -118,4 +118,16 @@ describe('syncPluGroupsAcid', () => {
     const g1 = db.prepare('SELECT name FROM plu_groups_cache WHERE id = ?').get('g1') as any
     expect(g1.name).toBe('İçecekler Güncellendi')
   })
+
+  /** Merkez PLU senkronu artık her zaman full kullanır; diff ile kısmi sync eski grupları bırakır. */
+  it('diff mode: sunucudan silinen grup cache’de kalır (full ile temizlenir)', () => {
+    syncPlu(mockGroups, 'full')
+    const onlyG1 = [mockGroups[0]]
+    syncPlu(onlyG1, 'diff')
+    const grpsAfterDiff = db.prepare('SELECT id FROM plu_groups_cache WHERE company_id = ?').all('c1') as { id: string }[]
+    expect(grpsAfterDiff.map(r => r.id).sort()).toEqual(['g1', 'g2'])
+    syncPlu(onlyG1, 'full')
+    const grpsAfterFull = db.prepare('SELECT id FROM plu_groups_cache WHERE company_id = ?').all('c1') as { id: string }[]
+    expect(grpsAfterFull.map(r => r.id)).toEqual(['g1'])
+  })
 })

@@ -9,6 +9,16 @@ export interface PavoSettings {
   printWidth: '58mm' | '80mm'
 }
 
+/** Pavo CompleteSale: SendPhoneNotification true iken NotificationPhone zorunlu. */
+export interface PavoPhoneNotify {
+  send: boolean
+  phone?: string | null
+}
+
+export function notificationPhoneDigitCount(s: string): number {
+  return s.replace(/\D/g, '').length
+}
+
 export interface PavoSaleItem {
   name: string
   unitName?: string
@@ -117,6 +127,7 @@ export async function pavoCompleteSale(
     Amount: number
   },
   customer?: CustomerRow | null,
+  phoneNotify?: PavoPhoneNotify | null,
 ): Promise<PaymentDeviceResult> {
   let customerParty: Record<string, unknown> | undefined
   if (customer) {
@@ -160,6 +171,10 @@ export async function pavoCompleteSale(
     : undefined
   const priceEffect = explicitPriceEffect ?? computedPriceEffect
 
+  const phoneTrim = (phoneNotify?.phone ?? '').trim()
+  const sendRequested = Boolean(phoneNotify?.send)
+  const sendPhoneNotification = sendRequested && notificationPhoneDigitCount(phoneTrim) >= 10
+
   const body = {
     TransactionHandle: transactionHandle(settings, seq),
     Sale: {
@@ -171,7 +186,8 @@ export async function pavoCompleteSale(
       TotalPrice: amount,
       CurrencyCode: 'TRY',
       ExchangeRate: 1,
-      SendPhoneNotification: false,
+      SendPhoneNotification: sendPhoneNotification,
+      ...(sendPhoneNotification ? { NotificationPhone: phoneTrim } : {}),
       SendEMailNotification: false,
       ShowCreditCardMenu: false,
       SelectedSlots: ['rf', 'icc', 'manual'],

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
-import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
+import { notificationPhoneDigitCount, pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import AppLogo from '../components/AppLogo'
@@ -139,6 +139,8 @@ export default function POSScreen({
   const [addCustomerModal, setAddCustomerModal] = useState(false)
   const [newCustPrefill, setNewCustPrefill] = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
+  const [sendSms, setSendSms] = useState(false)
+  const [smsPhoneInput, setSmsPhoneInput] = useState('')
   const [invoiceType, setInvoiceType] = useState<'e_archive' | 'paper'>('e_archive')
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
@@ -148,12 +150,6 @@ export default function POSScreen({
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
 
-  useEffect(() => {
-    if (!showCustomer || !companyId) return
-    window.electron.db.getCustomers(companyId, customerQ)
-      .then(setCustomers)
-      .catch(() => setCustomers([]))
-  }, [customerQ, showCustomer, companyId])
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
   const isOnline  = conn === 'online'
@@ -171,6 +167,19 @@ export default function POSScreen({
     isOnline,
     onToast: handleQueueToast,
   })
+
+  useEffect(() => {
+    const p = selectedCustomer?.phone?.trim()
+    if (p) setSmsPhoneInput(p)
+    else setSmsPhoneInput('')
+  }, [selectedCustomer?.id, selectedCustomer?.phone])
+
+  useEffect(() => {
+    if (!showCustomer || !companyId) return
+    window.electron.db.getCustomers(companyId, customerQ)
+      .then(setCustomers)
+      .catch(() => setCustomers([]))
+  }, [customerQ, showCustomer, companyId])
 
   /* ── İlk grup seç ── */
   useEffect(() => {
@@ -452,6 +461,8 @@ export default function POSScreen({
     setLineDiscountTarget(null)
     setSelectedCustomer(null)
     setMenuOpen(false)
+    setSendSms(false)
+    setSmsPhoneInput('')
   }
 
   function handleNumKey(k: string) {
@@ -696,6 +707,15 @@ export default function POSScreen({
           }
         })
 
+        const notifyPhone = (smsPhoneInput.trim() || selectedCustomer?.phone?.trim() || '')
+        if (sendSms && notificationPhoneDigitCount(notifyPhone) < 10) {
+          const msg = notifyPhone.trim() === ''
+            ? 'SMS bildirimi için geçerli bir telefon numarası girin veya cari seçin.'
+            : 'Telefon numarası en az 10 rakam içermelidir.'
+          showErrorPopup('SMS Bildirimi', msg)
+          return
+        }
+
         deviceResult = await pavoCompleteSale(
           pavoSettings,
           seq,
@@ -706,6 +726,7 @@ export default function POSScreen({
           pavoPaymentsFinal,
           salePriceEffect,
           selectedCustomer,
+          { send: sendSms, phone: notifyPhone || null },
         )
 
         if (!deviceResult.success) {
@@ -1794,6 +1815,39 @@ export default function POSScreen({
             <span>{selectedCustomer ? `👤 ${selectedCustomer.name.split(' ')[0]}` : 'İşlemler'}</span>
             <span style={{ fontSize: 9 }}>{menuOpen ? '▴' : '▾'}</span>
           </button>
+
+          {pavoSettings && (
+            <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 2px 2px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 11, fontWeight: 600, color: '#374151', userSelect: 'none' as const }}>
+                <input
+                  type="checkbox"
+                  checked={sendSms}
+                  onChange={e => setSendSms(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: '#1565C0', cursor: 'pointer' }}
+                />
+                SMS bildir
+              </label>
+              {sendSms && (
+                <input
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  placeholder="5xx xxx xx xx"
+                  value={smsPhoneInput}
+                  onChange={e => setSmsPhoneInput(e.target.value)}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '8px 10px',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    border: '1px solid #d1d5db',
+                    outline: 'none',
+                  }}
+                />
+              )}
+            </div>
+          )}
 
           {menuOpen && (
             <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 9, overflow: 'hidden', flexShrink: 0 }}>

@@ -78,10 +78,12 @@ async function syncPlu(
   workplaceId: string | null,
   terminalId: string,
   loggedInCashierId: string | null,
-  mode: SyncMode,
+  _mode: SyncMode,
 ): Promise<SyncResult> {
   const terminalSettings = await window.electron.db.getPosSettings()
   const pluMode = terminalSettings.pluMode
+  /** Merkez `diff` gönderse bile PLU tam liste kabul edilir; diff dalı eski grupları silmediği için her zaman full senkron. */
+  const pluSyncMode: SyncMode = 'full'
 
   if (pluMode === 'cashier') {
     const allCashiers = await window.electron.db.getAllCashiers()
@@ -92,7 +94,7 @@ async function syncPlu(
         const groups = await fetchPluGroupsFromServer(companyId, workplaceId, terminalId, cashier.id)
         if (groups.length === 0) continue
         const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, cashier.id)
-        const result = await window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+        const result = await window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
         if (result.success) anySuccess = true
       } catch (e) {
         console.warn(`[syncPlu] kasiyer ${cashier.fullName} hatası:`, e)
@@ -107,7 +109,7 @@ async function syncPlu(
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: 'Boş PLU listesi' }
   }
   const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, null)
-  return window.electron.db.syncPluGroupsAcid(cacheRows, mode)
+  return window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
 }
 
 async function refreshPluDisplay(
