@@ -5,6 +5,7 @@ import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
 import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
+import { API_URL } from '../lib/api'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -201,6 +202,11 @@ export default function POSScreen({
   const [menuOpen, setMenuOpen] = useState<'islemler' | 'belge' | 'musteri' | 'fiyatgor' | null>(null)
   const [fiyatGorQ, setFiyatGorQ] = useState('')
   const [fiyatGorItem, setFiyatGorItem] = useState<ProductRow | null>(null)
+  const [cariPaymentModal, setCariPaymentModal] = useState<'tahsilat' | 'odeme' | null>(null)
+  const [cariPaymentAmt, setCariPaymentAmt] = useState('')
+  const [cariPaymentDesc, setCariPaymentDesc] = useState('')
+  const [cariPaymentSaving, setCariPaymentSaving] = useState(false)
+  const [cariPaymentResult, setCariPaymentResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
   const [showCustomer, setShowCustomer]   = useState(false)
@@ -256,6 +262,11 @@ export default function POSScreen({
       setSmsPhonePanelOpen(false)
       setSmsPhoneDraft('')
       setMenuOpen(null)
+      setCariPaymentModal(null)
+      setCariPaymentAmt('')
+      setCariPaymentDesc('')
+      setCariPaymentResult(null)
+      setCariPaymentSaving(false)
       return
     }
     if (c.phone?.trim()) {
@@ -667,6 +678,55 @@ export default function POSScreen({
       setCustomers(list)
     } catch {
       setCustomers([])
+    }
+  }
+
+  async function handleCariPayment() {
+    if (!selectedCustomer || !cariPaymentModal || !companyId) return
+    const amount = parseFloat(cariPaymentAmt.replace(',', '.'))
+    if (!amount || amount <= 0) return
+
+    setCariPaymentSaving(true)
+    setCariPaymentResult(null)
+
+    const terminalName = posSettings.source?.trim() || 'Kasa'
+    const customerIdNum = Number.parseInt(selectedCustomer.id, 10) || 0
+
+    try {
+      const res = await fetch(`${API_URL}/integration/cari-payment/${companyId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          process_type:  cariPaymentModal === 'tahsilat' ? 1 : 2,
+          amount,
+          customer_id:   customerIdNum,
+          customer_code: selectedCustomer.code ?? '',
+          customer_name: selectedCustomer.name ?? '',
+          cashier_name:  cashier.fullName,
+          terminal_name: terminalName,
+          description:   cariPaymentDesc.trim(),
+          payment_date:  new Date().toISOString().replace('T', ' ').slice(0, 19),
+        }),
+      })
+      const data = await res.json() as { success?: boolean; message?: string; label?: string }
+
+      if (res.ok && data.success) {
+        setCariPaymentResult({
+          ok:  true,
+          msg: `${data.label ?? (cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme')} başarıyla kaydedildi. Tutar: ${amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+        })
+        setCariPaymentAmt('')
+        setCariPaymentDesc('')
+      } else {
+        setCariPaymentResult({
+          ok: false,
+          msg: data.message ?? (res.ok ? 'İşlem başarısız.' : `HTTP ${res.status}`),
+        })
+      }
+    } catch (e) {
+      setCariPaymentResult({ ok: false, msg: String(e) })
+    } finally {
+      setCariPaymentSaving(false)
     }
   }
 
@@ -2388,7 +2448,19 @@ export default function POSScreen({
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} last={i === arr.length - 1}
                     onClick={() => {
                       if (item.disabled) return
-                      if (item.label.startsWith('Cari tah') || item.label.startsWith('Cari öd')) {
+                      if (item.label.startsWith('Cari tah')) {
+                        setCariPaymentModal('tahsilat')
+                        setCariPaymentAmt('')
+                        setCariPaymentDesc('')
+                        setCariPaymentResult(null)
+                        setMenuOpen(null)
+                        return
+                      }
+                      if (item.label.startsWith('Cari öd')) {
+                        setCariPaymentModal('odeme')
+                        setCariPaymentAmt('')
+                        setCariPaymentDesc('')
+                        setCariPaymentResult(null)
                         setMenuOpen(null)
                         return
                       }
@@ -2554,6 +2626,102 @@ export default function POSScreen({
                     Fişe Ekle
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {cariPaymentModal && selectedCustomer && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: 10000,
+              background: 'rgba(0,0,0,0.45)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center' }}
+              onClick={() => { if (!cariPaymentSaving) setCariPaymentModal(null) }}>
+              <div onClick={e => e.stopPropagation()}
+                style={{ background: 'white', borderRadius: 16, padding: 24,
+                  width: 'min(380px, 94vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>
+                      {cariPaymentModal === 'tahsilat' ? '💰 Cari Tahsilat' : '💸 Cari Ödeme'}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#6B7280', marginTop: 3 }}>
+                      {selectedCustomer.name}
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setCariPaymentModal(null)} disabled={cariPaymentSaving}
+                    style={{ background: 'none', border: 'none', fontSize: 20,
+                      cursor: cariPaymentSaving ? 'default' : 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
+                </div>
+
+                <div style={{ textAlign: 'center', padding: '14px 0',
+                  fontSize: 30, fontWeight: 600, letterSpacing: 2,
+                  color: cariPaymentModal === 'tahsilat' ? '#2E7D32' : '#C62828',
+                  borderTop: '1px solid #F3F4F6', borderBottom: '1px solid #F3F4F6' }}>
+                  {cariPaymentAmt || '—'} ₺
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)',
+                  gap: 'clamp(6px,1.5vw,10px)' }}>
+                  {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                    <button key={k} type="button"
+                      onMouseDown={e => {
+                        e.preventDefault()
+                        if (k === '⌫') setCariPaymentAmt(p => p.slice(0, -1))
+                        else if (k === ',') { if (!cariPaymentAmt.includes(',')) setCariPaymentAmt(p => p + ',') }
+                        else setCariPaymentAmt(p => p + k)
+                      }}
+                      style={{ padding: 'clamp(12px,2vw,16px) 0',
+                        fontSize: k === '⌫' ? 'clamp(16px,2vw,20px)' : 'clamp(18px,2.5vw,24px)',
+                        fontWeight: 500, borderRadius: 10,
+                        border: '1px solid #E5E7EB', background: 'white', cursor: 'pointer',
+                        color: k === '⌫' ? '#EF4444' : '#111' }}>
+                      {k}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  value={cariPaymentDesc}
+                  onChange={e => setCariPaymentDesc(e.target.value)}
+                  placeholder="Açıklama (opsiyonel)"
+                  style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
+                    border: '1px solid #E5E7EB', outline: 'none',
+                    width: '100%', boxSizing: 'border-box' as const }}
+                />
+
+                {cariPaymentResult && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13,
+                    background: cariPaymentResult.ok ? '#F0FDF4' : '#FEF2F2',
+                    border: `1px solid ${cariPaymentResult.ok ? '#BBF7D0' : '#FECACA'}`,
+                    color: cariPaymentResult.ok ? '#166534' : '#991B1B' }}>
+                    {cariPaymentResult.ok ? '✓' : '✗'} {cariPaymentResult.msg}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 10 }}>
+                  <button type="button"
+                    onMouseDown={e => { e.preventDefault(); setCariPaymentAmt('') }}
+                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 500,
+                      borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
+                    C
+                  </button>
+                  <button type="button"
+                    disabled={cariPaymentSaving || !cariPaymentAmt || (() => {
+                      const n = parseFloat(cariPaymentAmt.replace(',', '.'))
+                      return !Number.isFinite(n) || n <= 0
+                    })()}
+                    onClick={() => void handleCariPayment()}
+                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 600,
+                      borderRadius: 10, border: 'none', cursor: 'pointer',
+                      background: cariPaymentModal === 'tahsilat' ? '#2E7D32' : '#C62828',
+                      color: 'white',
+                      opacity: cariPaymentSaving || !cariPaymentAmt ? 0.6 : 1 }}>
+                    {cariPaymentSaving ? 'Gönderiliyor...'
+                      : cariPaymentModal === 'tahsilat' ? 'Tahsilat Yap' : 'Ödeme Yap'}
+                  </button>
+                </div>
+
               </div>
             </div>
           )}
