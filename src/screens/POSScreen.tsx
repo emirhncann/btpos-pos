@@ -2437,8 +2437,8 @@ export default function POSScreen({
                 </div>
 
                 {menuOpen === 'islemler' && [
-                  { icon: '💰', label: 'Cari tahsilat', disabled: !selectedCustomer },
-                  { icon: '💸', label: 'Cari ödeme', disabled: !selectedCustomer },
+                  { icon: '💰', label: 'Cari tahsilat', disabled: false },
+                  { icon: '💸', label: 'Cari ödeme', disabled: false },
                   { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
                   { icon: '📂', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
                   { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
@@ -2449,6 +2449,11 @@ export default function POSScreen({
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label.startsWith('Cari tah')) {
+                        if (!selectedCustomer) {
+                          showErrorPopup('Müşteri seçin', 'Cari tahsilat için önce müşteri seçin (👤 Müşteri → Müşteri seç).')
+                          setMenuOpen(null)
+                          return
+                        }
                         setCariPaymentModal('tahsilat')
                         setCariPaymentAmt('')
                         setCariPaymentDesc('')
@@ -2457,6 +2462,11 @@ export default function POSScreen({
                         return
                       }
                       if (item.label.startsWith('Cari öd')) {
+                        if (!selectedCustomer) {
+                          showErrorPopup('Müşteri seçin', 'Cari ödeme için önce müşteri seçin (👤 Müşteri → Müşteri seç).')
+                          setMenuOpen(null)
+                          return
+                        }
                         setCariPaymentModal('odeme')
                         setCariPaymentAmt('')
                         setCariPaymentDesc('')
