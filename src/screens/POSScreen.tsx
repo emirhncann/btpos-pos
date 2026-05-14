@@ -129,33 +129,34 @@ function localISOString(): string {
   return local.toISOString().replace('Z', '').slice(0, 26)
 }
 
-type MenuPopupItem = {
+function PopupItem({ icon, label, disabled, danger, last, onClick }: {
+  icon: string
   label: string
-  action: () => void
   disabled?: boolean
   danger?: boolean
-}
-
-function MenuItem({ item, last }: { item: MenuPopupItem; last: boolean }) {
+  last?: boolean
+  onClick?: () => void
+}) {
   return (
     <div
-      onClick={item.disabled ? undefined : item.action}
+      onClick={disabled ? undefined : onClick}
       style={{
-        padding: '12px 16px', cursor: item.disabled ? 'default' : 'pointer',
-        fontSize: 13, fontWeight: 500,
-        borderBottom: last ? 'none' : '1px solid #F5F5F5',
-        color: item.danger ? '#DC2626' : item.disabled ? '#D1D5DB' : '#374151',
-        opacity: item.disabled ? 0.5 : 1,
-        userSelect: 'none',
+        padding: '13px 20px', cursor: disabled ? 'default' : 'pointer',
+        fontSize: 13, fontWeight: 400,
+        borderBottom: last ? 'none' : '0.5px solid #F3F4F6',
+        color: danger ? '#DC2626' : disabled ? '#D1D5DB' : '#374151',
+        display: 'flex', alignItems: 'center', gap: 10,
+        opacity: disabled ? 0.5 : 1, userSelect: 'none',
       }}
       onMouseEnter={e => {
-        if (!item.disabled)
-          (e.currentTarget as HTMLDivElement).style.background = item.danger ? '#FFF5F5' : '#F3F4F6'
+        if (!disabled)
+          (e.currentTarget as HTMLDivElement).style.background = danger ? '#FFF5F5' : '#F9FAFB'
       }}
       onMouseLeave={e => {
         (e.currentTarget as HTMLDivElement).style.background = 'white'
       }}>
-      {item.label}
+      <span>{icon}</span>
+      <span>{label}</span>
     </div>
   )
 }
@@ -2297,55 +2298,57 @@ export default function POSScreen({
 
           </div>
 
-          {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
+          {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler (v2) ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr',
+            gridTemplateRows: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
 
-            {/* 1 — Menü */}
-            <button type="button" onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
-              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: menuOpen === 'islemler' ? '#1565C0' : '#E5E7EB',
-                background: menuOpen === 'islemler' ? '#EFF6FF' : 'white',
-                color: menuOpen === 'islemler' ? '#1565C0' : '#374151',
-                fontWeight: 600, cursor: 'pointer',
+            {/* 1 — Menü: mavi tonu */}
+            <button type="button"
+              onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
+              style={{ padding: '8% 2%', borderRadius: 8,
+                border: `1.5px solid ${menuOpen === 'islemler' ? '#1565C0' : '#BBDEFB'}`,
+                background: menuOpen === 'islemler' ? '#E3F2FD' : '#F3F8FE',
+                color: '#1565C0', fontWeight: 600, cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>☰</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Menü</span>
             </button>
 
-            {/* 2 — Belge */}
-            <button type="button" onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
-              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: menuOpen === 'belge' ? '#7C3AED' : '#E5E7EB',
-                background: menuOpen === 'belge' ? '#F5F3FF' : 'white',
-                color: menuOpen === 'belge' ? '#7C3AED' : '#374151',
-                fontWeight: 600, cursor: 'pointer',
+            {/* 2 — Belge: mor tonu */}
+            <button type="button"
+              onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
+              style={{ padding: '8% 2%', borderRadius: 8,
+                border: `1.5px solid ${menuOpen === 'belge' ? '#7C3AED' : '#DDD6FE'}`,
+                background: menuOpen === 'belge' ? '#EDE9FE' : '#F5F3FF',
+                color: '#7C3AED', fontWeight: 600, cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>📄</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Belge</span>
             </button>
 
-            {/* 3 — Müşteri */}
-            <button type="button" onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
-              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: menuOpen === 'musteri' ? '#2E7D32' : '#E5E7EB',
-                background: menuOpen === 'musteri' ? '#E8F5E9' : 'white',
-                color: selectedCustomer ? '#2E7D32' : menuOpen === 'musteri' ? '#2E7D32' : '#374151',
-                fontWeight: 600, cursor: 'pointer',
+            {/* 3 — Müşteri: yeşil tonu */}
+            <button type="button"
+              onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
+              style={{ padding: '8% 2%', borderRadius: 8,
+                border: `1.5px solid ${menuOpen === 'musteri' || selectedCustomer ? '#2E7D32' : '#C8E6C9'}`,
+                background: menuOpen === 'musteri' ? '#E8F5E9' : selectedCustomer ? '#F1F8F1' : '#F4FBF4',
+                color: '#2E7D32', fontWeight: 600, cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>👤</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)',
-                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center' }}>
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                textOverflow: 'ellipsis', width: '100%', textAlign: 'center' as const }}>
                 {selectedCustomer ? selectedCustomer.name.split(' ')[0] : 'Müşteri'}
               </span>
             </button>
 
-            {/* 4 — Fiyat Gör */}
-            <button type="button" onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
-              style={{ padding: '8% 2%', borderRadius: 8, border: '1.5px solid',
-                borderColor: menuOpen === 'fiyatgor' ? '#D97706' : '#E5E7EB',
-                background: menuOpen === 'fiyatgor' ? '#FFFBEB' : 'white',
-                color: menuOpen === 'fiyatgor' ? '#D97706' : '#374151',
-                fontWeight: 600, cursor: 'pointer',
+            {/* 4 — Fiyat Gör: amber tonu */}
+            <button type="button"
+              onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
+              style={{ padding: '8% 2%', borderRadius: 8,
+                border: `1.5px solid ${menuOpen === 'fiyatgor' ? '#D97706' : '#FDE68A'}`,
+                background: menuOpen === 'fiyatgor' ? '#FEF3C7' : '#FFFBEB',
+                color: '#D97706', fontWeight: 600, cursor: 'pointer',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Fiyat Gör</span>
@@ -2361,102 +2364,87 @@ export default function POSScreen({
                 onClick={() => setMenuOpen(null)}
               />
               <div style={{
-                position: 'absolute', top: 0, left: '102%',
-                zIndex: 9991, background: 'white',
-                border: '1px solid #E5E7EB', borderRadius: 12,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                minWidth: 210, overflow: 'hidden',
+                position: 'absolute', top: 0, left: '102%', zIndex: 9991,
+                background: 'white', border: '0.5px solid #E5E7EB',
+                borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+                minWidth: 240, overflow: 'hidden',
               }}>
 
+                <div style={{ padding: '12px 20px 8px', fontSize: 11, fontWeight: 600,
+                  color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '0.5px',
+                  borderBottom: '0.5px solid #F3F4F6' }}>
+                  {{ islemler: 'İşlemler', belge: 'Belge işlemleri', musteri: 'Müşteri işlemleri' }[menuOpen]}
+                </div>
+
                 {menuOpen === 'islemler' && [
-                  {
-                    label: '💰 Cari Tahsilat',
-                    action: () => { setMenuOpen(null) },
-                    disabled: !selectedCustomer,
-                  },
-                  {
-                    label: '💸 Cari Ödeme',
-                    action: () => { setMenuOpen(null) },
-                    disabled: !selectedCustomer,
-                  },
-                  {
-                    label: '🚫 Belge İptal',
-                    action: () => { clearCart(); setMenuOpen(null) },
-                    disabled: cart.length === 0,
-                    danger: true,
-                  },
-                  {
-                    label: '⏸ Beklemeye Al',
-                    action: () => { void holdDoc(); setMenuOpen(null) },
-                    disabled: cart.length === 0,
-                  },
-                  {
-                    label: `📂 Belge Getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`,
-                    action: () => { setShowHeld(true); setMenuOpen(null) },
-                    disabled: false,
-                  },
-                  {
-                    label: '% Belge İndirim',
-                    action: () => {
-                      setSmsPhonePanelOpen(false)
-                      setMenuOpen(null)
-                      const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
-                      setDocDiscMode(openMode)
-                      setDocDiscInput(
-                        openMode === 'rate'
-                          ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
-                          : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
-                      )
-                      setDocDiscountMode(true)
-                    },
-                    disabled: cart.length === 0,
-                  },
-                  {
-                    label: cancelMode ? '✓ Ürün İptal (kapat)' : '✕ Ürün İptal',
-                    action: () => { if (cart.length > 0) setCancelMode(m => !m); setMenuOpen(null) },
-                    disabled: cart.length === 0,
-                  },
+                  { icon: '💰', label: 'Cari tahsilat', disabled: !selectedCustomer },
+                  { icon: '💸', label: 'Cari ödeme', disabled: !selectedCustomer },
+                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
+                  { icon: '📂', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
+                  { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
+                  { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
+                  { icon: '✕', label: cancelMode ? 'Ürün iptal (kapat)' : 'Ürün iptal', disabled: cart.length === 0 },
                 ].map((item, i, arr) => (
-                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} last={i === arr.length - 1}
+                    onClick={() => {
+                      if (item.disabled) return
+                      if (item.label.startsWith('Cari tah') || item.label.startsWith('Cari öd')) {
+                        setMenuOpen(null)
+                        return
+                      }
+                      if (item.label.startsWith('Beklemeye')) { void holdDoc(); return }
+                      if (item.label.startsWith('Belge getir')) { setShowHeld(true); setMenuOpen(null); return }
+                      if (item.label.startsWith('Belge ind')) {
+                        setSmsPhonePanelOpen(false)
+                        setMenuOpen(null)
+                        const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
+                        setDocDiscMode(openMode)
+                        setDocDiscInput(
+                          openMode === 'rate'
+                            ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
+                            : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
+                        )
+                        setDocDiscountMode(true)
+                        return
+                      }
+                      if (item.label.startsWith('Belge iptal')) { clearCart(); return }
+                      if (item.label.startsWith('Ürün iptal')) {
+                        setCancelMode(m => !m)
+                        setMenuOpen(null)
+                      }
+                    }} />
                 ))}
 
                 {menuOpen === 'belge' && [
-                  {
-                    label: '↩️ İade Al',
-                    action: () => { setMenuOpen(null) },
-                    disabled: false,
-                  },
+                  { icon: '↩️', label: 'İade al', disabled: false },
                 ].map((item, i, arr) => (
-                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} last={i === arr.length - 1} onClick={() => setMenuOpen(null)} />
                 ))}
 
                 {menuOpen === 'musteri' && [
+                  { icon: '🔍', label: 'Müşteri seç', disabled: false },
+                  { icon: '👤+', label: 'Müşteri ekle', disabled: false },
+                  { icon: '✏️', label: 'Müşteri düzenle', disabled: !selectedCustomer },
                   {
-                    label: '👤+ Müşteri Ekle',
-                    action: () => { setNewCustPrefill(''); setAddCustomerModal(true); setMenuOpen(null) },
-                    disabled: false,
-                  },
-                  {
-                    label: '🔍 Müşteri Seç',
-                    action: () => { void loadCustomers(); setMenuOpen(null) },
-                    disabled: false,
-                  },
-                  {
-                    label: '✏️ Müşteri Düzenle',
-                    action: () => { setMenuOpen(null) },
-                    disabled: !selectedCustomer,
-                  },
-                  {
-                    label: selectedCustomer ? `❌ ${selectedCustomer.name.split(' ')[0]} — Çıkar` : '❌ Müşteri Çıkar',
-                    action: () => {
-                      applyCustomerSelection(null)
-                      setMenuOpen(null)
-                    },
+                    icon: '❌',
+                    label: selectedCustomer
+                      ? `${selectedCustomer.name.split(' ')[0]} — çıkar`
+                      : 'Müşteri çıkar',
                     disabled: !selectedCustomer,
                     danger: true,
                   },
                 ].map((item, i, arr) => (
-                  <MenuItem key={i} item={item} last={i === arr.length - 1} />
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} last={i === arr.length - 1}
+                    onClick={() => {
+                      if (item.disabled) return
+                      if (item.label === 'Müşteri seç') { void loadCustomers(); setMenuOpen(null); return }
+                      if (item.label === 'Müşteri ekle') { setNewCustPrefill(''); setAddCustomerModal(true); setMenuOpen(null); return }
+                      if (item.label === 'Müşteri düzenle') { setMenuOpen(null); return }
+                      if (item.label.endsWith('— çıkar') || item.label === 'Müşteri çıkar') {
+                        applyCustomerSelection(null)
+                        setMenuOpen(null)
+                      }
+                    }} />
                 ))}
 
               </div>
@@ -2465,15 +2453,18 @@ export default function POSScreen({
 
           {menuOpen === 'fiyatgor' && (
             <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
-              background: 'rgba(0,0,0,0.45)', display: 'flex',
+              background: 'rgba(0,0,0,0.4)', display: 'flex',
               alignItems: 'center', justifyContent: 'center' }}
               onClick={() => setMenuOpen(null)}>
               <div onClick={e => e.stopPropagation()}
                 style={{ background: 'white', borderRadius: 16, padding: 24,
-                  width: 'min(480px, 92vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  width: 'min(520px, 94vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#111' }}>🔍 Fiyat Gör</div>
+                  <div style={{ fontSize: 16, fontWeight: 500, color: '#111',
+                    display: 'flex', alignItems: 'center', gap: 8 }}>
+                    🔍 Fiyat Gör
+                  </div>
                   <button type="button" onClick={() => setMenuOpen(null)}
                     style={{ background: 'none', border: 'none', fontSize: 20,
                       cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
@@ -2486,42 +2477,38 @@ export default function POSScreen({
                     const v = e.target.value
                     setFiyatGorQ(v)
                     setFiyatGorItem(null)
-                    const t = v.trim()
-                    const found = t
-                      ? allProducts.find(p =>
-                          (p.barcode?.trim() === t) || (p.code?.trim() === t))
-                      : undefined
+                    const found = allProducts.find(p =>
+                      p.barcode === v || p.code === v
+                    )
                     if (found) setFiyatGorItem(found)
                   }}
                   placeholder="Barkod okut veya ürün adı gir..."
-                  style={{ padding: '12px 14px', fontSize: 15, borderRadius: 10,
-                    border: '1.5px solid #E5E7EB', outline: 'none', width: '100%',
-                    boxSizing: 'border-box' as const }}
+                  style={{ fontSize: 15, padding: '12px 14px', borderRadius: 10,
+                    border: '1.5px solid #E5E7EB', outline: 'none',
+                    width: '100%', boxSizing: 'border-box' as const }}
                 />
 
                 {!fiyatGorItem && fiyatGorQ.length > 1 && (
-                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex',
-                    flexDirection: 'column', gap: 4, border: '1px solid #F3F4F6',
-                    borderRadius: 10, padding: 4 }}>
+                  <div style={{ maxHeight: 240, overflowY: 'auto',
+                    border: '0.5px solid #E5E7EB', borderRadius: 10, overflow: 'hidden' }}>
                     {allProducts
                       .filter(p =>
                         (p.name?.toLowerCase().includes(fiyatGorQ.toLowerCase()) ?? false) ||
                         (p.code?.toLowerCase().includes(fiyatGorQ.toLowerCase()) ?? false)
                       )
                       .slice(0, 20)
-                      .map(p => (
-                        <div key={p.id}
-                          role="presentation"
-                          onClick={() => setFiyatGorItem(p)}
-                          style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                            display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                      .map((p, i, arr) => (
+                        <div key={p.id} role="presentation" onClick={() => setFiyatGorItem(p)}
+                          style={{ padding: '12px 16px', cursor: 'pointer',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            borderBottom: i < arr.length - 1 ? '0.5px solid #F3F4F6' : 'none' }}
                           onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F9FAFB' }}
                           onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 500, color: '#111' }}>{p.name}</div>
-                            <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace' }}>{p.code}</div>
+                            <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace', marginTop: 2 }}>{p.code}</div>
                           </div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: '#1565C0' }}>
+                          <div style={{ fontSize: 16, fontWeight: 600, color: '#1565C0' }}>
                             {p.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                           </div>
                         </div>
@@ -2530,19 +2517,15 @@ export default function POSScreen({
                 )}
 
                 {fiyatGorItem && (
-                  <div style={{ padding: '16px', borderRadius: 12, background: '#F0F9FF',
-                    border: '1.5px solid #BAE6FD', display: 'flex',
-                    justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ padding: 16, borderRadius: 12, background: '#F0F9FF',
+                    border: '1.5px solid #BAE6FD',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: '#111' }}>{fiyatGorItem.name}</div>
-                      <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2, fontFamily: 'monospace' }}>
-                        {fiyatGorItem.code ?? ''}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                        KDV: %{fiyatGorItem.vatRate}
-                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 500, color: '#111' }}>{fiyatGorItem.name}</div>
+                      <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2, fontFamily: 'monospace' }}>{fiyatGorItem.code ?? ''}</div>
+                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>KDV %{fiyatGorItem.vatRate}</div>
                     </div>
-                    <div style={{ fontSize: 28, fontWeight: 700, color: '#1565C0' }}>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: '#1565C0' }}>
                       {fiyatGorItem.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                     </div>
                   </div>
@@ -2550,9 +2533,9 @@ export default function POSScreen({
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <button type="button" onClick={() => setMenuOpen(null)}
-                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 500,
-                      borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: 'white', cursor: 'pointer', color: '#374151' }}>
+                    style={{ padding: '14px 0', fontSize: 14, borderRadius: 10,
+                      border: '1px solid #E5E7EB', background: 'white',
+                      cursor: 'pointer', color: '#374151' }}>
                     Kapat
                   </button>
                   <button type="button"
@@ -2563,10 +2546,11 @@ export default function POSScreen({
                         setMenuOpen(null)
                       }
                     }}
-                    style={{ padding: '13px 0', fontSize: 14, fontWeight: 700,
-                      borderRadius: 10, border: 'none', cursor: fiyatGorItem ? 'pointer' : 'default',
+                    style={{ padding: '14px 0', fontSize: 14, fontWeight: 600,
+                      borderRadius: 10, border: 'none',
                       background: fiyatGorItem ? '#1565C0' : '#E5E7EB',
-                      color: fiyatGorItem ? 'white' : '#9CA3AF' }}>
+                      color: fiyatGorItem ? 'white' : '#9CA3AF',
+                      cursor: fiyatGorItem ? 'pointer' : 'default' }}>
                     Fişe Ekle
                   </button>
                 </div>
