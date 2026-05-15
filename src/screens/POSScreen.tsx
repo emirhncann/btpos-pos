@@ -11,6 +11,7 @@ import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { TouchKeyboard } from '../components/TouchKeyboard'
 import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
+import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -305,11 +306,15 @@ export default function POSScreen({
     setShowCustomer(false)
   }, [applyCustomerSelection])
 
-  const searchCustomers = useCallback(async (q: string) => {
+  const loadCustomersForModal = useCallback(async (q: string) => {
     if (!companyId) return
     try {
-      const list = await window.electron.db.getCustomers(companyId, q)
-      setCustomers(list)
+      const all = await window.electron.db.getCustomers(companyId)
+      if (q.trim().length < 2) {
+        setCustomers([])
+      } else {
+        setCustomers(rankCustomers(all, q))
+      }
     } catch {
       setCustomers([])
     }
@@ -317,8 +322,8 @@ export default function POSScreen({
 
   useEffect(() => {
     if (!showCustomer || !companyId) return
-    void searchCustomers(customerQ)
-  }, [customerQ, showCustomer, companyId, searchCustomers])
+    void loadCustomersForModal(customerQ)
+  }, [customerQ, showCustomer, companyId, loadCustomersForModal])
 
   /** Klavye onConfirm veya normal input — sonuçlar dropdown'da; tek eşleşmede otomatik seç */
   const searchCariPayment = useCallback(async (v: string) => {
@@ -330,11 +335,7 @@ export default function POSScreen({
     setCariPaymentSearching(true)
     try {
       const all = await window.electron.db.getCustomers(companyId)
-      const vLower = v.toLowerCase()
-      const results = all.filter(c =>
-        c.name.toLowerCase().includes(vLower) ||
-        (c.code ?? '').toLowerCase().includes(vLower)
-      ).slice(0, 20)
+      const results = rankCustomers(all, v)
       setCariPaymentResults(results)
       if (results.length === 1) {
         setCariPaymentCust(results[0])
@@ -1848,12 +1849,20 @@ export default function POSScreen({
                 title:     'Müşteri ara',
                 initial:   customerQ,
                 type:      'qwerty',
-                onConfirm: (v) => { setCustomerQ(v); void searchCustomers(v) },
+                onSearch:  async (q) => {
+                  const all = await window.electron.db.getCustomers(companyId)
+                  return rankCustomers(all, q)
+                },
+                onSelectResult: (c) => {
+                  selectCustomer(c)
+                  setCustomerQ('')
+                },
+                onConfirm: (v) => setCustomerQ(v),
               })}
               onChange={e => {
                 if (!touchEnabled) {
                   setCustomerQ(e.target.value)
-                  void searchCustomers(e.target.value)
+                  void loadCustomersForModal(e.target.value)
                 }
               }}
               placeholder="Ad veya kod ile ara..."
@@ -2771,7 +2780,15 @@ export default function POSScreen({
                         title:     'Cari ara',
                         initial:   cariPaymentQ,
                         type:      'qwerty',
-                        onConfirm: (v) => { void searchCariPayment(v) },
+                        onSearch:  async (q) => {
+                          const all = await window.electron.db.getCustomers(companyId)
+                          return rankCustomers(all, q)
+                        },
+                        onSelectResult: (c) => {
+                          setCariPaymentCust(c)
+                          setCariPaymentQ('')
+                        },
+                        onConfirm: (v) => setCariPaymentQ(v),
                       })}
                       onChange={e => {
                         if (!touchEnabled) void searchCariPayment(e.target.value)

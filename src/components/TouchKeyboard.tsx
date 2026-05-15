@@ -3,16 +3,20 @@ import { useState, useCallback, type CSSProperties } from 'react'
 export type KeyboardType = 'qwerty' | 'numeric'
 
 interface TouchKeyboardProps {
-  title?:     string
-  value:      string
-  onChange:   (v: string) => void
-  onConfirm:  (v: string) => void
-  onClose:    () => void
-  type?:      KeyboardType
+  title?:          string
+  value:           string
+  onChange:        (v: string) => void
+  onConfirm:       (v: string) => void
+  onClose:         () => void
+  type?:           KeyboardType
+  searchResults?:  CustomerRow[]
+  onSelectResult?: (c: CustomerRow) => void
+  searching?:      boolean
 }
 
 export function TouchKeyboard({
-  title, value, onChange, onConfirm, onClose, type = 'qwerty'
+  title, value, onChange, onConfirm, onClose, type = 'qwerty',
+  searchResults, onSelectResult, searching,
 }: TouchKeyboardProps) {
   const [tab,   setTab]   = useState<'abc' | '123'>(type === 'numeric' ? '123' : 'abc')
   const [shift, setShift] = useState(false)
@@ -81,6 +85,45 @@ export function TouchKeyboard({
           letterSpacing: 0.5, wordBreak: 'break-all' }}>
           {value || <span style={{ color: '#D1D5DB' }}>—</span>}
         </div>
+
+        {searchResults && searchResults.length > 0 && (
+          <div style={{
+            maxHeight: 160, overflowY: 'auto',
+            border: '0.5px solid #E5E7EB', borderRadius: 10,
+            background: 'white',
+          }}>
+            {searchResults.map((c, i) => (
+              <div key={c.id ?? i}
+                onMouseDown={e => {
+                  e.preventDefault()
+                  onSelectResult?.(c)
+                }}
+                style={{ padding: '10px 14px', cursor: 'pointer',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  borderBottom: i < searchResults.length - 1 ? '0.5px solid #F3F4F6' : 'none',
+                  background: 'white' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F0F9FF' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111' }}>{c.name}</div>
+                  {c.phone && (
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>{c.phone}</div>
+                  )}
+                </div>
+                <span style={{ fontSize: 11, color: '#9CA3AF',
+                  fontFamily: 'monospace', flexShrink: 0, marginLeft: 8 }}>
+                  {c.code}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {searching && (
+          <div style={{ textAlign: 'center', fontSize: 12, color: '#9CA3AF', padding: '8px 0' }}>
+            ⟳ Aranıyor...
+          </div>
+        )}
 
         {tab === 'abc' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
