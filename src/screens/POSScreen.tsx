@@ -2361,7 +2361,7 @@ export default function POSScreen({
           background: '#f8f9fa',
           display: 'flex',
           flexDirection: 'column',
-          padding: '1.5%',
+          padding: 6,
           gap: 5,
           borderRight: '1px solid #e0e0e0',
           overflow: 'visible',
@@ -2433,8 +2433,7 @@ export default function POSScreen({
           </div>
 
           {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler (v2) ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr',
-            gridTemplateRows: '1fr 1fr', gap: 5, flexShrink: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
 
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
@@ -2944,10 +2943,10 @@ export default function POSScreen({
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, 1fr)',
+            gridTemplateRows: 'repeat(5, 1fr)',
             gap: 5,
             flex: 1,
             minHeight: 0,
-            alignContent: 'stretch',
           }}>
             {[
               '7', '8', '9',
@@ -2961,6 +2960,7 @@ export default function POSScreen({
                 onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
                 style={{
                   width: '100%', minWidth: 0,
+                  height: '100%',
                   boxSizing: 'border-box',
                   border: '1.5px solid',
                   borderRadius: 9,
@@ -2972,7 +2972,6 @@ export default function POSScreen({
                   color: k === '⌫' ? '#d97706' : '#1f2937',
                   borderColor: k === '⌫' ? '#fde68a' : '#d1d5db',
                   fontSize: 'clamp(14px, 1.4vw + 4px, 26px)',
-                  minHeight: 0,
                 }}
               >{k}</button>
             ))}
@@ -2982,10 +2981,9 @@ export default function POSScreen({
               onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
               style={{
                 gridColumn: 'span 3',
-                width: '100%', boxSizing: 'border-box',
-                minHeight: 36,
-                maxHeight: 56,
-                padding: 'clamp(4px, 3%, 12px) 0',
+                width: '100%',
+                height: '100%',
+                boxSizing: 'border-box',
                 border: '1.5px solid #fecdd3',
                 borderRadius: 9, cursor: 'pointer',
                 fontWeight: 700, fontSize: 'clamp(12px, 1.1vw + 4px, 18px)',
