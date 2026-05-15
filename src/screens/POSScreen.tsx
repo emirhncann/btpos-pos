@@ -2362,13 +2362,13 @@ export default function POSScreen({
           display: 'flex',
           flexDirection: 'column',
           padding: '1.5%',
-          gap: '1.5%',
+          gap: 5,
           borderRight: '1px solid #e0e0e0',
           overflow: 'visible',
           position: 'relative',
         }}>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
 
             {/* SMS */}
             <div style={{ borderRadius: 8, border: '1.5px solid',
@@ -2434,7 +2434,7 @@ export default function POSScreen({
 
           {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler (v2) ── */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr',
-            gridTemplateRows: '1fr 1fr', gap: '4%', flexShrink: 0 }}>
+            gridTemplateRows: '1fr 1fr', gap: 5, flexShrink: 0 }}>
 
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
@@ -2944,9 +2944,10 @@ export default function POSScreen({
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: '3%',
+            gap: 5,
             flex: 1,
             minHeight: 0,
+            alignContent: 'stretch',
           }}>
             {[
               '7', '8', '9',
@@ -2961,9 +2962,6 @@ export default function POSScreen({
                 style={{
                   width: '100%', minWidth: 0,
                   boxSizing: 'border-box',
-                  aspectRatio: '1 / 1',
-                  minHeight: 36,
-                  maxHeight: 72,
                   border: '1.5px solid',
                   borderRadius: 9,
                   cursor: 'pointer',
@@ -2973,7 +2971,8 @@ export default function POSScreen({
                   background: k === '⌫' ? '#fffbeb' : 'white',
                   color: k === '⌫' ? '#d97706' : '#1f2937',
                   borderColor: k === '⌫' ? '#fde68a' : '#d1d5db',
-                  fontSize: 'clamp(14px, 1.6vw + 4px, 26px)',
+                  fontSize: 'clamp(14px, 1.4vw + 4px, 26px)',
+                  minHeight: 0,
                 }}
               >{k}</button>
             ))}
