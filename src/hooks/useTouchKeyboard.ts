@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import type { KeyboardType } from '../components/TouchKeyboard'
 
-interface OpenOpts {
+export interface OpenOpts {
   title?:    string
   initial?:  string
   type?:     KeyboardType

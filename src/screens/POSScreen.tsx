@@ -10,7 +10,7 @@ import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { TouchKeyboard } from '../components/TouchKeyboard'
-import { useTouchKeyboard } from '../hooks/useTouchKeyboard'
+import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -305,12 +305,43 @@ export default function POSScreen({
     setShowCustomer(false)
   }, [applyCustomerSelection])
 
+  const searchCustomers = useCallback(async (q: string) => {
+    if (!companyId) return
+    try {
+      const list = await window.electron.db.getCustomers(companyId, q)
+      setCustomers(list)
+    } catch {
+      setCustomers([])
+    }
+  }, [companyId])
+
   useEffect(() => {
     if (!showCustomer || !companyId) return
-    window.electron.db.getCustomers(companyId, customerQ)
-      .then(setCustomers)
-      .catch(() => setCustomers([]))
-  }, [customerQ, showCustomer, companyId])
+    void searchCustomers(customerQ)
+  }, [customerQ, showCustomer, companyId, searchCustomers])
+
+  const searchCariPayment = useCallback(async (q: string) => {
+    setCariPaymentQ(q)
+    if (q.length < 2) {
+      setCariPaymentResults([])
+      return
+    }
+    setCariPaymentSearching(true)
+    try {
+      const all = await window.electron.db.getCustomers(companyId)
+      const qLower = q.toLowerCase()
+      setCariPaymentResults(
+        all.filter(c =>
+          c.name.toLowerCase().includes(qLower) ||
+          (c.code ?? '').toLowerCase().includes(qLower)
+        ).slice(0, 20)
+      )
+    } catch {
+      setCariPaymentResults([])
+    } finally {
+      setCariPaymentSearching(false)
+    }
+  }, [companyId])
 
   /* ── İlk grup seç ── */
   useEffect(() => {
@@ -1809,14 +1840,20 @@ export default function POSScreen({
               value={customerQ}
               readOnly={touchEnabled}
               onClick={() => openKeyboard({
-                title:    'Müşteri ara',
-                initial:  customerQ,
-                type:     'qwerty',
-                onConfirm: (v) => setCustomerQ(v),
+                title:     'Müşteri ara',
+                initial:   customerQ,
+                type:      'qwerty',
+                onConfirm: (v) => { setCustomerQ(v); void searchCustomers(v) },
               })}
-              onChange={e => { if (!touchEnabled) setCustomerQ(e.target.value) }}
-              placeholder="İsim veya kod ile ara..."
-              style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12 }}
+              onChange={e => {
+                if (!touchEnabled) {
+                  setCustomerQ(e.target.value)
+                  void searchCustomers(e.target.value)
+                }
+              }}
+              placeholder="Ad veya kod ile ara..."
+              style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12,
+                cursor: touchEnabled ? 'pointer' : 'text' }}
             />
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {customers.map(c => (
@@ -1884,6 +1921,8 @@ export default function POSScreen({
             </div>
             <AddCustomerForm
               prefillTaxNo={newCustPrefill}
+              touchEnabled={touchEnabled}
+              openKeyboard={openKeyboard}
               onClose={() => setAddCustomerModal(false)}
               onSuccess={async (customer) => {
                 const newId = crypto.randomUUID()
@@ -2568,23 +2607,51 @@ export default function POSScreen({
                       cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
                 </div>
 
-                <input
-                  autoFocus
-                  value={fiyatGorQ}
-                  onChange={e => {
-                    const v = e.target.value
-                    setFiyatGorQ(v)
-                    setFiyatGorItem(null)
-                    const found = allProducts.find(p =>
-                      p.barcode === v || p.code === v
-                    )
-                    if (found) setFiyatGorItem(found)
-                  }}
-                  placeholder="Barkod okut veya ürün adı gir..."
-                  style={{ fontSize: 15, padding: '12px 14px', borderRadius: 10,
-                    border: '1.5px solid #E5E7EB', outline: 'none',
-                    width: '100%', boxSizing: 'border-box' as const }}
-                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    autoFocus={!touchEnabled}
+                    value={fiyatGorQ}
+                    readOnly={touchEnabled}
+                    onChange={e => {
+                      if (!touchEnabled) {
+                        const v = e.target.value
+                        setFiyatGorQ(v)
+                        setFiyatGorItem(null)
+                        const found = allProducts.find(p =>
+                          p.barcode === v || p.code === v
+                        )
+                        if (found) setFiyatGorItem(found)
+                      }
+                    }}
+                    placeholder="Barkod okut veya ürün adı gir..."
+                    style={{ flex: 1, padding: '12px 14px', fontSize: 15, borderRadius: 10,
+                      border: '1.5px solid #E5E7EB', outline: 'none',
+                      boxSizing: 'border-box' as const,
+                      cursor: touchEnabled ? 'default' : 'text' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => openKeyboard({
+                      title:     'Ürün ara',
+                      initial:   fiyatGorQ,
+                      type:      'qwerty',
+                      onConfirm: (v) => {
+                        setFiyatGorQ(v)
+                        setFiyatGorItem(null)
+                        const found = allProducts.find(p =>
+                          p.barcode === v || p.code === v
+                        )
+                        if (found) setFiyatGorItem(found)
+                      },
+                    })}
+                    style={{ padding: '12px 14px', borderRadius: 10,
+                      border: '1.5px solid #E5E7EB', background: '#F9FAFB',
+                      cursor: 'pointer', color: '#6B7280', fontSize: 18,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0 }}>
+                    ⌨️
+                  </button>
+                </div>
 
                 {!fiyatGorItem && fiyatGorQ.length > 1 && (
                   <div style={{ maxHeight: 240, overflowY: 'auto',
@@ -2657,7 +2724,7 @@ export default function POSScreen({
           )}
 
           {cariPaymentModal && (
-            <div style={{ position: 'fixed', inset: 0, zIndex: 10001,
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
               background: 'rgba(0,0,0,0.45)', display: 'flex',
               alignItems: 'center', justifyContent: 'center' }}
               onClick={() => { if (!cariPaymentSaving) setCariPaymentModal(null) }}>
@@ -2692,37 +2759,23 @@ export default function POSScreen({
                 ) : (
                   <div style={{ position: 'relative' }}>
                     <input
-                      autoFocus
+                      autoFocus={!touchEnabled}
                       value={cariPaymentQ}
+                      readOnly={touchEnabled}
+                      onClick={() => openKeyboard({
+                        title:     'Cari ara',
+                        initial:   cariPaymentQ,
+                        type:      'qwerty',
+                        onConfirm: (v) => { void searchCariPayment(v) },
+                      })}
                       onChange={e => {
-                        const q = e.target.value
-                        setCariPaymentQ(q)
-                        if (q.length < 2) {
-                          setCariPaymentResults([])
-                          return
-                        }
-                        setCariPaymentSearching(true)
-                        void (async () => {
-                          try {
-                            const all = await window.electron.db.getCustomers(companyId)
-                            const qLower = q.toLowerCase()
-                            setCariPaymentResults(
-                              all.filter(c =>
-                                c.name.toLowerCase().includes(qLower) ||
-                                (c.code ?? '').toLowerCase().includes(qLower)
-                              ).slice(0, 20)
-                            )
-                          } catch {
-                            setCariPaymentResults([])
-                          } finally {
-                            setCariPaymentSearching(false)
-                          }
-                        })()
+                        if (!touchEnabled) void searchCariPayment(e.target.value)
                       }}
                       placeholder="Cari ara... (ad veya kod)"
                       style={{ width: '100%', padding: '10px 14px', fontSize: 13,
                         borderRadius: 10, border: '1px solid #E5E7EB', outline: 'none',
-                        boxSizing: 'border-box' as const }}
+                        boxSizing: 'border-box' as const,
+                        cursor: touchEnabled ? 'pointer' : 'text' }}
                     />
                     {cariPaymentSearching && (
                       <span style={{ position: 'absolute', right: 12, top: '50%',
@@ -2785,21 +2838,31 @@ export default function POSScreen({
                   ))}
                 </div>
 
-                <input
-                  value={cariPaymentDesc}
-                  readOnly={touchEnabled}
-                  onClick={() => openKeyboard({
-                    title:    'Açıklama',
-                    initial:  cariPaymentDesc,
-                    type:     'qwerty',
-                    onConfirm: (v) => setCariPaymentDesc(v),
-                  })}
-                  onChange={e => { if (!touchEnabled) setCariPaymentDesc(e.target.value) }}
-                  placeholder="Açıklama (opsiyonel)"
-                  style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
-                    border: '1px solid #E5E7EB', outline: 'none',
-                    width: '100%', boxSizing: 'border-box' as const }}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    value={cariPaymentDesc}
+                    readOnly={touchEnabled}
+                    onClick={() => openKeyboard({
+                      title:     'Açıklama',
+                      initial:   cariPaymentDesc,
+                      type:      'qwerty',
+                      onConfirm: (v) => setCariPaymentDesc(v),
+                    })}
+                    onChange={e => { if (!touchEnabled) setCariPaymentDesc(e.target.value) }}
+                    placeholder="Açıklama (opsiyonel)"
+                    style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
+                      border: '1px solid #E5E7EB', outline: 'none',
+                      width: '100%', boxSizing: 'border-box' as const,
+                      cursor: touchEnabled ? 'pointer' : 'text' }}
+                  />
+                  {touchEnabled && (
+                    <span style={{ position: 'absolute', right: 10, top: '50%',
+                      transform: 'translateY(-50%)', color: '#9CA3AF', fontSize: 14,
+                      pointerEvents: 'none' }}>
+                      ⌨️
+                    </span>
+                  )}
+                </div>
 
                 {cariPaymentResult && (
                   <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13,
@@ -3360,6 +3423,8 @@ const CITY_OPTIONS = [
 
 interface AddCustomerFormProps {
   prefillTaxNo?: string
+  touchEnabled:  boolean
+  openKeyboard:  (opts: OpenOpts) => boolean
   onClose: () => void
   onSuccess: (customer: {
     name: string
@@ -3376,7 +3441,7 @@ interface AddCustomerFormProps {
 }
 
 /** firmType: 1 (Müşteri & Tedarikçi), code API'ye gönderilmez */
-function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormProps) {
+function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, onSuccess }: AddCustomerFormProps) {
   const [isPerson, setIsPerson] = useState(true)
   const [name, setName] = useState('')
   const [taxNo, setTaxNo] = useState(prefillTaxNo ?? '')
@@ -3439,6 +3504,7 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
     fontSize: 13,
     outline: 'none',
     boxSizing: 'border-box',
+    cursor: touchEnabled ? 'pointer' : 'text',
   }
 
   const lbl = (txt: string, req?: boolean) => (
@@ -3478,7 +3544,14 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
           {lbl(isPerson ? 'Ad Soyad' : 'Firma Adı', true)}
           <input
             value={name}
-            onChange={e => setName(e.target.value)}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     isPerson ? 'Ad Soyad' : 'Firma Adı',
+              initial:   name,
+              type:      'qwerty',
+              onConfirm: (v) => setName(v),
+            })}
+            onChange={e => { if (!touchEnabled) setName(e.target.value) }}
             style={s}
             placeholder={isPerson ? 'Ahmet Yılmaz' : 'ACME Ltd. Şti.'}
           />
@@ -3488,7 +3561,14 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
           {lbl(isPerson ? 'TC Kimlik No' : 'VKN', true)}
           <input
             value={taxNo}
-            onChange={e => setTaxNo(e.target.value)}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     isPerson ? 'TC Kimlik No' : 'VKN',
+              initial:   taxNo,
+              type:      'numeric',
+              onConfirm: (v) => setTaxNo(v),
+            })}
+            onChange={e => { if (!touchEnabled) setTaxNo(e.target.value) }}
             style={s}
             placeholder={isPerson ? '11111111111' : '1234567890'}
           />
@@ -3496,24 +3576,68 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
 
         <div>
           {lbl('Vergi Dairesi')}
-          <input value={taxOffice} onChange={e => setTaxOffice(e.target.value)} style={s} placeholder="Bolu" />
+          <input
+            value={taxOffice}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'Vergi Dairesi',
+              initial:   taxOffice,
+              type:      'qwerty',
+              onConfirm: (v) => setTaxOffice(v),
+            })}
+            onChange={e => { if (!touchEnabled) setTaxOffice(e.target.value) }}
+            style={s}
+            placeholder="Bolu"
+          />
         </div>
 
         <div>
           {lbl('Telefon')}
-          <input value={phone} onChange={e => setPhone(e.target.value)} style={s} placeholder="0555 000 0000" />
+          <input
+            value={phone}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'Telefon',
+              initial:   phone,
+              type:      'numeric',
+              onConfirm: (v) => setPhone(v),
+            })}
+            onChange={e => { if (!touchEnabled) setPhone(e.target.value) }}
+            style={s}
+            placeholder="0555 000 0000"
+          />
         </div>
 
         <div>
           {lbl('E-posta')}
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={s} placeholder="ornek@mail.com" />
+          <input
+            type="email"
+            value={email}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'E-posta',
+              initial:   email,
+              type:      'qwerty',
+              onConfirm: (v) => setEmail(v),
+            })}
+            onChange={e => { if (!touchEnabled) setEmail(e.target.value) }}
+            style={s}
+            placeholder="ornek@mail.com"
+          />
         </div>
 
         <div style={{ gridColumn: 'span 2' }}>
           {lbl('Adres')}
           <input
             value={address}
-            onChange={e => setAddress(e.target.value)}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'Adres',
+              initial:   address,
+              type:      'qwerty',
+              onConfirm: (v) => setAddress(v),
+            })}
+            onChange={e => { if (!touchEnabled) setAddress(e.target.value) }}
             style={s}
             placeholder="Sokak, No, Mahalle"
           />
@@ -3523,12 +3647,25 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
           {lbl('Şehir')}
           <input
             value={city || citySearch}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'Şehir',
+              initial:   city || citySearch,
+              type:      'qwerty',
+              onConfirm: (v) => {
+                setCitySearch(v)
+                setCity('')
+                setShowCityDD(true)
+              },
+            })}
             onChange={e => {
-              setCitySearch(e.target.value)
-              setCity('')
-              setShowCityDD(true)
+              if (!touchEnabled) {
+                setCitySearch(e.target.value)
+                setCity('')
+                setShowCityDD(true)
+              }
             }}
-            onFocus={() => setShowCityDD(true)}
+            onFocus={() => { if (!touchEnabled) setShowCityDD(true) }}
             onBlur={() => setTimeout(() => setShowCityDD(false), 150)}
             style={s}
             placeholder="Bolu"
@@ -3569,12 +3706,36 @@ function AddCustomerForm({ prefillTaxNo, onClose, onSuccess }: AddCustomerFormPr
 
         <div>
           {lbl('İlçe')}
-          <input value={district} onChange={e => setDistrict(e.target.value)} style={s} placeholder="Merkez" />
+          <input
+            value={district}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'İlçe',
+              initial:   district,
+              type:      'qwerty',
+              onConfirm: (v) => setDistrict(v),
+            })}
+            onChange={e => { if (!touchEnabled) setDistrict(e.target.value) }}
+            style={s}
+            placeholder="Merkez"
+          />
         </div>
 
         <div>
           {lbl('Posta Kodu')}
-          <input value={postalCode} onChange={e => setPostalCode(e.target.value)} style={s} placeholder="14100" />
+          <input
+            value={postalCode}
+            readOnly={touchEnabled}
+            onClick={() => openKeyboard({
+              title:     'Posta Kodu',
+              initial:   postalCode,
+              type:      'numeric',
+              onConfirm: (v) => setPostalCode(v),
+            })}
+            onChange={e => { if (!touchEnabled) setPostalCode(e.target.value) }}
+            style={s}
+            placeholder="14100"
+          />
         </div>
 
       </div>

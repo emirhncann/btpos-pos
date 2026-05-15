@@ -46,7 +46,7 @@ export function TouchKeyboard({
   const rows_123_2 = ['!','@','#','$','%','&','-','+','=','/']
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
+    <div style={{ position: 'fixed', inset: 0, zIndex: 10000,
       background: 'rgba(0,0,0,0.45)', display: 'flex',
       alignItems: 'center', justifyContent: 'center' }}
       onClick={onClose}>
