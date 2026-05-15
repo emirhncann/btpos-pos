@@ -320,22 +320,27 @@ export default function POSScreen({
     void searchCustomers(customerQ)
   }, [customerQ, showCustomer, companyId, searchCustomers])
 
-  const searchCariPayment = useCallback(async (q: string) => {
-    setCariPaymentQ(q)
-    if (q.length < 2) {
+  /** Klavye onConfirm veya normal input — sonuçlar dropdown'da; tek eşleşmede otomatik seç */
+  const searchCariPayment = useCallback(async (v: string) => {
+    setCariPaymentQ(v)
+    if (v.length < 2) {
       setCariPaymentResults([])
       return
     }
     setCariPaymentSearching(true)
     try {
       const all = await window.electron.db.getCustomers(companyId)
-      const qLower = q.toLowerCase()
-      setCariPaymentResults(
-        all.filter(c =>
-          c.name.toLowerCase().includes(qLower) ||
-          (c.code ?? '').toLowerCase().includes(qLower)
-        ).slice(0, 20)
-      )
+      const vLower = v.toLowerCase()
+      const results = all.filter(c =>
+        c.name.toLowerCase().includes(vLower) ||
+        (c.code ?? '').toLowerCase().includes(vLower)
+      ).slice(0, 20)
+      setCariPaymentResults(results)
+      if (results.length === 1) {
+        setCariPaymentCust(results[0])
+        setCariPaymentResults([])
+        setCariPaymentQ('')
+      }
     } catch {
       setCariPaymentResults([])
     } finally {
