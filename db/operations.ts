@@ -541,6 +541,7 @@ export interface PosSettingsRow {
   torbaCariId:          string | null
   torbaCariName:        string | null
   invoiceType:          'e_archive' | 'paper'
+  touchKeyboard?:       boolean
 }
 
 export interface PosSettingsAcidRow extends PosSettingsRow {
@@ -702,6 +703,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
     torbaCariId:          settings.torbaCariId   ?? null,
     torbaCariName:        settings.torbaCariName ?? null,
     invoiceType:          settings.invoiceType ?? 'e_archive',
+    touchKeyboard:        settings.touchKeyboard ?? true,
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
     set: {
@@ -727,6 +729,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
       torbaCariId:          settings.torbaCariId   ?? null,
       torbaCariName:        settings.torbaCariName ?? null,
       invoiceType:          settings.invoiceType ?? 'e_archive',
+      touchKeyboard:        settings.touchKeyboard ?? true,
     },
   }).run()
 }
@@ -746,7 +749,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
         @duplicateItemAction, @minQtyPerLine,
@@ -754,7 +757,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @maxLineDiscountPct, @maxDocDiscountPct,
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
-        @torbaCariId, @torbaCariName, @invoiceType
+        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard
       )
     `).run({
       id:                  rowId,
@@ -781,6 +784,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       torbaCariId:         settings.torbaCariId   ?? null,
       torbaCariName:       settings.torbaCariName ?? null,
       invoiceType:         settings.invoiceType ?? 'e_archive',
+      touchKeyboard:       settings.touchKeyboard !== false ? 1 : 0,
     })
 
     // 2. Doğrula
@@ -798,7 +802,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
       )
       SELECT
         id, cashier_id, show_price, show_code, show_barcode,
@@ -807,7 +811,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
 
@@ -869,6 +873,7 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     torbaCariId:          row?.torbaCariId          ?? null,
     torbaCariName:        row?.torbaCariName        ?? null,
     invoiceType:          (row?.invoiceType === 'paper' ? 'paper' : 'e_archive'),
+    touchKeyboard:        row?.touchKeyboard ?? true,
   }
 }
 

@@ -9,6 +9,8 @@ import { API_URL } from '../lib/api'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
+import { TouchKeyboard } from '../components/TouchKeyboard'
+import { useTouchKeyboard } from '../hooks/useTouchKeyboard'
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -175,6 +177,9 @@ export default function POSScreen({
   commandRecentlyReceived = false,
   commandDeferred = false,
 }: Props) {
+
+  const touchEnabled = posSettings?.touchKeyboard ?? true
+  const { openKeyboard, keyboardProps } = useTouchKeyboard(touchEnabled)
 
   /* ── State ── */
   const [cart, setCart]                   = useState<CartItem[]>([])
@@ -1800,9 +1805,16 @@ export default function POSScreen({
               <button onClick={() => setShowCustomer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
             </div>
             <input
-              autoFocus
+              autoFocus={!touchEnabled}
               value={customerQ}
-              onChange={e => setCustomerQ(e.target.value)}
+              readOnly={touchEnabled}
+              onClick={() => openKeyboard({
+                title:    'Müşteri ara',
+                initial:  customerQ,
+                type:     'qwerty',
+                onConfirm: (v) => setCustomerQ(v),
+              })}
+              onChange={e => { if (!touchEnabled) setCustomerQ(e.target.value) }}
               placeholder="İsim veya kod ile ara..."
               style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12 }}
             />
@@ -2775,7 +2787,14 @@ export default function POSScreen({
 
                 <input
                   value={cariPaymentDesc}
-                  onChange={e => setCariPaymentDesc(e.target.value)}
+                  readOnly={touchEnabled}
+                  onClick={() => openKeyboard({
+                    title:    'Açıklama',
+                    initial:  cariPaymentDesc,
+                    type:     'qwerty',
+                    onConfirm: (v) => setCariPaymentDesc(v),
+                  })}
+                  onChange={e => { if (!touchEnabled) setCariPaymentDesc(e.target.value) }}
                   placeholder="Açıklama (opsiyonel)"
                   style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
                     border: '1px solid #E5E7EB', outline: 'none',
@@ -2900,7 +2919,17 @@ export default function POSScreen({
             </span>
             <span style={{ fontSize: 9, color: '#9ca3af' }}>{filtered.length} ürün</span>
             <button
-              onClick={() => window.electron.app.openKeyboard().catch(() => {})}
+              type="button"
+              onClick={() => {
+                if (!openKeyboard({
+                  title:    'Ürün ara',
+                  initial:  searchQ,
+                  type:     'qwerty',
+                  onConfirm: (v) => setSearchQ(v),
+                })) {
+                  void window.electron.app.openKeyboard().catch(() => {})
+                }
+              }}
               style={{ width: 24, height: 24, background: '#efefef', border: '1px solid #e5e7eb', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}
               title="Klavye Aç"
             >⌨</button>
@@ -3309,6 +3338,10 @@ export default function POSScreen({
           </div>
         ))}
       </div>
+
+      {keyboardProps.open && (
+        <TouchKeyboard {...keyboardProps} />
+      )}
     </div>
   )
 }

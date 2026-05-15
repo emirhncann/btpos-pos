@@ -371,6 +371,7 @@ declare global {
     torbaCariId:          string | null
     torbaCariName:        string | null
     invoiceType:          'e_archive' | 'paper'
+    touchKeyboard?:       boolean
   }
 
   interface PaymentDeviceRow {

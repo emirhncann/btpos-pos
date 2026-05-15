@@ -296,6 +296,15 @@ app.whenReady().then(async () => {
   const custTempCols = (db.prepare('PRAGMA table_info(customers_temp)').all() as { name: string }[]).map(c => c.name)
   if (!custTempCols.includes('email')) db.exec(`ALTER TABLE customers_temp ADD COLUMN email TEXT`)
 
+  const posCols = (db.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string }[]).map(c => c.name)
+  if (!posCols.includes('touch_keyboard')) {
+    db.run('ALTER TABLE pos_settings_cache ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
+  }
+  const posTempCols = (db.prepare('PRAGMA table_info(pos_settings_temp)').all() as { name: string }[]).map(c => c.name)
+  if (!posTempCols.includes('touch_keyboard')) {
+    db.run('ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
+  }
+
   createWindow()
 
   ipcMain.handle('app:selectFolder', async () => {

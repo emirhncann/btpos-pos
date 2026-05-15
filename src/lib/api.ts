@@ -151,6 +151,7 @@ export const api = {
         ? String(d.torba_cari_name)
         : null,
       invoiceType:         d.invoice_type === 'paper' ? 'paper' : 'e_archive',
+      touchKeyboard:       d.touch_keyboard == null ? true : Boolean(d.touch_keyboard),
     }
   },
 

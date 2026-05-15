@@ -225,7 +225,7 @@ electron.app.whenReady().then(async () => {
   var _a;
   const savedDbDir = (_a = store.get("db_path")) == null ? void 0 : _a.trim();
   const dbDir = savedDbDir && savedDbDir.length > 0 ? savedDbDir : electron.app.getPath("userData");
-  const { initDatabase, getSqlite } = await Promise.resolve().then(() => require("./index-DtA0cDks.js")).then((n) => n.index);
+  const { initDatabase, getSqlite } = await Promise.resolve().then(() => require("./index-DtTeeLQP.js")).then((n) => n.index);
   initDatabase(path.join(dbDir, "btpos.db"));
   const db = getSqlite();
   db.exec(`
@@ -282,6 +282,18 @@ electron.app.whenReady().then(async () => {
   const spCols = db.prepare("PRAGMA table_info(sale_payments)").all().map((c) => c.name);
   if (!spCols.includes("cashier_id")) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_id TEXT`);
   if (!spCols.includes("cashier_name")) db.exec(`ALTER TABLE sale_payments ADD COLUMN cashier_name TEXT`);
+  const custCols = db.prepare("PRAGMA table_info(customers)").all().map((c) => c.name);
+  if (!custCols.includes("email")) db.exec(`ALTER TABLE customers ADD COLUMN email TEXT`);
+  const custTempCols = db.prepare("PRAGMA table_info(customers_temp)").all().map((c) => c.name);
+  if (!custTempCols.includes("email")) db.exec(`ALTER TABLE customers_temp ADD COLUMN email TEXT`);
+  const posCols = db.prepare("PRAGMA table_info(pos_settings_cache)").all().map((c) => c.name);
+  if (!posCols.includes("touch_keyboard")) {
+    db.run("ALTER TABLE pos_settings_cache ADD COLUMN touch_keyboard INTEGER DEFAULT 1");
+  }
+  const posTempCols = db.prepare("PRAGMA table_info(pos_settings_temp)").all().map((c) => c.name);
+  if (!posTempCols.includes("touch_keyboard")) {
+    db.run("ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1");
+  }
   createWindow();
   electron.ipcMain.handle("app:selectFolder", async () => {
     const result = await electron.dialog.showOpenDialog({
@@ -292,7 +304,7 @@ electron.app.whenReady().then(async () => {
   });
   electron.ipcMain.handle("app:reinitDb", async (_e, newPath) => {
     try {
-      const { reinitDatabase } = await Promise.resolve().then(() => require("./index-DtA0cDks.js")).then((n) => n.index);
+      const { reinitDatabase } = await Promise.resolve().then(() => require("./index-DtTeeLQP.js")).then((n) => n.index);
       reinitDatabase((newPath == null ? void 0 : newPath.trim()) || void 0);
       return { success: true };
     } catch (e) {
@@ -353,42 +365,42 @@ electron.app.whenReady().then(async () => {
   electron.ipcMain.handle("device:uid", () => getDeviceUID());
   electron.ipcMain.handle("app:version", () => electron.app.getVersion());
   electron.ipcMain.handle("db:saveProducts", async (_e, prods) => {
-    const { saveProducts } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { saveProducts } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return saveProducts(prods);
   });
   electron.ipcMain.handle("db:getProducts", async () => {
-    const { getAllProducts } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getAllProducts } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getAllProducts();
   });
   electron.ipcMain.handle("db:saveSale", async (_e, sale, items, device) => {
-    const { saveSale } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { saveSale } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return saveSale(sale, items, device);
   });
   electron.ipcMain.handle("db:getSales", async (_e, dateFrom, dateTo) => {
-    const { getSales } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getSales } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getSales(dateFrom, dateTo);
   });
   electron.ipcMain.handle("device:info", () => {
     return getDeviceInfo();
   });
   electron.ipcMain.handle("db:saveCashiers", async (_e, cashierList) => {
-    const { saveCashiers } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { saveCashiers } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return saveCashiers(cashierList);
   });
   electron.ipcMain.handle("db:verifyCashier", async (_e, code, password) => {
-    const { verifyCashier } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { verifyCashier } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return verifyCashier(code, password);
   });
   electron.ipcMain.handle("db:verifyCashierByCard", async (_e, cardNumber) => {
-    const { verifyCashierByCard } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { verifyCashierByCard } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return verifyCashierByCard(cardNumber);
   });
   electron.ipcMain.handle("db:getCashiers", async () => {
-    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getAllCashiers();
   });
   electron.ipcMain.handle("db:getAllCashiers", async () => {
-    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getAllCashiers } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getAllCashiers();
   });
   electron.ipcMain.handle("app:openKeyboard", () => {
@@ -400,170 +412,170 @@ electron.app.whenReady().then(async () => {
     });
   });
   electron.ipcMain.handle("db:holdDocument", async (_e, doc) => {
-    const { holdDocument } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { holdDocument } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return holdDocument(doc);
   });
   electron.ipcMain.handle("db:getHeldDocuments", async (_e, companyId) => {
-    const { getHeldDocuments } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getHeldDocuments } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getHeldDocuments(companyId);
   });
   electron.ipcMain.handle("db:deleteHeldDocument", async (_e, id) => {
-    const { deleteHeldDocument } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { deleteHeldDocument } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return deleteHeldDocument(id);
   });
   electron.ipcMain.handle("db:savePluGroups", async (_e, groups) => {
-    const { savePluGroups } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { savePluGroups } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     savePluGroups(groups);
   });
   electron.ipcMain.handle("db:getPluGroups", async (_e, companyId, wpId, cashierId) => {
-    const { getPluGroups } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getPluGroups } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getPluGroups(companyId, wpId, cashierId);
   });
   electron.ipcMain.handle("db:savePosSettings", async (_e, settings, cashierId) => {
-    const { syncPosSettingsAcid } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { syncPosSettingsAcid } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return syncPosSettingsAcid({
       ...settings,
       cashierId: cashierId ?? null
     });
   });
   electron.ipcMain.handle("db:getPosSettings", async (_e, cashierId) => {
-    const { getPosSettings } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getPosSettings } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getPosSettings(cashierId ?? null);
   });
   electron.ipcMain.handle("db:saveCommandHistory", async (_e, row) => {
-    const { saveCommandHistory } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { saveCommandHistory } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     saveCommandHistory(row);
   });
   electron.ipcMain.handle("db:getCommandHistory", async (_e, limit) => {
-    const { getCommandHistory } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getCommandHistory } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getCommandHistory(limit ?? 20);
   });
   electron.ipcMain.handle("db:syncProductsAcid", async (_e, items, mode) => {
-    const { syncProductsAcid } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { syncProductsAcid } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return syncProductsAcid(items, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:syncPluGroupsAcid", async (_e, groups, mode) => {
-    const { syncPluGroupsAcid } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { syncPluGroupsAcid } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return syncPluGroupsAcid(groups, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:syncCashiersAcid", async (_e, cashierList, companyId, mode) => {
-    const { syncCashiersAcid } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { syncCashiersAcid } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return syncCashiersAcid(cashierList, companyId, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:syncCustomersAcid", async (_e, items, companyId, mode) => {
-    const { syncCustomersAcid } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { syncCustomersAcid } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return syncCustomersAcid(items, companyId, mode === "diff" ? "diff" : "full");
   });
   electron.ipcMain.handle("db:getCustomers", async (_e, companyId, query) => {
-    const { getCustomers } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getCustomers } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getCustomers(companyId, query);
   });
   electron.ipcMain.handle("db:getCustomerById", async (_e, companyId, id) => {
-    const { getCustomerById } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getCustomerById } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getCustomerById(companyId, id);
   });
   electron.ipcMain.handle("db:getPendingInvoices", async (_e, onlyAnonymous = false) => {
-    const { getPendingInvoices } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getPendingInvoices } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getPendingInvoices(onlyAnonymous);
   });
   electron.ipcMain.handle("db:markInvoiceSent", async (_e, saleId, invoiceId) => {
-    const { markInvoiceSent } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { markInvoiceSent } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     markInvoiceSent(saleId, invoiceId);
   });
   electron.ipcMain.handle("db:markInvoiceError", async (_e, saleId, error) => {
-    const { markInvoiceError } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { markInvoiceError } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     markInvoiceError(saleId, error);
   });
   electron.ipcMain.handle("db:getSaleItems", async (_e, saleId) => {
-    const { getSaleItems } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getSaleItems } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getSaleItems(saleId);
   });
   electron.ipcMain.handle("db:saveSalePayments", async (_e, payments) => {
-    const { saveSalePayments } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { saveSalePayments } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     saveSalePayments(db, payments);
   });
   electron.ipcMain.handle("db:getSalePayments", async (_e, saleId) => {
-    const { getSalePayments } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getSalePayments } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getSalePayments(db, saleId);
   });
   electron.ipcMain.handle("db:getCardTotalsByBank", async (_e, saleIds) => {
-    const { getCardTotalsByBank } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getCardTotalsByBank } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getCardTotalsByBank(db, saleIds);
   });
   electron.ipcMain.handle("db:getCashTotal", async (_e, saleIds) => {
-    const { getCashTotal } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getCashTotal } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getCashTotal(db, saleIds);
   });
   electron.ipcMain.handle("db:getProductByCode", async (_e, code) => {
-    const { getProductByCode } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getProductByCode } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getProductByCode(code);
   });
   electron.ipcMain.handle("db:getProductIdByCode", async (_e, code) => {
-    const { getProductIdByCode } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getProductIdByCode } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getProductIdByCode(code);
   });
   electron.ipcMain.handle("db:upsertCustomer", async (_e, row) => {
-    const { upsertCustomer } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { upsertCustomer } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     upsertCustomer(row);
   });
   electron.ipcMain.handle("db:enqueueOperation", async (_e, params) => {
-    const { enqueueOperation } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { enqueueOperation } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     enqueueOperation(params);
   });
   electron.ipcMain.handle("db:getPendingOperations", async (_e, companyId) => {
-    const { getPendingOperations } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getPendingOperations } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getPendingOperations(companyId);
   });
   electron.ipcMain.handle("db:getAllOperations", async (_e, companyId, limit) => {
-    const { getAllOperations } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getAllOperations } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getAllOperations(companyId, limit ?? 100);
   });
   electron.ipcMain.handle("db:markOperationProcessing", async (_e, id) => {
-    const { markOperationProcessing } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { markOperationProcessing } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     markOperationProcessing(id);
   });
   electron.ipcMain.handle("db:markOperationSuccess", async (_e, id) => {
-    const { markOperationSuccess } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { markOperationSuccess } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     markOperationSuccess(id);
   });
   electron.ipcMain.handle("db:markOperationFailed", async (_e, id, error) => {
-    const { markOperationFailed } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { markOperationFailed } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     markOperationFailed(id, error);
   });
   electron.ipcMain.handle("db:retryOperation", async (_e, id) => {
-    const { retryOperation } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { retryOperation } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     retryOperation(id);
   });
   electron.ipcMain.handle("db:deleteOperation", async (_e, id) => {
-    const { deleteOperation } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { deleteOperation } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     deleteOperation(id);
   });
   electron.ipcMain.handle("db:getPaymentDeviceSettings", async (_e, provider) => {
-    const { getPaymentDeviceSettings } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getPaymentDeviceSettings } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getPaymentDeviceSettings(provider ?? "pavo");
   });
   electron.ipcMain.handle("db:upsertPaymentDeviceSettings", async (_e, row) => {
-    const { upsertPaymentDeviceSettings } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { upsertPaymentDeviceSettings } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     upsertPaymentDeviceSettings(row);
   });
   electron.ipcMain.handle("db:nextPavoSequence", async () => {
-    const { nextPavoSequence } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { nextPavoSequence } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return nextPavoSequence();
   });
   electron.ipcMain.handle("db:updatePavoSequence", async (_e, seq) => {
-    const { updatePavoSequence } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { updatePavoSequence } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     updatePavoSequence(seq);
   });
   electron.ipcMain.handle("db:getUnitPavoCode", async (_e, unitName) => {
-    const { getUnitPavoCode } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getUnitPavoCode } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getUnitPavoCode(db, unitName);
   });
   electron.ipcMain.handle("db:upsertUnitMapping", async (_e, row) => {
-    const { upsertUnitMapping } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { upsertUnitMapping } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     upsertUnitMapping(db, row);
   });
   electron.ipcMain.handle("db:getAllUnitMappings", async (_e, companyId) => {
-    const { getAllUnitMappings } = await Promise.resolve().then(() => require("./operations-CVmH1Cc4.js"));
+    const { getAllUnitMappings } = await Promise.resolve().then(() => require("./operations-DQilM19O.js"));
     return getAllUnitMappings(db, companyId);
   });
 });

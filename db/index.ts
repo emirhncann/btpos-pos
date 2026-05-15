@@ -314,6 +314,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_name', 'torba_cari_name TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_id', 'torba_cari_id TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_name', 'torba_cari_name TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'touch_keyboard', 'touch_keyboard INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'touch_keyboard', 'touch_keyboard INTEGER DEFAULT 1')
   try {
     sqlite.exec(`ALTER TABLE pos_settings_cache ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
   } catch {
