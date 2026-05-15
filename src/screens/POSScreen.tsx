@@ -1999,10 +1999,10 @@ export default function POSScreen({
       )}
 
       {/* ── 4 PANEL — toplam %100 ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0, minWidth: 0 }}>
 
         {/* ① SEPET — %42 */}
-        <div style={{ width: '42%', flexShrink: 0, boxSizing: 'border-box', background: cancelMode ? '#fff8f8' : '#f6f7f9', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e8eaef', transition: 'background 0.25s' }}>
+        <div style={{ width: '42%', flexShrink: 0, minWidth: 280, boxSizing: 'border-box', background: cancelMode ? '#fff8f8' : '#f6f7f9', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e8eaef', transition: 'background 0.25s' }}>
 
           {/* Sepet header */}
           <div style={{
@@ -2354,8 +2354,9 @@ export default function POSScreen({
 
         {/* ② NUMPAD KOLON — %22 */}
         <div style={{
-          width: '22%',
+          width: 'clamp(160px, 22%, 260px)',
           flexShrink: 0,
+          minWidth: 160,
           boxSizing: 'border-box',
           background: '#f8f9fa',
           display: 'flex',
@@ -2438,7 +2439,7 @@ export default function POSScreen({
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
-              style={{ padding: '8% 2%', borderRadius: 8,
+              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'islemler' ? '#1565C0' : '#BBDEFB'}`,
                 background: menuOpen === 'islemler' ? '#E3F2FD' : '#F3F8FE',
                 color: '#1565C0', fontWeight: 600, cursor: 'pointer',
@@ -2450,7 +2451,7 @@ export default function POSScreen({
             {/* 2 — Belge: mor tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
-              style={{ padding: '8% 2%', borderRadius: 8,
+              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'belge' ? '#7C3AED' : '#DDD6FE'}`,
                 background: menuOpen === 'belge' ? '#EDE9FE' : '#F5F3FF',
                 color: '#7C3AED', fontWeight: 600, cursor: 'pointer',
@@ -2462,7 +2463,7 @@ export default function POSScreen({
             {/* 3 — Müşteri: yeşil tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
-              style={{ padding: '8% 2%', borderRadius: 8,
+              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'musteri' || selectedCustomer ? '#2E7D32' : '#C8E6C9'}`,
                 background: menuOpen === 'musteri' ? '#E8F5E9' : selectedCustomer ? '#F1F8F1' : '#F4FBF4',
                 color: '#2E7D32', fontWeight: 600, cursor: 'pointer',
@@ -2478,7 +2479,7 @@ export default function POSScreen({
             {/* 4 — Fiyat Gör: amber tonu */}
             <button type="button"
               onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
-              style={{ padding: '8% 2%', borderRadius: 8,
+              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'fiyatgor' ? '#D97706' : '#FDE68A'}`,
                 background: menuOpen === 'fiyatgor' ? '#FEF3C7' : '#FFFBEB',
                 color: '#D97706', fontWeight: 600, cursor: 'pointer',
@@ -2924,9 +2925,10 @@ export default function POSScreen({
 
           {/* ── Adet göstergesi — ince ── */}
           <div style={{
-            borderRadius: 7, padding: '3% 4%', textAlign: 'center',
+            borderRadius: 7, padding: 'clamp(3px, 3%, 8px) 4%', textAlign: 'center',
             border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`,
             background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0,
+            overflow: 'hidden', minHeight: 32,
           }}>
             <span style={{
               fontSize: 'clamp(13px, 1.1vw + 6px, 20px)',
@@ -2960,6 +2962,8 @@ export default function POSScreen({
                   width: '100%', minWidth: 0,
                   boxSizing: 'border-box',
                   aspectRatio: '1 / 1',
+                  minHeight: 36,
+                  maxHeight: 72,
                   border: '1.5px solid',
                   borderRadius: 9,
                   cursor: 'pointer',
@@ -2969,7 +2973,7 @@ export default function POSScreen({
                   background: k === '⌫' ? '#fffbeb' : 'white',
                   color: k === '⌫' ? '#d97706' : '#1f2937',
                   borderColor: k === '⌫' ? '#fde68a' : '#d1d5db',
-                  fontSize: 'clamp(16px, 1.6vw + 6px, 30px)',
+                  fontSize: 'clamp(14px, 1.6vw + 4px, 26px)',
                 }}
               >{k}</button>
             ))}
@@ -2980,7 +2984,9 @@ export default function POSScreen({
               style={{
                 gridColumn: 'span 3',
                 width: '100%', boxSizing: 'border-box',
-                padding: '4% 0',
+                minHeight: 36,
+                maxHeight: 56,
+                padding: 'clamp(4px, 3%, 12px) 0',
                 border: '1.5px solid #fecdd3',
                 borderRadius: 9, cursor: 'pointer',
                 fontWeight: 700, fontSize: 'clamp(12px, 1.1vw + 4px, 18px)',
@@ -2994,7 +3000,7 @@ export default function POSScreen({
         </div>
 
         {/* ③ PLU — %29 */}
-        <div style={{ width: '29%', flexShrink: 0, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0', minWidth: 0 }}>
+        <div style={{ flex: 1, flexShrink: 1, minWidth: 180, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0' }}>
 
           {/* PLU başlık */}
           <div style={{ padding: '7px 10px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 6, height: 36, flexShrink: 0, background: '#f8f9fa' }}>
@@ -3301,7 +3307,7 @@ export default function POSScreen({
         </div>
 
         {/* ④ GRUPLAR — %7 */}
-        <div style={{ width: '7%', flexShrink: 0, boxSizing: 'border-box', background: '#f3f4f6', display: 'flex', flexDirection: 'column', overflowY: 'auto', minWidth: 0 }}>
+        <div style={{ width: 'clamp(44px, 7%, 72px)', flexShrink: 0, minWidth: 44, boxSizing: 'border-box', background: '#f3f4f6', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
           {pluGroups.map(g => (
             <button
               key={g.id}

@@ -60,7 +60,8 @@
     ],
     "win": {
       "target": "nsis",
-      "icon": "src/assets/logo_bt.png"
+      "icon": "src/assets/logo_bt.png",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
