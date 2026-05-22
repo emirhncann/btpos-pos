@@ -67,6 +67,39 @@ declare global {
         toggleFullscreen: () => Promise<void>
         toggleDevTools:   () => Promise<void>
       }
+      printer: {
+        list: () => Promise<{ name: string; isDefault: boolean }[]>
+        print: (printerName: string, dataB64: string) => Promise<{ success: boolean; message?: string }>
+        printRaw: (config: {
+          type: 'usb' | 'network'
+          printerName?: string
+          ip?: string
+          port?: number
+        }, dataB64: string) => Promise<{ success: boolean; message?: string }>
+        getSettings: () => Promise<PrinterSettingsDbRow | undefined>
+        saveSettings: (s: Record<string, unknown>) => Promise<{ success: boolean }>
+        printPaymentReceipt: (opts: PaymentReceiptPrintOpts) => Promise<{ success: boolean; message?: string }>
+        testPrint: (settings: Record<string, unknown>) => Promise<{ success: boolean; message?: string }>
+      }
+      templates: {
+        getAll: () => Promise<Record<string, unknown>[]>
+        getByTrigger: (triggerType: string) => Promise<Record<string, unknown>[]>
+        getDefault: (triggerType: string) => Promise<Record<string, unknown> | undefined>
+        save: (templates: Record<string, unknown>[]) => Promise<{ success: boolean; count: number }>
+        printThermal: (opts: {
+          triggerType: string
+          data: Record<string, Record<string, unknown>>
+        }) => Promise<{ success: boolean; message?: string }>
+        printPdf: (opts: {
+          triggerType: string
+          data: Record<string, Record<string, unknown>>
+        }) => Promise<{ success: boolean; message?: string }>
+        printWithBehavior: (opts: {
+          triggerType: string
+          data:        Record<string, Record<string, unknown>>
+          templateId?: string
+        }) => Promise<TemplatePrintResult>
+      }
       secondScreen: {
         open: () => Promise<{ success: boolean; error?: string }>
         update: (payload: SecondScreenPayload) => Promise<{ success: boolean; error?: string }>
@@ -349,6 +382,29 @@ declare global {
 
   type PluMode = 'terminal' | 'cashier'
 
+  interface PaymentReceiptPrintOpts {
+    terminalName:  string
+    cashierName:   string
+    date:          string
+    customerName:  string
+    customerCode:  string
+    processType:   'tahsilat' | 'odeme'
+    amount:        number
+    description?:  string
+  }
+
+  interface PrinterSettingsDbRow {
+    id?:            string
+    terminal_id?:   string | null
+    printer_type?:  'usb' | 'network'
+    printer_name?:  string | null
+    printer_ip?:    string | null
+    printer_port?:  number
+    paper_width?:   number
+    is_active?:     number | boolean
+    updated_at?:    string
+  }
+
   interface PosSettingsRow {
     showPrice:            boolean
     showCode:             boolean
@@ -372,6 +428,27 @@ declare global {
     torbaCariName:        string | null
     invoiceType:          'e_archive' | 'paper'
     touchKeyboard?:       boolean
+    customerDisplay?:     boolean
+    printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
+    defaultTemplateIds?:  Record<string, string>
+  }
+
+  type PrintBehavior = 'default' | 'ask' | 'none'
+
+  interface TemplateListItem {
+    id:            string
+    name:          string
+    template_type: string
+    is_default:    boolean
+  }
+
+  interface TemplatePrintResult {
+    success:         boolean
+    skipped?:        boolean
+    needsSelection?: boolean
+    templates?:      TemplateListItem[]
+    data?:           Record<string, Record<string, unknown>>
+    message?:        string
   }
 
   interface PaymentDeviceRow {

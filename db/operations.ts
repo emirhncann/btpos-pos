@@ -542,6 +542,9 @@ export interface PosSettingsRow {
   torbaCariName:        string | null
   invoiceType:          'e_archive' | 'paper'
   touchKeyboard?:       boolean
+  customerDisplay?:     boolean
+  printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
+  defaultTemplateIds?:  Record<string, string>
 }
 
 export interface PosSettingsAcidRow extends PosSettingsRow {
@@ -704,6 +707,13 @@ export function savePosSettings(settings: PosSettingsRow): void {
     torbaCariName:        settings.torbaCariName ?? null,
     invoiceType:          settings.invoiceType ?? 'e_archive',
     touchKeyboard:        settings.touchKeyboard ?? true,
+    customerDisplay:      settings.customerDisplay ?? true,
+    printBehavior:        settings.printBehavior
+      ? JSON.stringify(settings.printBehavior)
+      : null,
+    defaultTemplateIds: settings.defaultTemplateIds
+      ? JSON.stringify(settings.defaultTemplateIds)
+      : null,
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
     set: {
@@ -730,6 +740,13 @@ export function savePosSettings(settings: PosSettingsRow): void {
       torbaCariName:        settings.torbaCariName ?? null,
       invoiceType:          settings.invoiceType ?? 'e_archive',
       touchKeyboard:        settings.touchKeyboard ?? true,
+      customerDisplay:      settings.customerDisplay ?? true,
+      printBehavior:        settings.printBehavior
+        ? JSON.stringify(settings.printBehavior)
+        : null,
+      defaultTemplateIds: settings.defaultTemplateIds
+        ? JSON.stringify(settings.defaultTemplateIds)
+        : null,
     },
   }).run()
 }
@@ -749,7 +766,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
         @duplicateItemAction, @minQtyPerLine,
@@ -757,7 +774,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @maxLineDiscountPct, @maxDocDiscountPct,
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
-        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard
+        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds
       )
     `).run({
       id:                  rowId,
@@ -785,6 +802,13 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       torbaCariName:       settings.torbaCariName ?? null,
       invoiceType:         settings.invoiceType ?? 'e_archive',
       touchKeyboard:       settings.touchKeyboard !== false ? 1 : 0,
+      customerDisplay:     settings.customerDisplay !== false ? 1 : 0,
+      printBehavior:       settings.printBehavior
+        ? JSON.stringify(settings.printBehavior)
+        : null,
+      defaultTemplateIds: settings.defaultTemplateIds
+        ? JSON.stringify(settings.defaultTemplateIds)
+        : null,
     })
 
     // 2. Doğrula
@@ -802,7 +826,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
       )
       SELECT
         id, cashier_id, show_price, show_code, show_barcode,
@@ -811,7 +835,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
 
@@ -874,6 +898,45 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     torbaCariName:        row?.torbaCariName        ?? null,
     invoiceType:          (row?.invoiceType === 'paper' ? 'paper' : 'e_archive'),
     touchKeyboard:        row?.touchKeyboard ?? true,
+    customerDisplay:      row?.customerDisplay ?? true,
+    printBehavior:        parsePrintBehaviorField(row?.printBehavior),
+    defaultTemplateIds: parseDefaultTemplateIdsField(row?.defaultTemplateIds),
+  }
+}
+
+function parseDefaultTemplateIdsField(
+  raw: string | null | undefined,
+): Record<string, string> | undefined {
+  if (!raw) return undefined
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v != null && String(v).trim()) out[k] = String(v)
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function parsePrintBehaviorField(
+  raw: string | null | undefined,
+): PosSettingsRow['printBehavior'] {
+  if (!raw) {
+    return { satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none' }
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const out: Record<string, 'default' | 'ask' | 'none'> = {
+      satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none',
+    }
+    for (const [k, v] of Object.entries(parsed)) {
+      if (v === 'default' || v === 'ask' || v === 'none') out[k] = v
+    }
+    return out
+  } catch {
+    return { satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none' }
   }
 }
 

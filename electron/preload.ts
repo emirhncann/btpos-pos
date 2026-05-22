@@ -23,6 +23,38 @@ contextBridge.exposeInMainWorld('electron', {
     toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
     toggleDevTools: () => ipcRenderer.invoke('window:toggleDevTools'),
   },
+  printer: {
+    list: () => ipcRenderer.invoke('printer:list'),
+    print: (printerName: string, dataB64: string) =>
+      ipcRenderer.invoke('printer:print', printerName, dataB64),
+    printRaw: (config: {
+      type: 'usb' | 'network'
+      printerName?: string
+      ip?: string
+      port?: number
+    }, dataB64: string) => ipcRenderer.invoke('printer:printRaw', config, dataB64),
+    getSettings: () => ipcRenderer.invoke('printer:getSettings'),
+    saveSettings: (s: Record<string, unknown>) => ipcRenderer.invoke('printer:saveSettings', s),
+    printPaymentReceipt: (opts: PaymentReceiptPrintOpts) =>
+      ipcRenderer.invoke('printer:printPaymentReceipt', opts),
+    testPrint: (settings: Record<string, unknown>) =>
+      ipcRenderer.invoke('printer:testPrint', settings),
+  },
+  templates: {
+    getAll: () => ipcRenderer.invoke('templates:getAll'),
+    getByTrigger: (triggerType: string) => ipcRenderer.invoke('templates:getByTrigger', triggerType),
+    getDefault: (triggerType: string) => ipcRenderer.invoke('templates:getDefault', triggerType),
+    save: (templates: Record<string, unknown>[]) => ipcRenderer.invoke('templates:save', templates),
+    printThermal: (opts: { triggerType: string; data: Record<string, Record<string, unknown>> }) =>
+      ipcRenderer.invoke('templates:printThermal', opts),
+    printPdf: (opts: { triggerType: string; data: Record<string, Record<string, unknown>> }) =>
+      ipcRenderer.invoke('templates:printPdf', opts),
+    printWithBehavior: (opts: {
+      triggerType: string
+      data: Record<string, Record<string, unknown>>
+      templateId?: string
+    }) => ipcRenderer.invoke('templates:printWithBehavior', opts),
+  },
   secondScreen: {
     open: () => ipcRenderer.invoke('secondScreen:open'),
     update: (payload: SecondScreenPayload) => ipcRenderer.invoke('secondScreen:update', payload),

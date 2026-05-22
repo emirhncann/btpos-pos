@@ -19,6 +19,7 @@ export const noopCommandHandlers: CommandHandlers = {
   onSyncCustomers:  async () => {},
   onSyncProducts:   async () => {},
   onSyncSettings:   async () => {},
+  onSyncTemplates:  async () => {},
   onPairPavo:       async () => {},
   onLogout:         () => {},
   onMessage:        () => {},
@@ -342,6 +343,25 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       )
       if (!result.success) throw new Error(result.error)
       d.showToast('Ayarlar güncellendi')
+    },
+
+    onSyncTemplates: async () => {
+      console.log('[sync_templates] başladı, companyId:', d.companyId)
+      try {
+        const templates = await api.getTemplates(d.companyId)
+        console.log('[sync_templates] API yanıtı, adet:', templates.length)
+        if (templates.length > 0) {
+          const saveResult = await window.electron.templates.save(templates)
+          console.log(`[sync_templates] ${saveResult.count} şablon SQLite'a yazıldı`)
+          d.showToast(`${saveResult.count} fiş şablonu güncellendi`)
+        } else {
+          console.warn('[sync_templates] API boş liste döndü')
+          d.showToast('Şablon listesi boş')
+        }
+      } catch (e) {
+        console.error('[sync_templates] hata:', e)
+        throw e
+      }
     },
 
     onPairPavo: async (payload) => {

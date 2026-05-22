@@ -16,6 +16,7 @@ export interface CommandHandlers {
   onSyncCustomers:  (mode?: SyncMode) => Promise<void>
   onSyncProducts:   (mode?: SyncMode) => Promise<void>
   onSyncSettings:   () => Promise<void>
+  onSyncTemplates:  () => Promise<void>
   onPairPavo:       (payload?: Record<string, unknown>) => Promise<void>
   onLogout:         () => void
   onMessage:        (text: string, duration?: number) => void
@@ -31,7 +32,20 @@ const SYNC_KINDS = new Set([
   'sync_cashiers',
   'sync_customers',
   'sync_settings',
+  'sync_templates',
 ])
+
+/** API / panel farklı isim gönderebilir */
+function normalizeCommandKind(raw: string): string {
+  const kind = String(raw ?? '').toLowerCase().trim().replace(/-/g, '_')
+  const aliases: Record<string, string> = {
+    sync_template:          'sync_templates',
+    templates_sync:         'sync_templates',
+    sync_receipt_templates: 'sync_templates',
+    receipt_templates_sync: 'sync_templates',
+  }
+  return aliases[kind] ?? kind
+}
 
 interface UseCommandPollerOptions {
   /** Komut geçmişi SQLite'a yazıldıktan sonra (feed yenileme vb.) */
@@ -76,8 +90,9 @@ export function useCommandPoller(
       }
 
       for (const cmd of res.commands ?? []) {
-        const kind = String(cmd.command ?? '').toLowerCase().trim()
+        const kind = normalizeCommandKind(cmd.command ?? '')
         const mode = syncModeFromPayload(cmd.payload)
+        console.log('[POLL] komut:', kind, '| raw:', cmd.command, '| target:', cmd.target_id)
 
         if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
           console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
@@ -110,6 +125,20 @@ export function useCommandPoller(
             case 'sync_products':
               await h.onSyncProducts(mode)
               break
+
+            case 'sync_templates': {
+              console.log('[POLL][sync_templates] komut alındı:', {
+                targetId: cmd.target_id,
+                createdAt: cmd.created_at,
+                hasHandler: typeof h.onSyncTemplates === 'function',
+              })
+              if (typeof h.onSyncTemplates !== 'function') {
+                throw new Error('onSyncTemplates handler tanımlı değil — uygulamayı yeniden başlatın')
+              }
+              await h.onSyncTemplates()
+              console.log('[POLL][sync_templates] handler tamamlandı')
+              break
+            }
 
             case 'sync_settings':
               console.log('[POLL][sync_settings] komut alındı:', {

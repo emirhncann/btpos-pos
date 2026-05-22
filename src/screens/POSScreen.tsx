@@ -81,6 +81,7 @@ interface Props {
   commandSyncing?: boolean
   commandRecentlyReceived?: boolean
   commandDeferred?: boolean
+  customerDisplay?: boolean
 }
 
 interface CardPaymentInfo {
@@ -177,6 +178,7 @@ export default function POSScreen({
   commandSyncing = false,
   commandRecentlyReceived = false,
   commandDeferred = false,
+  customerDisplay = true,
 }: Props) {
 
   const touchEnabled = posSettings?.touchKeyboard ?? true
@@ -217,6 +219,11 @@ export default function POSScreen({
   const [cariPaymentQ, setCariPaymentQ] = useState('')
   const [cariPaymentResults, setCariPaymentResults] = useState<CustomerRow[]>([])
   const [cariPaymentSearching, setCariPaymentSearching] = useState(false)
+  const [printSelectModal, setPrintSelectModal] = useState<{
+    trigger: string
+    templates: { id: string; name: string; template_type: string; is_default: boolean }[]
+    data: Record<string, Record<string, unknown>>
+  } | null>(null)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
   const [showCustomer, setShowCustomer]   = useState(false)
@@ -731,6 +738,29 @@ export default function POSScreen({
     }
   }
 
+  async function printIfTemplate(
+    trigger: string,
+    data: Record<string, Record<string, unknown>>,
+  ) {
+    try {
+      const result = await window.electron.templates.printWithBehavior({
+        triggerType: trigger,
+        data,
+      })
+      if (result.needsSelection && result.templates?.length) {
+        setPrintSelectModal({
+          trigger,
+          templates: result.templates,
+          data:      result.data ?? data,
+        })
+      } else if (!result.success && result.message) {
+        console.warn('[Fiş]', result.message)
+      }
+    } catch (e) {
+      console.warn('[Şablon]', e)
+    }
+  }
+
   async function handleCariPayment() {
     if (!cariPaymentCust || !cariPaymentModal || !companyId) return
     const amount = parseFloat(cariPaymentAmt.replace(',', '.'))
@@ -761,12 +791,27 @@ export default function POSScreen({
       const data = await res.json() as { success?: boolean; message?: string; label?: string }
 
       if (res.ok && data.success) {
+        const paymentDesc = cariPaymentDesc.trim()
         setCariPaymentResult({
           ok:  true,
           msg: `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} başarıyla kaydedildi. Tutar: ${amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
         })
         setCariPaymentAmt('')
         setCariPaymentDesc('')
+
+        void printIfTemplate(cariPaymentModal, {
+          sale_payments: {
+            amount,
+            method:     'cash',
+            created_at: new Date().toISOString(),
+          },
+          customers: {
+            name: cariPaymentCust.name,
+            code: cariPaymentCust.code ?? '',
+          },
+          cashiers:  { full_name: cashier.fullName },
+          terminals: { name: terminalName ?? 'Kasa' },
+        })
       } else {
         setCariPaymentResult({
           ok: false,
@@ -811,6 +856,8 @@ export default function POSScreen({
       : 'merkezMailIdle 2.6s ease-in-out infinite'
 
   useEffect(() => {
+    if (!customerDisplay) return
+
     const discounts: SecondScreenDiscount[] = []
     for (const item of cart) {
       const brut = item.price * item.quantity
@@ -853,7 +900,7 @@ export default function POSScreen({
     }
 
     void window.electron.secondScreen.update(payload).catch(() => {})
-  }, [cart, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
+  }, [cart, customerDisplay, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
 
   async function completeSale(forcedLines?: PaymentLine[]) {
     const lines = forcedLines ?? paymentLines
@@ -1080,6 +1127,29 @@ export default function POSScreen({
           cardByBank,
         })
       }
+
+      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      void printIfTemplate('satis', {
+        sales: {
+          receipt_no:    receiptNo,
+          net_amount:    grandTotal,
+          cash_amount:   cashAmt,
+          card_amount:   cardAmt,
+          payment_type:  salePaymentType,
+          created_at:    new Date().toISOString(),
+        },
+        customers: selectedCustomer
+          ? {
+              name:    selectedCustomer.name,
+              code:    selectedCustomer.code ?? '',
+              phone:   selectedCustomer.phone ?? '',
+              tax_no:  selectedCustomer.taxNo ?? '',
+            }
+          : {},
+        cashiers:  { full_name: cashier.fullName },
+        terminals: { name: terminalLabel },
+      })
+
       setLastReceipt(receiptNo)
       setPaymentMode(false)
       setPaymentLines([])
@@ -3344,6 +3414,76 @@ export default function POSScreen({
           textAlign: 'center',
         }}>
           ⚠ {cancelWarning}
+        </div>
+      )}
+
+      {printSelectModal && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10001,
+          background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16, padding: 24,
+            width: 'min(360px, 94vw)', display: 'flex', flexDirection: 'column', gap: 10,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>
+              🖨️ Fiş seçin
+            </div>
+            <div style={{ fontSize: 12, color: '#6B7280' }}>
+              Hangi fişi basmak istiyorsunuz?
+            </div>
+
+            {printSelectModal.templates.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  const modal = printSelectModal
+                  setPrintSelectModal(null)
+                  void window.electron.templates.printWithBehavior({
+                    triggerType: modal.trigger,
+                    data:        modal.data,
+                    templateId:  t.id,
+                  })
+                }}
+                style={{
+                  padding: '12px 16px', borderRadius: 10,
+                  border: `1.5px solid ${t.is_default ? '#1565C0' : '#E5E7EB'}`,
+                  background: t.is_default ? '#EFF6FF' : 'white',
+                  cursor: 'pointer', textAlign: 'left',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}
+              >
+                <span style={{ fontSize: 18 }}>
+                  {t.template_type === 'thermal' ? '🖨️' : '📄'}
+                </span>
+                <div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 600,
+                    color: t.is_default ? '#1565C0' : '#111',
+                  }}>
+                    {t.name}
+                  </div>
+                  {t.is_default && (
+                    <div style={{ fontSize: 11, color: '#1565C0' }}>Varsayılan</div>
+                  )}
+                </div>
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() => setPrintSelectModal(null)}
+              style={{
+                padding: '10px', borderRadius: 10, marginTop: 4,
+                border: '1px solid #E5E7EB', background: '#F9FAFB',
+                cursor: 'pointer', fontSize: 13, color: '#6B7280',
+              }}
+            >
+              Fiş Basma
+            </button>
+          </div>
         </div>
       )}
 

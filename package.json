@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && electron-builder",
+    "postinstall": "node scripts/prebuild-sqlite-electron.js",
+    "rebuild:native": "node scripts/prebuild-sqlite-electron.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.js",
     "test": "vitest run",
@@ -36,7 +38,8 @@
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-slot": "^1.0.2",
-    "better-sqlite3": "11.10.0",
+    "@thiagoelg/node-printer": "^0.6.2",
+    "better-sqlite3": "^11.10.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "drizzle-orm": "^0.29.4",

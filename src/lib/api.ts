@@ -1,5 +1,27 @@
 export const API_URL = 'https://api.btpos.com.tr'
 
+function parseApiPrintBehavior(raw: unknown): PosSettingsRow['printBehavior'] {
+  if (!raw || typeof raw !== 'object') {
+    return { satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none' }
+  }
+  const out: Record<string, 'default' | 'ask' | 'none'> = {
+    satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none',
+  }
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v === 'default' || v === 'ask' || v === 'none') out[k] = v
+  }
+  return out
+}
+
+function parseApiDefaultTemplateIds(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v != null && String(v).trim()) out[k] = String(v)
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export const api = {
 
   async activate(licenseKey: string, deviceUid: string, email: string, deviceInfo: DeviceInfo) {
@@ -152,7 +174,27 @@ export const api = {
         : null,
       invoiceType:         d.invoice_type === 'paper' ? 'paper' : 'e_archive',
       touchKeyboard:       d.touch_keyboard == null ? true : Boolean(d.touch_keyboard),
+      customerDisplay:     d.customer_display == null ? true : Boolean(d.customer_display),
+      printBehavior:       parseApiPrintBehavior(d.print_behavior),
+      defaultTemplateIds:  parseApiDefaultTemplateIds(d.default_template_ids),
     }
+  },
+
+  async getTemplates(companyId: string): Promise<Record<string, unknown>[]> {
+    const url = `${API_URL}/templates/${companyId}`
+    console.log('[api.getTemplates] GET', url)
+    const res = await fetch(url)
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new Error(`getTemplates HTTP ${res.status}: ${body.slice(0, 200)}`)
+    }
+    const data = await res.json()
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.data)) return data.data
+    if (Array.isArray(data?.templates)) return data.templates
+    if (Array.isArray(data?.data?.templates)) return data.data.templates
+    console.warn('[api.getTemplates] beklenmeyen JSON yapısı:', Object.keys(data ?? {}))
+    return []
   },
 
   async getPaymentDeviceSettings(companyId: string, terminalId: string) {

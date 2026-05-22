@@ -184,6 +184,9 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   torbaCariName:        text('torba_cari_name'),
   invoiceType:          text('invoice_type').default('e_archive'),
   touchKeyboard:        integer('touch_keyboard', { mode: 'boolean' }).default(true),
+  customerDisplay:      integer('customer_display', { mode: 'boolean' }).default(true),
+  printBehavior:        text('print_behavior'),
+  defaultTemplateIds:   text('default_template_ids'),
 })
 
 // Kasanın aldığı komutların lokal geçmişi
@@ -311,4 +314,7 @@ export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   torbaCariName:        text('torba_cari_name'),
   invoiceType:          text('invoice_type').default('e_archive'),
   touchKeyboard:        integer('touch_keyboard', { mode: 'boolean' }).default(true),
+  customerDisplay:      integer('customer_display', { mode: 'boolean' }).default(true),
+  printBehavior:        text('print_behavior'),
+  defaultTemplateIds:   text('default_template_ids'),
 })

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
 import { sendPendingInvoices } from '../lib/invoiceSend'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
+import PrinterSettingsPanel from '../components/PrinterSettingsPanel'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -11,6 +12,7 @@ const CMD_LABELS: Record<string, string> = {
   sync_cashiers:  'Kasiyerler güncellendi',
   sync_customers: 'Cariler güncellendi',
   sync_settings:  'Ayarlar güncellendi',
+  sync_templates: 'Fiş şablonları güncellendi',
   logout:         'Kasiyer çıkışı yapıldı',
   message:        'Yönetici mesajı alındı',
   restart:        'Uygulama yeniden başlatıldı',
@@ -25,6 +27,7 @@ const CMD_COLORS: Record<string, { bg: string; icon: string }> = {
   sync_cashiers:  { bg: '#F3E5F5', icon: '👤' },
   sync_customers: { bg: '#FBE9E7', icon: '🏢' },
   sync_settings:  { bg: '#F5F5F5', icon: '⚙️' },
+  sync_templates: { bg: '#E8F5E9', icon: '🧾' },
   logout:         { bg: '#FFF3E0', icon: '🚪' },
   message:        { bg: '#E8F5E9', icon: '💬' },
   restart:        { bg: '#FFF8E1', icon: '🔁' },
@@ -73,6 +76,8 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment'>('screen')
+  const [pavoDeviceInfo, setPavoDeviceInfo] = useState<{ ip: string; port: number } | null>(null)
   const [showQueue, setShowQueue] = useState(false)
   const [invoiceSending, setInvoiceSending] = useState(false)
 
@@ -92,6 +97,19 @@ export default function DashboardScreen({
       .then(docs => setHeldCount(docs.length))
       .catch(() => {})
   }, [companyId, refreshCmdHistory, cmdPollTick])
+
+  useEffect(() => {
+    if (!showSettings || settingsTab !== 'payment') return
+    window.electron.db.getPaymentDeviceSettings('pavo')
+      .then(device => {
+        if (device?.ipAddress) {
+          setPavoDeviceInfo({ ip: device.ipAddress, port: device.port ?? 9100 })
+        } else {
+          setPavoDeviceInfo(null)
+        }
+      })
+      .catch(() => setPavoDeviceInfo(null))
+  }, [showSettings, settingsTab])
 
   async function loadDailySummary() {
     try {
@@ -185,7 +203,7 @@ export default function DashboardScreen({
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             type="button"
-            onClick={() => setShowSettings(true)}
+            onClick={() => { setSettingsTab('screen'); setShowSettings(true) }}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
@@ -193,7 +211,7 @@ export default function DashboardScreen({
               fontSize: 13, fontWeight: 500, color: '#374151',
             }}
           >
-            ⚙ Ekran Ayarları
+            ⚙ Kasa Ayarları
           </button>
           <button
             type="button"
@@ -330,7 +348,7 @@ export default function DashboardScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 14, width: 480,
+            background: 'white', borderRadius: 14, width: 520,
             maxHeight: '85vh', overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
           }}>
@@ -338,7 +356,7 @@ export default function DashboardScreen({
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '16px 20px', borderBottom: '1px solid #F0F0F0',
             }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>Ekran Ayarları</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>Kasa Ayarları</div>
               <button
                 type="button"
                 onClick={() => setShowSettings(false)}
@@ -348,7 +366,46 @@ export default function DashboardScreen({
                 }}
               >✕</button>
             </div>
+            <div style={{
+              display: 'flex', gap: 4, padding: '10px 16px 0',
+              borderBottom: '1px solid #F0F0F0',
+            }}>
+              {([
+                { id: 'screen' as const, label: 'Ekran' },
+                { id: 'payment' as const, label: 'Ödeme & Yazıcı' },
+              ]).map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setSettingsTab(tab.id)}
+                  style={{
+                    flex: 1, padding: '8px 12px', borderRadius: 8, border: 'none',
+                    background: settingsTab === tab.id ? '#E3F2FD' : 'transparent',
+                    color: settingsTab === tab.id ? '#1565C0' : '#6B7280',
+                    fontWeight: settingsTab === tab.id ? 600 : 400,
+                    fontSize: 13, cursor: 'pointer',
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
             <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+              {settingsTab === 'payment' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{
+                    padding: '12px 16px', background: '#E3F2FD', borderRadius: 10,
+                    border: '1px solid #90CAF9', fontSize: 12, color: '#1565C0',
+                  }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>💳 Pavo Ödeme Cihazı</div>
+                    {pavoDeviceInfo
+                      ? <>Merkezden senkron: {pavoDeviceInfo.ip}:{pavoDeviceInfo.port}</>
+                      : 'Henüz yapılandırılmamış — merkezden sync_settings ile gelir.'}
+                  </div>
+                  <PrinterSettingsPanel />
+                </div>
+              )}
+              {settingsTab === 'screen' && (<>
               <div style={{
                 fontSize: 11, fontWeight: 600, color: '#9ca3af',
                 textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 10,
@@ -450,6 +507,7 @@ export default function DashboardScreen({
                   </div>
                 ))}
               </div>
+              </>)}
             </div>
             <div style={{ padding: '12px 20px', borderTop: '1px solid #F0F0F0' }}>
               <button

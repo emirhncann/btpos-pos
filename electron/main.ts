@@ -5,6 +5,8 @@ import { join } from 'path'
 import Store from 'electron-store'
 
 import { getDeviceUID, getDeviceInfo } from './device'
+import { registerPrinterIpc } from './printerNative'
+import { registerTemplatesIpc } from './templatesIpc'
 
 const store = new Store()
 
@@ -304,6 +306,15 @@ app.whenReady().then(async () => {
   if (!posTempCols.includes('touch_keyboard')) {
     db.run('ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
   }
+  if (!posCols.includes('customer_display')) {
+    db.run('ALTER TABLE pos_settings_cache ADD COLUMN customer_display INTEGER DEFAULT 1')
+  }
+  if (!posTempCols.includes('customer_display')) {
+    db.run('ALTER TABLE pos_settings_temp ADD COLUMN customer_display INTEGER DEFAULT 1')
+  }
+
+  registerPrinterIpc(ipcMain, db)
+  registerTemplatesIpc(ipcMain, db)
 
   createWindow()
 

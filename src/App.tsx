@@ -57,6 +57,7 @@ export default function App() {
     pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
+    customerDisplay: true,
   })
   const [terminalSettings, setTerminalSettings] = useState<PosSettingsRow>({
     showPrice: true, showCode: true, showBarcode: false,
@@ -75,6 +76,7 @@ export default function App() {
     pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
+    customerDisplay: true,
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
   const [terminalLocked, setTerminalLocked] = useState(false)
@@ -124,7 +126,10 @@ export default function App() {
       setCommandSyncing,
       onLogout: handleLogout,
       onShowMessage: showPopupMessage,
-      onSettingsUpdated: setPosSettings,
+      onSettingsUpdated: (s) => {
+        setPosSettings(s)
+        void window.electron.db.getPosSettings().then(setTerminalSettings).catch(() => {})
+      },
       onLock: (reason) => {
         setTerminalLocked(true)
         setTerminalLockReason(reason ?? null)
@@ -184,7 +189,8 @@ export default function App() {
 
   useEffect(() => {
     if (showSplash) return
-    const shouldKeepSecondScreen = state === 'dashboard' || state === 'pos'
+    const shouldKeepSecondScreen =
+      (state === 'dashboard' || state === 'pos') && terminalSettings.customerDisplay !== false
     if (!shouldKeepSecondScreen) {
       void window.electron.secondScreen.close().catch(() => {})
       return
@@ -204,7 +210,7 @@ export default function App() {
         return window.electron.secondScreen.update(payload)
       })
       .catch(() => {})
-  }, [state, showSplash])
+  }, [state, showSplash, terminalSettings.customerDisplay])
 
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
@@ -386,6 +392,7 @@ export default function App() {
       commandSyncing={commandSyncing}
       commandRecentlyReceived={showCommandIndicator}
       commandDeferred={hasDeferredCommand}
+      customerDisplay={terminalSettings.customerDisplay !== false}
     />
   )
 }
