@@ -12,6 +12,7 @@ import {
   type RenderData,
 } from '../src/lib/templateEngine'
 import { renderHtml, renderThermal } from './templateRenderer'
+import { isPdfmeTemplate, renderPdfme, renderThermalReceipt } from './pdfmeRenderer'
 import {
   isPrinterActive,
   printReceipt,
@@ -53,29 +54,65 @@ async function doPrint(
   templateId: string,
   data: RenderData,
 ): Promise<{ success: boolean; message?: string }> {
-  const tpl = db.prepare('SELECT * FROM receipt_templates WHERE id = ?')
-    .get(templateId) as Record<string, unknown> | undefined
-  if (!tpl) return { success: false, message: 'Şablon bulunamadı' }
+  try {
+    const tpl = db.prepare('SELECT * FROM receipt_templates WHERE id = ?').get(templateId) as {
+      id: string
+      schema: string
+      paper_width_mm: number
+      paper_height_mm: number | null
+      template_type: string
+    } | undefined
 
-  const schema  = parseTemplateSchema(tpl.schema)
-  const paperW  = Number(tpl.paper_width_mm ?? 80)
-  const paperH  = tpl.paper_height_mm != null ? Number(tpl.paper_height_mm) : null
-  const tplType = String(tpl.template_type ?? 'thermal')
+    if (!tpl) return { success: false, message: 'Şablon bulunamadı' }
 
-  const printerCfg = getPrinterRow(db)
-  if (!printerCfg || !isPrinterActive(printerCfg)) {
-    return { success: false, message: 'Yazıcı ayarı yok' }
+    const printerCfg = getPrinterRow(db)
+    if (!printerCfg || !isPrinterActive(printerCfg)) {
+      return { success: false, message: 'Yazıcı ayarı yok' }
+    }
+
+    let templateJson: unknown
+    try {
+      templateJson = typeof tpl.schema === 'string'
+        ? JSON.parse(tpl.schema)
+        : tpl.schema
+    } catch {
+      return { success: false, message: 'Şablon JSON parse hatası' }
+    }
+
+    if (!isPdfmeTemplate(templateJson)) {
+      return { success: false, message: 'Geçersiz pdfme şablonu — schemas veya basePdf eksik' }
+    }
+
+    const config = settingsRowToConfig(printerCfg)
+    const paperW = Number(tpl.paper_width_mm ?? 80)
+    const isThermal = paperW <= 120
+
+    console.log('[doPrint] paper:', paperW, 'mm, termal:', isThermal)
+
+    if (isThermal) {
+      console.log('[doPrint] pdfme → ESC/POS')
+      const escBuf = await renderThermalReceipt(templateJson, data, paperW)
+      console.log('[doPrint] ESC/POS boyut:', escBuf.length, 'bytes')
+      await printReceipt(config, escBuf)
+    } else {
+      console.log('[doPrint] pdfme → PDF')
+      const pdfBuf = await renderPdfme(templateJson, data)
+      console.log('[doPrint] PDF boyut:', pdfBuf.length, 'bytes')
+
+      if (printerCfg.printer_type === 'network') {
+        console.log('[doPrint] PDF yazıcıya gönderiliyor (ağ)...')
+        await printReceipt(config, pdfBuf)
+      } else {
+        console.log('[doPrint] PDF yazıcıya gönderiliyor...')
+        await printPdfBuffer(db, pdfBuf, printerCfg)
+      }
+    }
+
+    return { success: true }
+  } catch (e) {
+    console.error('[doPrint]', e)
+    return { success: false, message: String(e) }
   }
-
-  if (tplType === 'thermal') {
-    const buf = renderThermal(schema, data, paperW)
-    await printRawBuffer(db, buf)
-  } else {
-    const html   = renderHtml(schema, data, paperW, paperH)
-    const pdfBuf = await renderPdfBuffer(html, paperW, paperH)
-    await printPdfBuffer(db, pdfBuf, printerCfg)
-  }
-  return { success: true }
 }
 
 function getPrinterRow(db: Database.Database): PrinterSettingsRow | undefined {

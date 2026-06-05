@@ -12,6 +12,7 @@ import ConnectionDot from '../components/ConnectionDot'
 import { TouchKeyboard } from '../components/TouchKeyboard'
 import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
+import { buildSaleReceiptData } from '../lib/templateEngine'
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -1129,26 +1130,37 @@ export default function POSScreen({
       }
 
       const terminalLabel = posSettings.source?.trim() || 'Kasa'
-      void printIfTemplate('satis', {
-        sales: {
-          receipt_no:    receiptNo,
-          net_amount:    grandTotal,
-          cash_amount:   cashAmt,
-          card_amount:   cardAmt,
-          payment_type:  salePaymentType,
-          created_at:    new Date().toISOString(),
-        },
-        customers: selectedCustomer
-          ? {
-              name:    selectedCustomer.name,
-              code:    selectedCustomer.code ?? '',
-              phone:   selectedCustomer.phone ?? '',
-              tax_no:  selectedCustomer.taxNo ?? '',
-            }
-          : {},
-        cashiers:  { full_name: cashier.fullName },
-        terminals: { name: terminalLabel },
-      })
+      const paymentLabel =
+        salePaymentType === 'mixed' ? 'Karma'
+          : salePaymentType === 'cash' ? 'Nakit' : 'Kart'
+      const firstCardPayment = paymentRows.find(p => p.method === 'card')
+      const cashGiven = cashPayments.reduce(
+        (s, p) => s + Number(p.CashPayment?.GivenAmount ?? p.PaymentAmount ?? 0),
+        0,
+      )
+      const changeAmount = Math.max(0, parseFloat((cashGiven - actualCashAmt).toFixed(2)))
+      const terminalId = await window.electron.store.get('terminal_id') as string | null
+
+      void printIfTemplate('satis', buildSaleReceiptData({
+        receiptNo,
+        companyId,
+        cashier: { id: cashier.id, fullName: cashier.fullName },
+        cart,
+        paymentType: salePaymentType,
+        paymentLabel,
+        cashAmount: cashAmt,
+        cardAmount: cardAmt,
+        paidAmount: paidAmt,
+        docDiscountRate: docDiscountRate,
+        docDiscountAmount: docDiscountCalc,
+        customer: selectedCustomer,
+        terminalId: terminalId ?? '',
+        terminalName: terminalLabel,
+        planName: license?.planName ?? '',
+        changeAmount,
+        paymentLines: paymentRows,
+        firstCardAcquirerName: firstCardPayment?.acquirerName ?? '',
+      }))
 
       setLastReceipt(receiptNo)
       setPaymentMode(false)
