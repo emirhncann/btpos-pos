@@ -404,6 +404,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   if (!salesCols.includes('card_acquirer_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT')
   if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
+  if (!salesCols.includes('is_return')) sqlite.exec('ALTER TABLE sales ADD COLUMN is_return INTEGER DEFAULT 0')
 
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')

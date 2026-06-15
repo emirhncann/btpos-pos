@@ -275,6 +275,7 @@ app.whenReady().then(async () => {
   if (!salesCols.includes('payment_device_data')) db.exec(`ALTER TABLE sales ADD COLUMN payment_device_data TEXT`)
   if (!salesCols.includes('cashier_id')) db.exec(`ALTER TABLE sales ADD COLUMN cashier_id TEXT`)
   if (!salesCols.includes('cashier_name')) db.exec(`ALTER TABLE sales ADD COLUMN cashier_name TEXT`)
+  if (!salesCols.includes('is_return')) db.exec(`ALTER TABLE sales ADD COLUMN is_return INTEGER DEFAULT 0`)
   db.exec(`
     CREATE TABLE IF NOT EXISTS sale_payments (
       id            TEXT PRIMARY KEY,

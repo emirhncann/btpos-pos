@@ -18,6 +18,52 @@ function customerRowToInvoicePayload(c: CustomerRow) {
   }
 }
 
+/** Cari seçilmediğinde fatura/iade için torba cari (POS ayarlarından) */
+export async function resolveTorbaCustomer(companyId: string): Promise<CustomerRow> {
+  const settings = await window.electron.db.getPosSettings()
+  const torbaKey = settings.torbaCariId?.trim()
+
+  if (torbaKey) {
+    const allCustomers = await window.electron.db.getCustomers(companyId)
+    const found = allCustomers.find(c => c.code === torbaKey)
+    if (found) return found
+
+    return {
+      id:         '',
+      companyId,
+      code:       torbaKey,
+      name:       settings.torbaCariName ?? 'Genel Müşteri',
+      phone:      '',
+      taxNo:      '',
+      address:    '',
+      balance:    0,
+      isPerson:   true,
+      firstName:  '',
+      lastName:   '',
+      postalCode: '',
+      city:       '',
+      district:   '',
+    }
+  }
+
+  return {
+    id:         '',
+    companyId,
+    code:       '',
+    name:       'Genel Müşteri',
+    phone:      '',
+    taxNo:      '',
+    address:    '',
+    balance:    0,
+    isPerson:   true,
+    firstName:  '',
+    lastName:   '',
+    postalCode: '',
+    city:       '',
+    district:   '',
+  }
+}
+
 /** Gün sonu: carisiz bekleyen fişler tek ERP faturasında birleştirilir; gönderim kuyruğa yazılır */
 export async function sendPendingInvoices(
   companyId: string,
@@ -215,6 +261,53 @@ export async function sendInvoiceForSale(
     type:      'invoice',
     payload,
     label:     `${customer.name} faturası`,
+  })
+}
+
+/** İade sonrası fatura — kuyruğa yazılır (worker → return-invoice API) */
+export async function sendReturnInvoice(
+  companyId:   string,
+  saleId:      string,
+  customer:    CustomerRow,
+  invoiceType: 'e_archive' | 'paper' = 'e_archive',
+  payment?: {
+    cashAmount: number
+    cardAmount: number
+  },
+): Promise<void> {
+  const items = await window.electron.db.getSaleItems(saleId)
+
+  const payload = {
+    sale_id:         saleId,
+    customer:        customerRowToInvoicePayload(customer),
+    customer_erp_id: Number.parseInt(customer.id ?? '0', 10) || 0,
+    items: await Promise.all(items.map(async i => {
+      const productId = await window.electron.db.getProductIdByCode(i.productCode)
+      return {
+        product_code: i.productCode,
+        name:         i.productName ?? i.productCode,
+        quantity:     Math.abs(i.quantity),
+        price:        i.price,
+        vatRate:      i.vatRate ?? 0,
+        unit:         i.unit ?? 'Adet',
+        discountRate: i.discountRate ?? 0,
+        product_id:   Number.parseInt(productId ?? '0', 10) || 0,
+        unit_code:    await window.electron.db.getUnitPavoCode(i.unit ?? 'Adet'),
+      }
+    })),
+    invoice_date:  new Date().toISOString().replace('T', ' ').slice(0, 19),
+    description:   `POS İade — ${customer.name}`,
+    invoice_type:  invoiceType,
+    cash_amount:   payment?.cashAmount ?? 0,
+    card_amount:   payment?.cardAmount ?? 0,
+  }
+
+  await window.electron.db.enqueueOperation({
+    id:        crypto.randomUUID(),
+    companyId,
+    type:      'return_invoice',
+    payload,
+    label:     `${customer.name} iade faturası`,
   })
 }
 

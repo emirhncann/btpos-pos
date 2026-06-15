@@ -185,9 +185,18 @@ export function useQueueWorker({ companyId, isOnline, onToast }: UseQueueWorkerO
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
             })
-            const data = await res.json() as { success?: boolean; message?: string }
+            const data = await res.json() as { success?: boolean; message?: string; invoice_id?: string }
             success = data.success === true
             error = data.message ?? null
+
+            const returnSaleId = payload.sale_id
+            if (typeof returnSaleId === 'string') {
+              if (success && data.invoice_id) {
+                await window.electron.db.markInvoiceSent(returnSaleId, String(data.invoice_id))
+              } else if (!success) {
+                await window.electron.db.markInvoiceError(returnSaleId, error ?? 'İade faturası gönderilemedi')
+              }
+            }
           } else if (op.type === 'customer') {
             const res = await fetch(`${API_URL}/integration/customers/${companyId}`, {
               method: 'POST',

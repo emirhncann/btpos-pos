@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { sendInvoiceForSale, enqueueCustomer } from '../lib/invoiceSend'
+import { sendInvoiceForSale, sendReturnInvoice, resolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
 import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
@@ -198,6 +198,7 @@ export default function POSScreen({
   const [saving, setSaving]               = useState(false)
   const [lastReceipt, setLastReceipt]     = useState<string | null>(null)
   const [cancelMode, setCancelMode]       = useState(false)
+  const [returnMode, setReturnMode]       = useState(false)
   const [cancelWarning, setCancelWarning] = useState<string | null>(null)
   const [docDiscountMode, setDocDiscountMode] = useState(false)
   const [discMode, setDiscMode] = useState<'rate' | 'amt'>('rate')
@@ -1176,6 +1177,103 @@ export default function POSScreen({
     }
   }
 
+  async function completeReturn(forcedLines?: PaymentLine[]) {
+    const lines = forcedLines ?? paymentLines
+    if (!cart.length || lines.length === 0) return
+    setSaving(true)
+
+    try {
+      const cashAmt = lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0)
+      const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
+
+      if (cardAmt > 0 && pavoSettings) {
+        window.alert('Kart iadesi için Pavo entegrasyonu bir sonraki adımda gelecek.')
+        return
+      }
+
+      const invoiceCustomer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
+      const receiptNo = nextReceiptNo()
+      const salePaymentType: 'cash' | 'card' | 'mixed' =
+        cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
+      const saleRow = {
+        receiptNo,
+        totalAmount: lineSubtotal,
+        discountRate: docDiscountRate,
+        discountAmount: docDiscountCalc,
+        netAmount: grandTotal,
+        paymentType: salePaymentType,
+        cashAmount: cashAmt,
+        cardAmount: cardAmt,
+        cardAcquirerId: null,
+        cashierId: cashier.id,
+        cashierName: cashier.fullName,
+        customerId:   invoiceCustomer.id   || null,
+        customerName: invoiceCustomer.name ?? null,
+        customerCode: invoiceCustomer.code ?? null,
+        isReturn: true,
+      }
+
+      const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
+        productId: c.id,
+        productCode: c.code,
+        productName: c.name,
+        quantity: -Math.abs(c.quantity),
+        unitPrice: c.price,
+        vatRate: c.vatRate,
+        discountRate: c.discountRate,
+        discountAmount: c.discountAmount,
+        lineTotal: c.netTotal,
+        appliedBy: cashier.id,
+      })), undefined)
+
+      if (companyId) {
+        void sendReturnInvoice(companyId, saleId, invoiceCustomer, invoiceType, {
+          cashAmount: cashAmt,
+          cardAmount: cardAmt,
+        })
+      }
+
+      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      void printIfTemplate('iade', buildSaleReceiptData({
+        receiptNo,
+        companyId,
+        cashier: { id: cashier.id, fullName: cashier.fullName },
+        cart,
+        paymentType: salePaymentType,
+        paymentLabel: salePaymentType === 'cash' ? 'Nakit İade' : salePaymentType === 'card' ? 'Kart İade' : 'Karma İade',
+        cashAmount: cashAmt,
+        cardAmount: cardAmt,
+        paidAmount: cashAmt + cardAmt,
+        docDiscountRate: docDiscountRate,
+        docDiscountAmount: docDiscountCalc,
+        customer: invoiceCustomer,
+        terminalId: (await window.electron.store.get('terminal_id') as string | null) ?? '',
+        terminalName: terminalLabel,
+        planName: license?.planName ?? '',
+        changeAmount: 0,
+        paymentLines: lines.map(l => ({
+          method: l.method,
+          amount: l.amount,
+          acquirerName: l.acquirerName,
+        })),
+        firstCardAcquirerName: '',
+      }))
+
+      setReturnMode(false)
+      clearCart()
+      setPaymentLines([])
+      setPaymentMode(false)
+      setActiveMethod(null)
+      setPendingAmount('')
+      setLastReceipt(receiptNo)
+      searchRef.current?.focus()
+    } catch (e) {
+      showErrorPopup('İade Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   /* ── Renkler ── */
   const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? '#1565C0'
   const activeSoft  = hexToSoft(activeColor)
@@ -2088,36 +2186,61 @@ export default function POSScreen({
 
           {/* Sepet header */}
           <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 12px', height: 38, background: '#fafafa',
-            borderBottom: '1px solid #e8eaef', flexShrink: 0,
+            padding: '6px 12px',
+            background: returnMode ? '#FEF2F2' : '#fafafa',
+            borderBottom: `2px solid ${returnMode ? '#DC2626' : '#e8eaef'}`,
+            display: 'flex', alignItems: 'center', gap: 8,
+            flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>Satış Belgesi</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {returnMode && (
+              <span style={{
+                background: '#DC2626', color: 'white',
+                fontSize: 10, fontWeight: 700,
+                padding: '2px 8px', borderRadius: 4,
+                letterSpacing: '0.5px',
+              }}>İADE</span>
+            )}
+            <span style={{
+              fontSize: 13, fontWeight: 600,
+              color: returnMode ? '#DC2626' : '#111',
+            }}>
+              {returnMode ? 'İade Belgesi' : 'Satış Belgesi'}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
               <span style={{ fontSize: 11, color: '#9ca3af' }}>
                 {cart.length > 0 ? `${cart.length} kalem` : 'Boş'}
               </span>
-              <button
-                type="button"
-                onClick={() => setCancelMode(p => !p)}
-                style={{
-                  fontSize: 11, color: cancelMode ? '#1565C0' : '#dc2626',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                }}
-              >
-                {cancelMode ? '← Geri' : '✕ İptal'}
-              </button>
-              <button
-                type="button"
-                onClick={clearCart}
-                style={{
-                  fontSize: 11, background: '#dc2626', color: 'white',
-                  border: 'none', borderRadius: 8, padding: '4px 12px',
-                  cursor: 'pointer', fontWeight: 500,
-                }}
-              >Temizle</button>
+              {returnMode ? (
+                <button
+                  type="button"
+                  onClick={() => { setReturnMode(false); clearCart() }}
+                  style={{ background: 'none', border: 'none',
+                    cursor: 'pointer', color: '#9CA3AF', fontSize: 12 }}>
+                  İptal
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setCancelMode(p => !p)}
+                    style={{
+                      fontSize: 11, color: cancelMode ? '#1565C0' : '#dc2626',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                    }}
+                  >
+                    {cancelMode ? '← Geri' : '✕ İptal'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearCart}
+                    style={{
+                      fontSize: 11, background: '#dc2626', color: 'white',
+                      border: 'none', borderRadius: 8, padding: '4px 12px',
+                      cursor: 'pointer', fontWeight: 500,
+                    }}
+                  >Temizle</button>
+                </>
+              )}
             </div>
           </div>
 
@@ -2154,9 +2277,11 @@ export default function POSScreen({
             ) : cart.map((item, rowIdx) => {
               const dr = item.discountRate ?? 0
               const da = item.discountAmount ?? 0
-              const rowBg = cancelMode
-                ? (rowIdx % 2 === 0 ? '#fffdfd' : '#fff8f8')
-                : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
+              const rowBg = returnMode
+                ? (cancelMode ? '#FEE2E2' : '#FFF5F5')
+                : cancelMode
+                  ? (rowIdx % 2 === 0 ? '#fffdfd' : '#fff8f8')
+                  : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
               const pills: ReactNode[] = []
               if (posSettings.showCode && item.code?.trim()) pills.push(
                 <span key="kod" style={{
@@ -2227,6 +2352,7 @@ export default function POSScreen({
                     borderRadius: 11,
                     marginBottom: 5,
                     border: '1px solid #e8eaef',
+                    borderLeft: returnMode ? '3px solid #DC2626' : 'none',
                     boxShadow: '0 1px 2px rgba(15, 23, 42, 0.035)',
                   }}
                   onMouseEnter={e => {
@@ -2649,9 +2775,15 @@ export default function POSScreen({
                 ))}
 
                 {menuOpen === 'belge' && [
-                  { icon: '↩️', label: 'İade al', disabled: false },
+                  { icon: '↩️', label: 'İade Al', disabled: false },
                 ].map((item, i, arr) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} last={i === arr.length - 1} onClick={() => setMenuOpen(null)} />
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} last={i === arr.length - 1}
+                    onClick={() => {
+                      setReturnMode(true)
+                      clearCart()
+                      setSelectedCustomer(null)
+                      setMenuOpen(null)
+                    }} />
                 ))}
 
                 {menuOpen === 'musteri' && [
@@ -3079,7 +3211,7 @@ export default function POSScreen({
         </div>
 
         {/* ③ PLU — %29 */}
-        <div style={{ flex: 1, flexShrink: 1, minWidth: 180, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: '1px solid #e0e0e0' }}>
+        <div style={{ flex: 1, flexShrink: 1, minWidth: 180, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
           {/* PLU başlık */}
           <div style={{ padding: '7px 10px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 6, height: 36, flexShrink: 0, background: '#f8f9fa' }}>
@@ -3211,25 +3343,27 @@ export default function POSScreen({
                       id: crypto.randomUUID(),
                       method: 'cash',
                       amount: parseFloat(amt.toFixed(2)),
-                      label: 'Nakit',
+                      label: returnMode ? 'Nakit İade' : 'Nakit',
                       mediator: 1,
                     }
                     setPaymentLines([line])
-                    void completeSale([line])
+                    void (returnMode ? completeReturn([line]) : completeSale([line]))
                   }}
                   disabled={cart.length === 0}
                   style={{
                     padding: '13px 4px',
                     borderRadius: 7,
-                    border: 'none',
-                    background: cart.length === 0 ? '#f5f5f5' : '#e8f5e9',
-                    color: cart.length === 0 ? '#bdbdbd' : '#2e7d32',
+                    border: cart.length === 0
+                      ? 'none'
+                      : `1.5px solid ${returnMode ? '#FECACA' : '#A5D6A7'}`,
+                    background: cart.length === 0 ? '#f5f5f5' : returnMode ? '#FEF2F2' : '#e8f5e9',
+                    color: cart.length === 0 ? '#bdbdbd' : returnMode ? '#DC2626' : '#2e7d32',
                     fontWeight: 600,
                     fontSize: 13,
                     cursor: cart.length === 0 ? 'default' : 'pointer',
                   }}
                 >
-                  💵 Nakit
+                  {returnMode ? '💵 Nakit İade' : '💵 Nakit'}
                 </button>
                 <button
                   onClick={() => {
@@ -3237,27 +3371,30 @@ export default function POSScreen({
                       id: crypto.randomUUID(),
                       method: 'card',
                       amount: grandTotal,
-                      label: 'Kart',
+                      label: returnMode ? 'Kart İade' : 'Kart',
                       mediator: 2,
                     }
                     setPaymentLines([line])
-                    void completeSale([line])
+                    void (returnMode ? completeReturn([line]) : completeSale([line]))
                   }}
-                  disabled={cart.length === 0 || !pavoSettings}
-                  title={!pavoSettings ? 'Pavo cihazı ayarlı değil' : undefined}
+                  disabled={cart.length === 0 || (!returnMode && !pavoSettings)}
+                  title={!returnMode && !pavoSettings ? 'Pavo cihazı ayarlı değil' : undefined}
                   style={{
                     padding: '13px 4px',
                     borderRadius: 7,
-                    border: 'none',
-                    background: cart.length === 0 || !pavoSettings ? '#f5f5f5' : '#e3f2fd',
-                    color: cart.length === 0 || !pavoSettings ? '#bdbdbd' : '#1565C0',
+                    border: cart.length === 0 || (!returnMode && !pavoSettings)
+                      ? 'none'
+                      : `1.5px solid ${returnMode ? '#FECACA' : '#90CAF9'}`,
+                    background: cart.length === 0 || (!returnMode && !pavoSettings) ? '#f5f5f5' : returnMode ? '#FEF2F2' : '#e3f2fd',
+                    color: cart.length === 0 || (!returnMode && !pavoSettings) ? '#bdbdbd' : returnMode ? '#DC2626' : '#1565C0',
                     fontWeight: 600,
                     fontSize: 13,
-                    cursor: cart.length === 0 || !pavoSettings ? 'default' : 'pointer',
+                    cursor: cart.length === 0 || (!returnMode && !pavoSettings) ? 'default' : 'pointer',
                   }}
                 >
-                  💳 Kart
+                  {returnMode ? '💳 Kart İade' : '💳 Kart'}
                 </button>
+                {!returnMode && (
                 <button
                   onClick={() => {
                     setPaymentLines([])
@@ -3280,6 +3417,7 @@ export default function POSScreen({
                 >
                   🔀 Karma Ödeme
                 </button>
+                )}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -3368,7 +3506,7 @@ export default function POSScreen({
                     İptal
                   </button>
                   <button
-                    onClick={() => void completeSale()}
+                    onClick={() => void (returnMode ? completeReturn() : completeSale())}
                     disabled={remaining !== 0 || saving}
                     style={{
                       padding: '10px', borderRadius: 8, border: 'none',
@@ -3386,12 +3524,32 @@ export default function POSScreen({
         </div>
 
         {/* ④ GRUPLAR — %7 */}
-        <div style={{ width: 'clamp(44px, 7%, 72px)', flexShrink: 0, minWidth: 44, boxSizing: 'border-box', background: '#f3f4f6', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+        <div style={{ width: 'clamp(44px, 7%, 72px)', flexShrink: 0, minWidth: 44, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '4px 0', gap: 3 }}>
           {pluGroups.map(g => (
             <button
               key={g.id}
               onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
-              style={{ height: 68, border: 'none', background: 'white', cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, color: activeGroup === g.id ? '#111' : '#6b7280', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.2px', borderBottom: '1px solid #f0f0f0', flexShrink: 0, width: '100%', paddingRight: 5 }}
+              style={{
+                height: 68,
+                border: 'none',
+                background: activeGroup === g.id ? 'white' : '#f8f9fa',
+                cursor: 'pointer',
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 3,
+                color: activeGroup === g.id ? '#111' : '#6b7280',
+                fontSize: 10,
+                fontWeight: 600,
+                textTransform: 'uppercase' as const,
+                letterSpacing: '0.2px',
+                flexShrink: 0,
+                width: '100%',
+                paddingRight: 5,
+                borderRadius: '8px 0 0 8px',
+              }}
             >
               {/* Renk şeridi sağda */}
               <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: activeGroup === g.id ? 7 : 4, background: g.color, transition: 'width 0.15s' }} />

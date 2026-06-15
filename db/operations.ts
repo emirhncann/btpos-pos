@@ -58,6 +58,7 @@ export interface SaleRow {
   customerId?:   string | null
   customerName?: string | null
   customerCode?: string | null
+  isReturn?:    boolean
 }
 
 export interface PaymentDeviceResult {
@@ -152,6 +153,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     cardAcquirerId: sale.cardAcquirerId ?? null,
     paymentProvider: device?.provider ?? null,
     paymentDeviceData,
+    isReturn: sale.isReturn ? 1 : 0,
   }).run()
 
   for (const item of items) {

@@ -265,6 +265,7 @@ declare global {
     customerId?:     string | null
     customerName?:   string | null
     customerCode?:   string | null
+    isReturn?:       boolean
   }
 
   /** SQLite sales satırı (fatura / listeler) */
