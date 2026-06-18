@@ -4,4 +4,4 @@ require("child_process");
 require("fs");
 require("path");
 require("electron-store");
-require("./main-CShvo730.js");
+require("./main-B1jD4CA3.js");

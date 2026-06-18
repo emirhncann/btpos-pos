@@ -136,6 +136,17 @@ async function syncSettings(
   const tResult = await window.electron.db.savePosSettings(terminalSettings, undefined)
   if (!tResult.success) return tResult
 
+  await window.electron.db.updatePosWorkplaceTerminal({
+    terminalNumber:    terminalSettings.terminalNumber ?? null,
+    workplaceName:      terminalSettings.workplaceName ?? null,
+    workplaceAddress:   terminalSettings.workplaceAddress ?? null,
+    workplacePhone:     terminalSettings.workplacePhone ?? null,
+    workplaceCity:      terminalSettings.workplaceCity ?? null,
+    workplaceDistrict:  terminalSettings.workplaceDistrict ?? null,
+    workplaceTaxOffice: terminalSettings.workplaceTaxOffice ?? null,
+    workplaceTaxNo:     terminalSettings.workplaceTaxNo ?? null,
+  })
+
   if (cashierId) {
     const cashierSettings = await api.getPosSettings(companyId, workplaceId, terminalId, cashierId)
     await window.electron.db.savePosSettings(cashierSettings, cashierId)

@@ -69,6 +69,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getPluGroups: (companyId, wpId, cashierId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId, cashierId),
     savePosSettings: (settings, cashierId) => electron.ipcRenderer.invoke("db:savePosSettings", settings, cashierId),
     getPosSettings: (cashierId) => electron.ipcRenderer.invoke("db:getPosSettings", cashierId),
+    updatePosWorkplaceTerminal: (data) => electron.ipcRenderer.invoke("db:updatePosWorkplaceTerminal", data),
     saveCommandHistory: (row) => electron.ipcRenderer.invoke("db:saveCommandHistory", row),
     getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
     syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),
@@ -102,6 +103,11 @@ electron.contextBridge.exposeInMainWorld("electron", {
     updatePavoSequence: (seq) => electron.ipcRenderer.invoke("db:updatePavoSequence", seq),
     getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),
     upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
-    getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId)
+    getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId),
+    getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale")
+  },
+  pavo: {
+    getReturnableSale: (opts) => electron.ipcRenderer.invoke("pavo:getReturnableSale", opts),
+    partialReturn: (opts) => electron.ipcRenderer.invoke("pavo:partialReturn", opts)
   }
 });

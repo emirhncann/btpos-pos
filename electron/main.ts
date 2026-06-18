@@ -313,6 +313,19 @@ app.whenReady().then(async () => {
   if (!posTempCols.includes('customer_display')) {
     db.run('ALTER TABLE pos_settings_temp ADD COLUMN customer_display INTEGER DEFAULT 1')
   }
+  const workplaceCols = [
+    'terminal_number', 'workplace_name', 'workplace_address',
+    'workplace_phone', 'workplace_city', 'workplace_district',
+    'workplace_tax_office', 'workplace_tax_no',
+  ] as const
+  for (const col of workplaceCols) {
+    if (!posCols.includes(col)) {
+      db.run(`ALTER TABLE pos_settings_cache ADD COLUMN ${col} TEXT`)
+    }
+    if (!posTempCols.includes(col)) {
+      db.run(`ALTER TABLE pos_settings_temp ADD COLUMN ${col} TEXT`)
+    }
+  }
 
   registerPrinterIpc(ipcMain, db)
   registerTemplatesIpc(ipcMain, db)
@@ -492,6 +505,11 @@ app.whenReady().then(async () => {
     return getPosSettings(cashierId ?? null)
   })
 
+  ipcMain.handle('db:updatePosWorkplaceTerminal', async (_e, data: unknown) => {
+    const { updatePosWorkplaceTerminalCache } = await import('../db/operations')
+    updatePosWorkplaceTerminalCache(data as import('../db/operations').PosSettingsRow)
+  })
+
   ipcMain.handle('db:saveCommandHistory', async (_e, row: unknown) => {
     const { saveCommandHistory } = await import('../db/operations')
     saveCommandHistory(row as import('../db/operations').CommandHistoryRow)
@@ -653,6 +671,21 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getAllUnitMappings', async (_e, companyId: string) => {
     const { getAllUnitMappings } = await import('../db/operations')
     return getAllUnitMappings(db, companyId)
+  })
+
+  ipcMain.handle('db:getLastSale', async () => {
+    const { getLastSale } = await import('../db/operations')
+    return getLastSale()
+  })
+
+  ipcMain.handle('pavo:getReturnableSale', async (_e, opts: { saleNumber: string }) => {
+    const { pavoGetReturnableSale } = await import('./pavoApi')
+    return pavoGetReturnableSale(opts.saleNumber)
+  })
+
+  ipcMain.handle('pavo:partialReturn', async (_e, opts: Record<string, unknown>) => {
+    const { pavoPartialReturn } = await import('./pavoApi')
+    return pavoPartialReturn(opts)
   })
 })
 

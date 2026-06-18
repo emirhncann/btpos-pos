@@ -124,6 +124,11 @@ declare global {
         getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) => Promise<PluGroupCacheRow[]>
         savePosSettings:    (settings: PosSettingsRow, cashierId?: string) => Promise<SyncResult>
         getPosSettings:     (cashierId?: string) => Promise<PosSettingsRow>
+        updatePosWorkplaceTerminal: (data: Pick<
+          PosSettingsRow,
+          | 'terminalNumber' | 'workplaceName' | 'workplaceAddress' | 'workplacePhone'
+          | 'workplaceCity' | 'workplaceDistrict' | 'workplaceTaxOffice' | 'workplaceTaxNo'
+        >) => Promise<void>
         saveCommandHistory: (row: CommandHistoryRow) => Promise<void>
         getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
         syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
@@ -164,6 +169,37 @@ declare global {
         getUnitPavoCode: (unitName: string) => Promise<string>
         upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) => Promise<void>
         getAllUnitMappings: (companyId: string) => Promise<unknown[]>
+        getLastSale: () => Promise<{ receiptNo: string; pavoSaleNumber: string | null; orderNo: string | null } | null>
+      }
+      pavo: {
+        getReturnableSale(opts: { saleNumber: string }): Promise<{
+          success: boolean
+          message?: string
+          data?: {
+            Id: number
+            SaleNumber: string
+            CustomerInfo: { CustomerType?: number; CompanyName?: string } | null
+            Items: Array<{
+              Id: number
+              ProductName: string
+              Quantity: number
+              ReturnableQuantity: number
+              UnitPrice: number
+              TotalPrice: number
+            }>
+            Payments: Array<{
+              Mediator: number
+              Amount: number
+              ReturnableAmount: number
+              PaymentId: number
+            }>
+          }
+        }>
+        partialReturn(opts: Record<string, unknown>): Promise<{
+          success: boolean
+          message?: string
+          data?: unknown
+        }>
       }
     }
   }
@@ -432,6 +468,14 @@ declare global {
     customerDisplay?:     boolean
     printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
     defaultTemplateIds?:  Record<string, string>
+    terminalNumber?:      string | null
+    workplaceName?:       string | null
+    workplaceAddress?:    string | null
+    workplacePhone?:      string | null
+    workplaceCity?:       string | null
+    workplaceDistrict?:   string | null
+    workplaceTaxOffice?:  string | null
+    workplaceTaxNo?:      string | null
   }
 
   type PrintBehavior = 'default' | 'ask' | 'none'

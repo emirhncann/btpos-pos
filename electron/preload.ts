@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:savePosSettings', settings, cashierId),
     getPosSettings:     (cashierId?: string) =>
       ipcRenderer.invoke('db:getPosSettings', cashierId),
+    updatePosWorkplaceTerminal: (data: unknown) =>
+      ipcRenderer.invoke('db:updatePosWorkplaceTerminal', data),
     saveCommandHistory: (row: unknown)                        => ipcRenderer.invoke('db:saveCommandHistory', row),
     getCommandHistory:  (limit?: number)                     => ipcRenderer.invoke('db:getCommandHistory', limit),
     syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),
@@ -136,5 +138,12 @@ contextBridge.exposeInMainWorld('electron', {
     upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) =>
       ipcRenderer.invoke('db:upsertUnitMapping', row),
     getAllUnitMappings: (companyId: string) => ipcRenderer.invoke('db:getAllUnitMappings', companyId),
+    getLastSale: () => ipcRenderer.invoke('db:getLastSale'),
+  },
+  pavo: {
+    getReturnableSale: (opts: { saleNumber: string }) =>
+      ipcRenderer.invoke('pavo:getReturnableSale', opts),
+    partialReturn: (opts: Record<string, unknown>) =>
+      ipcRenderer.invoke('pavo:partialReturn', opts),
   },
 })

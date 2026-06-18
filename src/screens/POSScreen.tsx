@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, sendReturnInvoice, resolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
-import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
+import { pavoCompleteSale, pavoGetReturnableSale, pavoPartialReturn, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
@@ -13,6 +13,8 @@ import { TouchKeyboard } from '../components/TouchKeyboard'
 import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 import { buildSaleReceiptData } from '../lib/templateEngine'
+import { nextOrderNo } from '../lib/orderNo'
+import QuickReturnModal, { type QuickReturnModalState, type ReturnableSale } from '../components/QuickReturnModal'
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -107,10 +109,21 @@ const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
 let receiptCounter = parseInt(localStorage.getItem('btpos_receipt') || '1000')
-function nextReceiptNo(): string {
+
+function nextSaleNumbers(
+  terminalNumber: string | null | undefined,
+): { receiptNo: string; orderNo: string } {
   receiptCounter++
   localStorage.setItem('btpos_receipt', String(receiptCounter))
-  return `FIS-${String(receiptCounter).padStart(5, '0')}`
+  const seq = receiptCounter
+  return {
+    receiptNo: `FIS-${String(seq).padStart(5, '0')}`,
+    orderNo:   nextOrderNo(terminalNumber),
+  }
+}
+
+function nextReceiptNo(terminalNumber: string | null | undefined): string {
+  return nextSaleNumbers(terminalNumber).receiptNo
 }
 
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
@@ -247,6 +260,9 @@ export default function POSScreen({
   const [pavoLoading, setPavoLoading] = useState(false)
   const [pavoError, setPavoError] = useState<string | null>(null)
   const [errorPopup, setErrorPopup] = useState<{ title: string; message: string } | null>(null)
+  const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
+  const [quickReturnLoading, setQuickReturnLoading] = useState(false)
+  const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
@@ -504,6 +520,14 @@ export default function POSScreen({
   useEffect(() => {
     if (searchQ.length < 2) return
     const t = setTimeout(() => {
+      if (quickReturnModal?.step === 'search') {
+        const scannedCode = searchQ
+        setSearchQ('')
+        setQuickReturnModal(m => m ? { ...m, saleNumber: scannedCode } : m)
+        void searchReturnableSale(scannedCode)
+        return
+      }
+
       const byBarcode = allProducts.find(p => p.barcode === searchQ)
       if (!byBarcode) return
       const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
@@ -539,7 +563,7 @@ export default function POSScreen({
       addToCartWithQty(byBarcode, qty)
     }, 300)
     return () => clearTimeout(t)
-  }, [searchQ, cancelMode, numBuf, allProducts])
+  }, [searchQ, cancelMode, numBuf, allProducts, quickReturnModal?.step])
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
@@ -925,6 +949,8 @@ export default function POSScreen({
       .filter(l => l.method !== 'cash')
       .reduce((s, l) => s + l.amount, 0)
     let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
+    const terminalLabel = posSettings.source?.trim() || 'Kasa'
+    const { receiptNo, orderNo } = nextSaleNumbers(posSettings.terminalNumber)
     const pavoPaymentsFinal = lines.map(l => {
       if (l.method === 'cash') {
         const cashPart = Math.min(l.amount, cashRemaining)
@@ -939,7 +965,6 @@ export default function POSScreen({
 
       try {
         const seq = await window.electron.db.nextPavoSequence()
-        const orderNo = nextReceiptNo().padStart(17, '0')
         const round2 = (n: number) => parseFloat(n.toFixed(2))
         const salePriceEffect = docDiscountCalc > 0
           ? {
@@ -1015,7 +1040,9 @@ export default function POSScreen({
       }
     }
 
-      const receiptNo = nextReceiptNo()
+      const pavoData = deviceResult?.raw?.Data as Record<string, unknown> | undefined
+      const printOrderNo = String(pavoData?.OrderNo ?? orderNo)
+
       type RawPayment = {
         StatusId?: unknown
         PaymentMediatorId?: unknown
@@ -1130,7 +1157,7 @@ export default function POSScreen({
         })
       }
 
-      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      const terminalId = await window.electron.store.get('terminal_id') as string | null
       const paymentLabel =
         salePaymentType === 'mixed' ? 'Karma'
           : salePaymentType === 'cash' ? 'Nakit' : 'Kart'
@@ -1140,10 +1167,10 @@ export default function POSScreen({
         0,
       )
       const changeAmount = Math.max(0, parseFloat((cashGiven - actualCashAmt).toFixed(2)))
-      const terminalId = await window.electron.store.get('terminal_id') as string | null
 
       void printIfTemplate('satis', buildSaleReceiptData({
         receiptNo,
+        orderNo: printOrderNo,
         companyId,
         cashier: { id: cashier.id, fullName: cashier.fullName },
         cart,
@@ -1157,6 +1184,16 @@ export default function POSScreen({
         customer: selectedCustomer,
         terminalId: terminalId ?? '',
         terminalName: terminalLabel,
+        terminalNumber: posSettings.terminalNumber,
+        workplace: {
+          name: posSettings.workplaceName,
+          address: posSettings.workplaceAddress,
+          phone: posSettings.workplacePhone,
+          city: posSettings.workplaceCity,
+          district: posSettings.workplaceDistrict,
+          taxOffice: posSettings.workplaceTaxOffice,
+          taxNo: posSettings.workplaceTaxNo,
+        },
         planName: license?.planName ?? '',
         changeAmount,
         paymentLines: paymentRows,
@@ -1177,6 +1214,176 @@ export default function POSScreen({
     }
   }
 
+  async function searchReturnableSale(saleNumber: string) {
+    if (!saleNumber.trim()) return
+    if (!pavoSettings) {
+      setQuickReturnError('Pavo cihazı yapılandırılmamış.')
+      return
+    }
+    setQuickReturnLoading(true)
+    setQuickReturnError(null)
+
+    try {
+      const seq = await window.electron.db.nextPavoSequence()
+      const res = await pavoGetReturnableSale(pavoSettings, seq, saleNumber.trim())
+
+      if (!res.success || !res.data) {
+        setQuickReturnError(res.message ?? 'Satış bulunamadı')
+        return
+      }
+
+      const sale = res.data as ReturnableSale
+
+      const customerType = sale.CustomerInfo?.CustomerType
+      if (customerType === 2 || sale.CustomerInfo?.CompanyName) {
+        setQuickReturnError('Bu satışa ait müşteri carili (tüzel) — hızlı iade alınamaz.')
+        return
+      }
+
+      const selected: Record<number, number> = {}
+      for (const item of sale.Items) {
+        if (item.ReturnableQuantity > 0) {
+          selected[item.Id] = item.ReturnableQuantity
+        }
+      }
+
+      setQuickReturnModal({
+        step:       'review',
+        saleNumber: sale.SaleNumber,
+        saleData:   sale,
+        selected,
+      })
+    } catch (e) {
+      setQuickReturnError('Bağlantı hatası: ' + String(e))
+    } finally {
+      setQuickReturnLoading(false)
+    }
+  }
+
+  async function searchLastSale() {
+    setQuickReturnLoading(true)
+    setQuickReturnError(null)
+    try {
+      const lastSale = await window.electron.db.getLastSale()
+      const saleNo = lastSale?.pavoSaleNumber ?? lastSale?.receiptNo
+      if (!saleNo) {
+        setQuickReturnError('Son satış bulunamadı.')
+        return
+      }
+      await searchReturnableSale(saleNo)
+    } finally {
+      setQuickReturnLoading(false)
+    }
+  }
+
+  async function confirmQuickReturn() {
+    if (!quickReturnModal?.saleData || !pavoSettings) return
+    const sale     = quickReturnModal.saleData
+    const selected = quickReturnModal.selected
+
+    setQuickReturnLoading(true)
+    setQuickReturnError(null)
+
+    try {
+      const addedItems = sale.Items
+        .filter(item => (selected[item.Id] ?? 0) > 0)
+        .map(item => {
+          const qty = selected[item.Id]
+          return {
+            RelatedSaleItemId: item.Id,
+            ItemQuantity:      qty,
+            UnitPriceAmount:   item.UnitPrice,
+            TotalPriceAmount:  Math.round(qty * item.UnitPrice * 100) / 100,
+          }
+        })
+
+      const totalReturn = addedItems.reduce((s, i) => s + i.TotalPriceAmount, 0)
+
+      const returnablePayments = sale.Payments.filter(p => p.ReturnableAmount > 0)
+      const returnablePayTotal = returnablePayments.reduce((s, p) => s + p.ReturnableAmount, 0)
+
+      const paymentInformations = returnablePayments.map(p => ({
+        Mediator:         p.Mediator,
+        Amount:           returnablePayments.length === 1
+          ? totalReturn
+          : Math.round(totalReturn * (p.ReturnableAmount / returnablePayTotal) * 100) / 100,
+        IsVoid:           true,
+        RelatedPaymentId: p.PaymentId,
+      }))
+
+      const seq = await window.electron.db.nextPavoSequence()
+      const res = await pavoPartialReturn(pavoSettings, seq, {
+        RelatedSaleId:         sale.Id,
+        AddedSaleItems:        addedItems,
+        PaymentInformations:   paymentInformations,
+        SendPhoneNotification: false,
+        SendEMailNotification: false,
+        ReceiptWidth:          pavoSettings?.printWidth ?? '80mm',
+        PrintCustomerReceipt:  true,
+        PrintMerchantReceipt:  true,
+      })
+
+      if (!res.success) {
+        setQuickReturnError(res.message ?? 'İade işlemi başarısız')
+        return
+      }
+
+      const receiptNo = nextReceiptNo(posSettings.terminalNumber)
+      const saleRow = {
+        receiptNo,
+        totalAmount:    totalReturn,
+        discountRate:   0,
+        discountAmount: 0,
+        netAmount:      totalReturn,
+        paymentType:    'card' as const,
+        cashAmount:     0,
+        cardAmount:     totalReturn,
+        cardAcquirerId: null,
+        cashierId:      cashier.id,
+        cashierName:    cashier.fullName,
+        customerId:     null,
+        customerName:   null,
+        customerCode:   null,
+        isReturn:       true,
+      }
+
+      const items = sale.Items
+        .filter(item => (selected[item.Id] ?? 0) > 0)
+        .map(item => {
+          const qty = selected[item.Id] ?? 0
+          const lineTotal = Math.round(qty * item.UnitPrice * 100) / 100
+          return {
+            productCode:    '',
+            productName:    item.ProductName,
+            quantity:       -qty,
+            unitPrice:      item.UnitPrice,
+            vatRate:        20,
+            discountRate:   0,
+            discountAmount: 0,
+            lineTotal,
+          }
+        })
+
+      const saleId = await window.electron.db.saveSale(saleRow, items, undefined)
+
+      if (companyId) {
+        const invoiceCustomer = await resolveTorbaCustomer(companyId)
+        void sendReturnInvoice(companyId, saleId, invoiceCustomer, invoiceType, {
+          cashAmount: 0,
+          cardAmount: totalReturn,
+        })
+      }
+
+      window.alert(`✓ İade tamamlandı: ${totalReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`)
+      setQuickReturnModal(null)
+      setQuickReturnError(null)
+    } catch (e) {
+      setQuickReturnError('İade hatası: ' + String(e))
+    } finally {
+      setQuickReturnLoading(false)
+    }
+  }
+
   async function completeReturn(forcedLines?: PaymentLine[]) {
     const lines = forcedLines ?? paymentLines
     if (!cart.length || lines.length === 0) return
@@ -1192,7 +1399,8 @@ export default function POSScreen({
       }
 
       const invoiceCustomer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
-      const receiptNo = nextReceiptNo()
+      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      const { receiptNo, orderNo } = nextSaleNumbers(posSettings.terminalNumber)
       const salePaymentType: 'cash' | 'card' | 'mixed' =
         cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
       const saleRow = {
@@ -1233,9 +1441,10 @@ export default function POSScreen({
         })
       }
 
-      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      const terminalLabelIade = posSettings.source?.trim() || 'Kasa'
       void printIfTemplate('iade', buildSaleReceiptData({
         receiptNo,
+        orderNo,
         companyId,
         cashier: { id: cashier.id, fullName: cashier.fullName },
         cart,
@@ -1248,7 +1457,17 @@ export default function POSScreen({
         docDiscountAmount: docDiscountCalc,
         customer: invoiceCustomer,
         terminalId: (await window.electron.store.get('terminal_id') as string | null) ?? '',
-        terminalName: terminalLabel,
+        terminalName: terminalLabelIade,
+        terminalNumber: posSettings.terminalNumber,
+        workplace: {
+          name: posSettings.workplaceName,
+          address: posSettings.workplaceAddress,
+          phone: posSettings.workplacePhone,
+          city: posSettings.workplaceCity,
+          district: posSettings.workplaceDistrict,
+          taxOffice: posSettings.workplaceTaxOffice,
+          taxNo: posSettings.workplaceTaxNo,
+        },
         planName: license?.planName ?? '',
         changeAmount: 0,
         paymentLines: lines.map(l => ({
@@ -1921,6 +2140,53 @@ export default function POSScreen({
             </button>
           </div>
         </div>
+      )}
+
+      {quickReturnModal && (
+        <QuickReturnModal
+          modal={quickReturnModal}
+          loading={quickReturnLoading}
+          error={quickReturnError}
+          onClose={() => { setQuickReturnModal(null); setQuickReturnError(null) }}
+          onSaleNumberChange={saleNumber =>
+            setQuickReturnModal(m => m ? { ...m, saleNumber } : m)
+          }
+          onSearch={saleNumber => void searchReturnableSale(saleNumber)}
+          onSearchLast={() => void searchLastSale()}
+          onBack={() => {
+            setQuickReturnModal(m => m ? { ...m, step: 'search', saleData: undefined } : m)
+            setQuickReturnError(null)
+          }}
+          onConfirm={() => void confirmQuickReturn()}
+          onSelectAll={() => {
+            if (!quickReturnModal.saleData) return
+            const all: Record<number, number> = {}
+            for (const item of quickReturnModal.saleData.Items) {
+              if (item.ReturnableQuantity > 0) all[item.Id] = item.ReturnableQuantity
+            }
+            setQuickReturnModal(m => m ? { ...m, selected: all } : m)
+          }}
+          onClearAll={() => setQuickReturnModal(m => m ? { ...m, selected: {} } : m)}
+          onToggleItem={(itemId, returnableQty, checked) => {
+            setQuickReturnModal(m => {
+              if (!m) return m
+              const next = { ...m.selected }
+              if (checked) next[itemId] = returnableQty
+              else delete next[itemId]
+              return { ...m, selected: next }
+            })
+          }}
+          onQtyChange={(itemId, delta, maxQty) => {
+            setQuickReturnModal(m => {
+              if (!m) return m
+              const cur = m.selected[itemId] ?? 0
+              const next = delta < 0
+                ? Math.max(1, cur - 1)
+                : Math.min(maxQty, cur + 1)
+              return { ...m, selected: { ...m.selected, [itemId]: next } }
+            })
+          }}
+        />
       )}
 
       {errorPopup && (
@@ -2776,9 +3042,16 @@ export default function POSScreen({
 
                 {menuOpen === 'belge' && [
                   { icon: '↩️', label: 'İade Al', disabled: false },
+                  { icon: '⚡', label: 'Hızlı İade', disabled: !pavoSettings },
                 ].map((item, i, arr) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} last={i === arr.length - 1}
                     onClick={() => {
+                      if (item.label === 'Hızlı İade') {
+                        setQuickReturnModal({ step: 'search', saleNumber: '', selected: {} })
+                        setQuickReturnError(null)
+                        setMenuOpen(null)
+                        return
+                      }
                       setReturnMode(true)
                       clearCart()
                       setSelectedCustomer(null)

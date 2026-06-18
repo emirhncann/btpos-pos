@@ -177,6 +177,14 @@ export const api = {
       customerDisplay:     d.customer_display == null ? true : Boolean(d.customer_display),
       printBehavior:       parseApiPrintBehavior(d.print_behavior),
       defaultTemplateIds:  parseApiDefaultTemplateIds(d.default_template_ids),
+      terminalNumber:    d.terminal_number != null ? String(d.terminal_number) : null,
+      workplaceName:      d.workplace_name ?? null,
+      workplaceAddress:   d.workplace_address ?? null,
+      workplacePhone:     d.workplace_phone ?? null,
+      workplaceCity:      d.workplace_city ?? null,
+      workplaceDistrict:  d.workplace_district ?? null,
+      workplaceTaxOffice: d.workplace_tax_office ?? null,
+      workplaceTaxNo:     d.workplace_tax_no ?? null,
     }
   },
 

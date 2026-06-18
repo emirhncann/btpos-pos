@@ -322,6 +322,15 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'print_behavior', 'print_behavior TEXT DEFAULT NULL')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
+  const workplaceCols = [
+    'terminal_number', 'workplace_name', 'workplace_address',
+    'workplace_phone', 'workplace_city', 'workplace_district',
+    'workplace_tax_office', 'workplace_tax_no',
+  ] as const
+  for (const col of workplaceCols) {
+    addColumnIfMissing(sqlite, 'pos_settings_cache', col, `${col} TEXT`)
+    addColumnIfMissing(sqlite, 'pos_settings_temp', col, `${col} TEXT`)
+  }
   try {
     sqlite.exec(`ALTER TABLE pos_settings_cache ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
   } catch {

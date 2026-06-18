@@ -188,6 +188,14 @@ export const posSettingsCache = sqliteTable('pos_settings_cache', {
   customerDisplay:      integer('customer_display', { mode: 'boolean' }).default(true),
   printBehavior:        text('print_behavior'),
   defaultTemplateIds:   text('default_template_ids'),
+  terminalNumber:       text('terminal_number'),
+  workplaceName:        text('workplace_name'),
+  workplaceAddress:     text('workplace_address'),
+  workplacePhone:       text('workplace_phone'),
+  workplaceCity:        text('workplace_city'),
+  workplaceDistrict:    text('workplace_district'),
+  workplaceTaxOffice:   text('workplace_tax_office'),
+  workplaceTaxNo:       text('workplace_tax_no'),
 })
 
 // Kasanın aldığı komutların lokal geçmişi
@@ -318,4 +326,12 @@ export const posSettingsTemp = sqliteTable('pos_settings_temp', {
   customerDisplay:      integer('customer_display', { mode: 'boolean' }).default(true),
   printBehavior:        text('print_behavior'),
   defaultTemplateIds:   text('default_template_ids'),
+  terminalNumber:       text('terminal_number'),
+  workplaceName:        text('workplace_name'),
+  workplaceAddress:     text('workplace_address'),
+  workplacePhone:       text('workplace_phone'),
+  workplaceCity:        text('workplace_city'),
+  workplaceDistrict:    text('workplace_district'),
+  workplaceTaxOffice:   text('workplace_tax_office'),
+  workplaceTaxNo:       text('workplace_tax_no'),
 })

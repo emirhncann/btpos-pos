@@ -99,8 +99,19 @@ export function mapSaleItemsForColumns(
   })
 }
 
+export interface SaleReceiptWorkplace {
+  name?:       string | null
+  address?:    string | null
+  phone?:      string | null
+  city?:       string | null
+  district?:   string | null
+  taxOffice?:  string | null
+  taxNo?:      string | null
+}
+
 export interface SaleReceiptInput {
   receiptNo:             string
+  orderNo?:              string
   companyId:             string
   cashier:               { id: string; fullName: string }
   cart:                  SaleReceiptCartItem[]
@@ -114,6 +125,8 @@ export interface SaleReceiptInput {
   customer?:             SaleReceiptCustomer | null
   terminalId?:           string
   terminalName?:         string
+  terminalNumber?:       string | null
+  workplace?:            SaleReceiptWorkplace
   planName?:             string
   createdAt?:            string
   changeAmount?:         number
@@ -188,6 +201,7 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
     },
     sales: {
       receipt_no:           input.receiptNo,
+      order_no:             input.orderNo ?? input.receiptNo,
       created_at:           createdAt,
       gross_amount:         grossAmount,
       subtotal_amount:      lineSubtotal,
@@ -227,8 +241,18 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
       full_name:    input.cashier.fullName,
       cashier_code: input.cashier.id,
     },
+    workplaces: {
+      name:       input.workplace?.name ?? '',
+      address:    input.workplace?.address ?? '',
+      phone:      input.workplace?.phone ?? '',
+      city:       input.workplace?.city ?? '',
+      district:   input.workplace?.district ?? '',
+      tax_office: input.workplace?.taxOffice ?? '',
+      tax_no:     input.workplace?.taxNo ?? '',
+    },
     terminals: {
-      name: input.terminalName ?? '',
+      name:             input.terminalName ?? '',
+      terminal_number:  input.terminalNumber ?? '',
     },
     activation: {
       terminal_id: input.terminalId ?? '',
@@ -505,3 +529,30 @@ export function parseTemplateSchema(raw: unknown): TemplateBlock[] {
   }
   return []
 }
+
+export interface TemplateVariableDef {
+  key:  string
+  desc: string
+}
+
+export interface TemplateVariableGroup {
+  label:   string
+  trigger: string
+  vars:    TemplateVariableDef[]
+}
+
+/** Şablon editörü — değişken havuzu */
+export const TEMPLATE_VARIABLE_GROUPS: TemplateVariableGroup[] = [
+  {
+    label: 'Şube',
+    trigger: 'all',
+    vars: [
+      { key: 'workplaces.name',           desc: 'Şube Adı' },
+      { key: 'workplaces.address',        desc: 'Şube Adresi' },
+      { key: 'workplaces.phone',          desc: 'Şube Telefonu' },
+      { key: 'workplaces.tax_office',     desc: 'Vergi Dairesi' },
+      { key: 'workplaces.tax_no',         desc: 'VKN/TCKN' },
+      { key: 'terminals.terminal_number', desc: 'Kasa Numarası' },
+    ],
+  },
+]

@@ -64,6 +64,36 @@ function taxGroupCode(vatRate: number): string {
   return TAX_GROUP[vatRate] ?? `KDV${vatRate}`
 }
 
+/** Fiş altına OrderNo barkodu — Pavo BottomPrintableItems */
+export function buildOrderNoBottomPrintItems(
+  orderNo: string,
+  printWidth: '58mm' | '80mm',
+): Array<{
+  type:         string
+  barcodeData:  string
+  alignment:    string
+  barcodeType:  string
+  showText:     boolean
+  fontSize:     number
+  height:       number
+  width:        number
+}> {
+  const width = printWidth === '58mm' ? 280 : 384
+  const height = printWidth === '58mm' ? 150 : 200
+  return [
+    {
+      type:        'dBarcode',
+      barcodeData: orderNo,
+      alignment:   'center',
+      barcodeType: 'Code128',
+      showText:    true,
+      fontSize:    25.0,
+      height,
+      width,
+    },
+  ]
+}
+
 function pavoBaseUrl(settings: PavoSettings): string {
   return `http://${settings.ipAddress}:${settings.port}`
 }
@@ -233,6 +263,7 @@ export async function pavoCompleteSale(
         PrintCustomerReceiptCopy: false,
         PrintMerchantReceipt: true,
       },
+      BottomPrintableItems: buildOrderNoBottomPrintItems(orderNo, settings.printWidth),
       ...(customerParty ? { CustomerParty: customerParty } : {}),
     },
   }
@@ -242,5 +273,176 @@ export async function pavoCompleteSale(
     return parsePavoResult(data)
   } catch (e) {
     return { success: false, provider: 'pavo', message: String(e), raw: {} }
+  }
+}
+
+export interface PavoReturnableSaleItem {
+  Id:                 number
+  ProductName:        string
+  Quantity:           number
+  ReturnableQuantity: number
+  UnitPrice:          number
+  TotalPrice:         number
+}
+
+export interface PavoReturnableSale {
+  Id:           number
+  SaleNumber:   string
+  CustomerInfo: { CustomerType?: number; CompanyName?: string } | null
+  Items:        PavoReturnableSaleItem[]
+  Payments:     Array<{
+    Mediator:         number
+    Amount:           number
+    ReturnableAmount: number
+    PaymentId:        number
+  }>
+}
+
+function pavoErrorMessage(data: Record<string, unknown>, fallback: string): string {
+  return String(data.ErrorMessage ?? data.Message ?? fallback)
+}
+
+function extractPavoSale(data: Record<string, unknown>): Record<string, unknown> | null {
+  if (data.Sale && typeof data.Sale === 'object') {
+    return data.Sale as Record<string, unknown>
+  }
+  const inner = data.Data as Record<string, unknown> | undefined
+  if (inner?.Sale && typeof inner.Sale === 'object') {
+    return inner.Sale as Record<string, unknown>
+  }
+  if (inner && typeof inner === 'object' && inner.Id != null) {
+    return inner
+  }
+  return null
+}
+
+function pavoSaleItems(sale: Record<string, unknown>): unknown[] {
+  const raw = sale.AddedSaleItems ?? sale.Items
+  return Array.isArray(raw) ? raw : []
+}
+
+function pavoSalePayments(sale: Record<string, unknown>): unknown[] {
+  const raw = sale.AddedPayments ?? sale.Payments
+  return Array.isArray(raw) ? raw : []
+}
+
+function mapPavoReturnableItems(sale: Record<string, unknown>): PavoReturnableSaleItem[] {
+  return pavoSaleItems(sale).map((row) => {
+    const item = row as Record<string, unknown>
+    const qty = Number(item.ItemQuantity ?? item.Quantity ?? 0)
+    return {
+      Id:                 Number(item.Id ?? item.RelatedSaleItemId ?? 0),
+      ProductName:        String(item.Name ?? item.ProductName ?? ''),
+      Quantity:           qty,
+      ReturnableQuantity: Number(item.ReturnableQuantity ?? qty),
+      UnitPrice:          Number(item.UnitPriceAmount ?? item.UnitPrice ?? 0),
+      TotalPrice:         Number(item.TotalPriceAmount ?? item.TotalPrice ?? 0),
+    }
+  })
+}
+
+function mapPavoReturnablePayments(sale: Record<string, unknown>) {
+  return pavoSalePayments(sale)
+    .filter(p => Number((p as Record<string, unknown>).StatusId ?? 2) === 2)
+    .map((row) => {
+      const p = row as Record<string, unknown>
+      const amount = Number(p.PaymentAmount ?? p.Amount ?? 0)
+      return {
+        Mediator:         Number(p.PaymentMediatorId ?? p.Mediator ?? 0),
+        Amount:           amount,
+        ReturnableAmount: Number(p.RemainingVoidableAmount ?? p.ReturnableAmount ?? amount),
+        PaymentId:        Number(p.Id ?? p.PaymentId ?? 0),
+      }
+    })
+}
+
+async function syncPavoSequenceFromResponse(data: Record<string, unknown>): Promise<void> {
+  const handle = data.TransactionHandle as Record<string, unknown> | undefined
+  const pavoSeq = Number(handle?.TransactionSequence)
+  if (Number.isFinite(pavoSeq)) {
+    await window.electron.db.updatePavoSequence(pavoSeq)
+  }
+}
+
+export async function pavoGetReturnableSale(
+  settings: PavoSettings,
+  seq: number,
+  saleNumber: string,
+): Promise<{ success: boolean; message?: string; data?: PavoReturnableSale }> {
+  try {
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/GetReturnableSale`, {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        SaleNumber: saleNumber,
+        ReceiptImageEnabled: false,
+        ReceiptJsonEnabled:  false,
+        ReceiptTextEnabled:  false,
+      },
+    })
+
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Satış bulunamadı') }
+    }
+
+    const sale = extractPavoSale(data)
+    if (!sale) {
+      return { success: false, message: 'Satış bulunamadı' }
+    }
+
+    const items = mapPavoReturnableItems(sale)
+    const payments = mapPavoReturnablePayments(sale)
+
+    const customerRaw = sale.CustomerInfo ?? sale.CustomerParty
+    const customerInfo = customerRaw && typeof customerRaw === 'object'
+      ? customerRaw as { CustomerType?: number; CompanyName?: string }
+      : null
+
+    return {
+      success: true,
+      data: {
+        Id:           Number(sale.Id ?? 0),
+        SaleNumber:   String(sale.SaleNumber ?? saleNumber),
+        CustomerInfo: customerInfo ?? null,
+        Items:        items,
+        Payments:     payments,
+      },
+    }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoPartialReturn(
+  settings: PavoSettings,
+  seq: number,
+  opts: Record<string, unknown>,
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  try {
+    const printWidth = opts.ReceiptWidth ?? settings.printWidth
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/PartialReturn`, {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        RefererApp:            'BTPOS',
+        RefererAppVersion:     '1.0.0',
+        IntegrationSaleType:   6,
+        ...opts,
+        ReceiptWidth:          printWidth,
+        PrintCustomerReceipt:  opts.PrintCustomerReceipt ?? true,
+        PrintMerchantReceipt:  opts.PrintMerchantReceipt ?? true,
+      },
+    })
+
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'İade başarısız') }
+    }
+
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
   }
 }

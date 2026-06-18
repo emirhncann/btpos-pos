@@ -359,6 +359,51 @@ export function getSales(dateFrom?: string, dateTo?: string) {
   return db.select().from(sales).all()
 }
 
+export interface LastSaleRow {
+  receiptNo:       string
+  pavoSaleNumber:  string | null
+  orderNo:         string | null
+}
+
+/** Son satış — hızlı iade için Pavo satış numarası varsa döner */
+export function getLastSale(): LastSaleRow | null {
+  const db = getDB()
+  const row = db.select().from(sales)
+    .where(eq(sales.isReturn, 0))
+    .orderBy(desc(sales.createdAt))
+    .limit(1)
+    .get()
+
+  if (!row) return null
+
+  let pavoSaleNumber: string | null = null
+  let orderNo: string | null = null
+  if (row.paymentDeviceData) {
+    try {
+      const pd = JSON.parse(row.paymentDeviceData) as Record<string, unknown>
+      const raw = (pd.raw ?? pd) as Record<string, unknown>
+      const data = raw.Data as Record<string, unknown> | undefined
+      const sale = data?.Sale as Record<string, unknown> | undefined
+      const saleNum = data?.SaleNumber ?? sale?.SaleNumber
+      if (saleNum != null && String(saleNum).trim()) {
+        pavoSaleNumber = String(saleNum).trim()
+      }
+      const ord = data?.OrderNo ?? sale?.OrderNo
+      if (ord != null && String(ord).trim()) {
+        orderNo = String(ord).trim()
+      }
+    } catch {
+      // payment_device_data parse hatası — receiptNo kullanılır
+    }
+  }
+
+  return {
+    receiptNo: row.receiptNo,
+    pavoSaleNumber,
+    orderNo,
+  }
+}
+
 export interface CashierRow {
   id:           string
   companyId?:   string
@@ -547,6 +592,14 @@ export interface PosSettingsRow {
   customerDisplay?:     boolean
   printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
   defaultTemplateIds?:  Record<string, string>
+  terminalNumber?:      string | null
+  workplaceName?:       string | null
+  workplaceAddress?:    string | null
+  workplacePhone?:      string | null
+  workplaceCity?:       string | null
+  workplaceDistrict?:   string | null
+  workplaceTaxOffice?:  string | null
+  workplaceTaxNo?:      string | null
 }
 
 export interface PosSettingsAcidRow extends PosSettingsRow {
@@ -716,6 +769,14 @@ export function savePosSettings(settings: PosSettingsRow): void {
     defaultTemplateIds: settings.defaultTemplateIds
       ? JSON.stringify(settings.defaultTemplateIds)
       : null,
+    terminalNumber:      settings.terminalNumber      ?? null,
+    workplaceName:       settings.workplaceName       ?? null,
+    workplaceAddress:    settings.workplaceAddress    ?? null,
+    workplacePhone:      settings.workplacePhone      ?? null,
+    workplaceCity:       settings.workplaceCity       ?? null,
+    workplaceDistrict:   settings.workplaceDistrict   ?? null,
+    workplaceTaxOffice:  settings.workplaceTaxOffice  ?? null,
+    workplaceTaxNo:      settings.workplaceTaxNo      ?? null,
   }).onConflictDoUpdate({
     target: posSettingsCache.id,
     set: {
@@ -749,6 +810,14 @@ export function savePosSettings(settings: PosSettingsRow): void {
       defaultTemplateIds: settings.defaultTemplateIds
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
+      terminalNumber:      settings.terminalNumber      ?? null,
+      workplaceName:       settings.workplaceName       ?? null,
+      workplaceAddress:    settings.workplaceAddress    ?? null,
+      workplacePhone:      settings.workplacePhone      ?? null,
+      workplaceCity:       settings.workplaceCity       ?? null,
+      workplaceDistrict:   settings.workplaceDistrict   ?? null,
+      workplaceTaxOffice:  settings.workplaceTaxOffice  ?? null,
+      workplaceTaxNo:      settings.workplaceTaxNo      ?? null,
     },
   }).run()
 }
@@ -757,6 +826,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
   const sqlite = getSqlite()
   const now    = new Date().toISOString()
   const rowId  = settings.cashierId ? `cashier_${settings.cashierId}` : 'local'
+  const isLocal = rowId === 'local'
 
   const txn = sqlite.transaction(() => {
     // 1. Temp'e yaz
@@ -768,7 +838,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
         @duplicateItemAction, @minQtyPerLine,
@@ -776,7 +847,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @maxLineDiscountPct, @maxDocDiscountPct,
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
-        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds
+        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds,
+        @terminalNumber, @workplaceName, @workplaceAddress, @workplacePhone, @workplaceCity, @workplaceDistrict, @workplaceTaxOffice, @workplaceTaxNo
       )
     `).run({
       id:                  rowId,
@@ -811,6 +883,14 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       defaultTemplateIds: settings.defaultTemplateIds
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
+      terminalNumber:     isLocal ? (settings.terminalNumber ?? null) : null,
+      workplaceName:      isLocal ? (settings.workplaceName ?? null) : null,
+      workplaceAddress:   isLocal ? (settings.workplaceAddress ?? null) : null,
+      workplacePhone:     isLocal ? (settings.workplacePhone ?? null) : null,
+      workplaceCity:      isLocal ? (settings.workplaceCity ?? null) : null,
+      workplaceDistrict:  isLocal ? (settings.workplaceDistrict ?? null) : null,
+      workplaceTaxOffice: isLocal ? (settings.workplaceTaxOffice ?? null) : null,
+      workplaceTaxNo:     isLocal ? (settings.workplaceTaxNo ?? null) : null,
     })
 
     // 2. Doğrula
@@ -828,7 +908,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       )
       SELECT
         id, cashier_id, show_price, show_code, show_barcode,
@@ -837,7 +918,8 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         max_line_discount_pct, max_doc_discount_pct,
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids
+        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
 
@@ -857,8 +939,36 @@ function normalizeDuplicateAction(v: string | null | undefined): DuplicateItemAc
   return v === 'add_new' ? 'add_new' : 'increase_qty'
 }
 
+export function updatePosWorkplaceTerminalCache(data: Pick<
+  PosSettingsRow,
+  | 'terminalNumber' | 'workplaceName' | 'workplaceAddress' | 'workplacePhone'
+  | 'workplaceCity' | 'workplaceDistrict' | 'workplaceTaxOffice' | 'workplaceTaxNo'
+>): void {
+  const sqlite = getSqlite()
+  sqlite.prepare(`
+    UPDATE pos_settings_cache SET
+      terminal_number = ?, workplace_name = ?, workplace_address = ?,
+      workplace_phone = ?, workplace_city = ?, workplace_district = ?,
+      workplace_tax_office = ?, workplace_tax_no = ?
+    WHERE id = 'local'
+  `).run(
+    data.terminalNumber ?? null,
+    data.workplaceName ?? null,
+    data.workplaceAddress ?? null,
+    data.workplacePhone ?? null,
+    data.workplaceCity ?? null,
+    data.workplaceDistrict ?? null,
+    data.workplaceTaxOffice ?? null,
+    data.workplaceTaxNo ?? null,
+  )
+}
+
 export function getPosSettings(cashierId?: string | null): PosSettingsRow {
   const db = getDB()
+
+  const localRow = db.select().from(posSettingsCache)
+    .where(eq(posSettingsCache.id, 'local'))
+    .get()
 
   // Önce kasiyer bazlı ara
   let row: typeof posSettingsCache.$inferSelect | undefined = undefined
@@ -872,10 +982,10 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
 
   // Kasiyer ayarı yoksa kasa default'una düş
   if (!row) {
-    row = db.select().from(posSettingsCache)
-      .where(eq(posSettingsCache.id, 'local'))
-      .get()
+    row = localRow
   }
+
+  const wp = localRow ?? row
 
   return {
     showPrice:            row?.showPrice            ?? true,
@@ -903,6 +1013,14 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     customerDisplay:      row?.customerDisplay ?? true,
     printBehavior:        parsePrintBehaviorField(row?.printBehavior),
     defaultTemplateIds: parseDefaultTemplateIdsField(row?.defaultTemplateIds),
+    terminalNumber:    wp?.terminalNumber     ?? null,
+    workplaceName:      wp?.workplaceName       ?? null,
+    workplaceAddress:   wp?.workplaceAddress    ?? null,
+    workplacePhone:     wp?.workplacePhone      ?? null,
+    workplaceCity:      wp?.workplaceCity       ?? null,
+    workplaceDistrict:  wp?.workplaceDistrict   ?? null,
+    workplaceTaxOffice: wp?.workplaceTaxOffice  ?? null,
+    workplaceTaxNo:     wp?.workplaceTaxNo      ?? null,
   }
 }
 
