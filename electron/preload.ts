@@ -140,6 +140,17 @@ contextBridge.exposeInMainWorld('electron', {
     getAllUnitMappings: (companyId: string) => ipcRenderer.invoke('db:getAllUnitMappings', companyId),
     getLastSale: () => ipcRenderer.invoke('db:getLastSale'),
   },
+  cart: {
+    saveDraft: (opts: {
+      companyId:  string
+      terminalId: string
+      cashierId:  string
+      cart:       unknown[]
+      customer:   unknown | null
+    }) => ipcRenderer.invoke('cart:saveDraft', opts),
+    loadDraft: () => ipcRenderer.invoke('cart:loadDraft'),
+    clearDraft: () => ipcRenderer.invoke('cart:clearDraft'),
+  },
   pavo: {
     getReturnableSale: (opts: { saleNumber: string }) =>
       ipcRenderer.invoke('pavo:getReturnableSale', opts),

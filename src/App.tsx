@@ -172,7 +172,7 @@ export default function App() {
   }, [isOnline, companyId])
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 3500)
+    const timer = setTimeout(() => setShowSplash(false), 5000)
     return () => clearTimeout(timer)
   }, [])
 

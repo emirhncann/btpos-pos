@@ -171,6 +171,21 @@ declare global {
         getAllUnitMappings: (companyId: string) => Promise<unknown[]>
         getLastSale: () => Promise<{ receiptNo: string; pavoSaleNumber: string | null; orderNo: string | null } | null>
       }
+      cart: {
+        saveDraft(opts: {
+          companyId:  string
+          terminalId: string
+          cashierId:  string
+          cart:       unknown[]
+          customer:   unknown | null
+        }): Promise<{ success: boolean }>
+        loadDraft(): Promise<{
+          cart:     unknown[]
+          customer: unknown | null
+          savedAt:  string
+        } | null>
+        clearDraft(): Promise<{ success: boolean }>
+      }
       pavo: {
         getReturnableSale(opts: { saleNumber: string }): Promise<{
           success: boolean
@@ -361,6 +376,7 @@ declare global {
 
   interface CartItem {
     id:             string
+    productId:      string
     code:           string
     name:           string
     category:       string

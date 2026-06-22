@@ -106,6 +106,11 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId),
     getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale")
   },
+  cart: {
+    saveDraft: (opts) => electron.ipcRenderer.invoke("cart:saveDraft", opts),
+    loadDraft: () => electron.ipcRenderer.invoke("cart:loadDraft"),
+    clearDraft: () => electron.ipcRenderer.invoke("cart:clearDraft")
+  },
   pavo: {
     getReturnableSale: (opts) => electron.ipcRenderer.invoke("pavo:getReturnableSale", opts),
     partialReturn: (opts) => electron.ipcRenderer.invoke("pavo:partialReturn", opts)

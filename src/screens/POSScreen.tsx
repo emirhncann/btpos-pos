@@ -138,7 +138,16 @@ function normalizeHeldCartItem(i: CartItem): CartItem {
   const discountRate = i.discountRate ?? 0
   const discountAmount = i.discountAmount ?? 0
   const netTotal = i.netTotal ?? calcLineDiscount(lineTotal, discountRate, discountAmount)
-  return { ...i, lineTotal, discountRate, discountAmount, netTotal, barcode: i.barcode ?? '' }
+  return {
+    ...i,
+    id:        i.id ?? crypto.randomUUID(),
+    productId: i.productId ?? i.id,
+    lineTotal,
+    discountRate,
+    discountAmount,
+    netTotal,
+    barcode: i.barcode ?? '',
+  }
 }
 
 function localISOString(): string {
@@ -148,35 +157,74 @@ function localISOString(): string {
   return local.toISOString().replace('Z', '').slice(0, 26)
 }
 
-function PopupItem({ icon, label, disabled, danger, last, onClick }: {
-  icon: string
-  label: string
+const MENU_ACCENT: Record<'islemler' | 'belge' | 'musteri', string> = {
+  islemler: '#1565C0',
+  belge:    '#7C3AED',
+  musteri:  '#2E7D32',
+}
+
+function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout = 'row', onClick }: {
+  icon:     string
+  label:    string
   disabled?: boolean
-  danger?: boolean
-  last?: boolean
+  danger?:  boolean
+  accent?:  string
+  layout?:  'row' | 'stack'
   onClick?: () => void
 }) {
+  const tone = danger ? '#DC2626' : accent
+  const stacked = layout === 'stack'
   return (
-    <div
-      onClick={disabled ? undefined : onClick}
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
       style={{
-        padding: '13px 20px', cursor: disabled ? 'default' : 'pointer',
-        fontSize: 13, fontWeight: 400,
-        borderBottom: last ? 'none' : '0.5px solid #F3F4F6',
-        color: danger ? '#DC2626' : disabled ? '#D1D5DB' : '#374151',
-        display: 'flex', alignItems: 'center', gap: 10,
-        opacity: disabled ? 0.5 : 1, userSelect: 'none',
+        display: 'flex',
+        flexDirection: stacked ? 'column' : 'row',
+        alignItems: stacked ? 'center' : 'center',
+        justifyContent: stacked ? 'center' : 'flex-start',
+        gap: stacked ? 10 : 14,
+        width: '100%',
+        minHeight: stacked ? 100 : 60,
+        padding: stacked ? '16px 12px' : '14px 16px',
+        borderRadius: 14,
+        border: `1.5px solid ${disabled ? '#E5E7EB' : danger ? '#FECACA' : `${tone}30`}`,
+        background: disabled ? '#F9FAFB' : danger ? '#FFF5F5' : '#FFFFFF',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        textAlign: stacked ? 'center' as const : 'left' as const,
+        boxShadow: disabled ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
       }}
-      onMouseEnter={e => {
-        if (!disabled)
-          (e.currentTarget as HTMLDivElement).style.background = danger ? '#FFF5F5' : '#F9FAFB'
-      }}
-      onMouseLeave={e => {
-        (e.currentTarget as HTMLDivElement).style.background = 'white'
+    >
+      <span style={{
+        width: stacked ? 52 : 46,
+        height: stacked ? 52 : 46,
+        borderRadius: 12,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: stacked ? 26 : 22,
+        flexShrink: 0,
+        background: disabled ? '#F3F4F6' : danger ? '#FEE2E2' : `${tone}12`,
       }}>
-      <span>{icon}</span>
-      <span>{label}</span>
-    </div>
+        {icon}
+      </span>
+      <span style={{
+        fontSize: stacked ? 14 : 15,
+        fontWeight: 600,
+        color: disabled ? '#9CA3AF' : danger ? '#DC2626' : '#1F2937',
+        lineHeight: 1.35,
+        flex: stacked ? undefined : 1,
+      }}>
+        {label}
+      </span>
+      {!disabled && !stacked && (
+        <span style={{ fontSize: 18, color: '#D1D5DB', flexShrink: 0 }}>›</span>
+      )}
+    </button>
   )
 }
 
@@ -251,7 +299,6 @@ export default function POSScreen({
   const [sendEmail, setSendEmail] = useState(false)
   const [smsPhone, setSmsPhone] = useState('')
   const [mailAddr, setMailAddr] = useState('')
-  const [smsModalOpen, setSmsModalOpen] = useState(false)
   const [mailModalOpen, setMailModalOpen] = useState(false)
   const [smsPhonePanelOpen, setSmsPhonePanelOpen] = useState(false)
   const [smsPhoneDraft, setSmsPhoneDraft] = useState('')
@@ -263,6 +310,11 @@ export default function POSScreen({
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
   const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
+  const [draftModal, setDraftModal] = useState<{
+    cart:     CartItem[]
+    customer: CustomerRow | null
+    savedAt:  string
+  } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
@@ -292,7 +344,6 @@ export default function POSScreen({
       setSendEmail(false)
       setSmsPhone('')
       setMailAddr('')
-      setSmsModalOpen(false)
       setMailModalOpen(false)
       setSmsPhonePanelOpen(false)
       setSmsPhoneDraft('')
@@ -389,6 +440,20 @@ export default function POSScreen({
 
   useEffect(() => { loadHeld() }, [loadHeld])
   useEffect(() => { searchRef.current?.focus() }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const draft = await window.electron.cart.loadDraft()
+        if (!draft || !Array.isArray(draft.cart) || draft.cart.length === 0) return
+        setDraftModal({
+          cart:     draft.cart as CartItem[],
+          customer: draft.customer as CustomerRow | null,
+          savedAt:  new Date(draft.savedAt).toLocaleString('tr-TR'),
+        })
+      } catch { /* taslak yok */ }
+    })()
+  }, [])
 
   useEffect(() => {
     void (async () => {
@@ -536,24 +601,25 @@ export default function POSScreen({
 
       if (cancelMode) {
         setCart(prev => {
-          const ex = prev.find(c => c.id === byBarcode.id)
-          if (!ex) {
+          const exIdx = prev.findIndex(c => (c.productId ?? c.id) === byBarcode.id)
+          if (exIdx === -1) {
             showCancelWarning('Bu ürün sepette yok.')
             return prev
           }
+          const ex = prev[exIdx]
           if (ex.quantity < qty) {
             showCancelWarning(`Sepette ${ex.quantity} adet var, ${qty} adet düşülemez.`)
             return prev
           }
           if (ex.quantity === qty) {
-            const next = prev.filter(c => c.id !== byBarcode.id)
+            const next = prev.filter((_, i) => i !== exIdx)
             if (next.length === 0) setCancelMode(false)
             return next
           }
           const newQty = ex.quantity - qty
           const newTotal = parseFloat((newQty * ex.price).toFixed(2))
           const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
-          return prev.map(c => c.id === byBarcode.id
+          return prev.map((c, i) => i === exIdx
             ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
             : c
           )
@@ -568,27 +634,38 @@ export default function POSScreen({
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
     setCart(prev => {
-      const ex = prev.find(c => c.id === product.id)
       const dup = posSettings.duplicateItemAction ?? 'increase_qty'
 
-      if (ex && dup === 'increase_qty') {
-        const newQty = ex.quantity + qty
-        const newTotal = parseFloat((newQty * ex.price).toFixed(2))
-        const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
-        return prev.map(c => c.id === product.id
-          ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
-          : c
-        )
+      if (dup === 'increase_qty') {
+        const exIdx = prev.findIndex(c => c.productId === product.id)
+        if (exIdx !== -1) {
+          const ex = prev[exIdx]
+          const newQty = ex.quantity + qty
+          const newTotal = parseFloat((newQty * ex.price).toFixed(2))
+          const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
+          return prev.map((c, i) => i === exIdx
+            ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
+            : c
+          )
+        }
       }
 
       const lineTotal = parseFloat((product.price * qty).toFixed(2))
       return [...prev, {
-        id: product.id, code: product.code ?? '', name: product.name,
-        category: product.category ?? '', price: product.price,
-        vatRate: product.vatRate ?? 18, unit: product.unit ?? 'Adet',
-        quantity: qty, lineTotal,
-        discountRate: 0, discountAmount: 0, netTotal: lineTotal,
-        barcode: product.barcode ?? '',
+        id:          crypto.randomUUID(),
+        productId:   product.id,
+        code:        product.code ?? '',
+        name:        product.name,
+        category:    product.category ?? '',
+        price:       product.price,
+        vatRate:     product.vatRate ?? 18,
+        unit:        product.unit ?? 'Adet',
+        quantity:    qty,
+        lineTotal,
+        discountRate:   0,
+        discountAmount: 0,
+        netTotal:    lineTotal,
+        barcode:     product.barcode ?? '',
       }]
     })
   }
@@ -638,12 +715,35 @@ export default function POSScreen({
     setLineDiscountTarget(null)
   }
 
-  function removeFromCart(id: string) {
+  function cancelQtyFromNumBuf(): number {
+    if (!numBuf) return 1
+    const n = parseInt(numBuf.replace(',', '.').split('.')[0] ?? '', 10)
+    return Math.max(1, n || 1)
+  }
+
+  function cancelOneFromCart(id: string) {
+    const qty = cancelQtyFromNumBuf()
+
     setCart(prev => {
+      const item = prev.find(c => c.id === id)
+      if (!item) return prev
+
+      if (item.quantity > qty) {
+        return prev.map(c => {
+          if (c.id !== id) return c
+          const newQty   = c.quantity - qty
+          const newTotal = parseFloat((newQty * c.price).toFixed(2))
+          const netTotal = calcLineDiscount(newTotal, c.discountRate, c.discountAmount)
+          return { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
+        })
+      }
+
       const next = prev.filter(c => c.id !== id)
-      if (cancelMode && next.length === 0) setCancelMode(false)
+      if (next.length === 0) setCancelMode(false)
       return next
     })
+
+    setNumBuf('')
   }
 
   function clearCart() {
@@ -662,7 +762,32 @@ export default function POSScreen({
     setLineDiscountTarget(null)
     applyCustomerSelection(null)
     setMenuOpen(null)
+    void window.electron.cart.clearDraft().catch(() => {})
   }
+
+  useEffect(() => {
+    if (!companyId) return
+
+    if (cart.length === 0) {
+      void window.electron.cart.clearDraft().catch(() => {})
+      return
+    }
+
+    const timer = setTimeout(() => {
+      void (async () => {
+        const terminalId = await window.electron.store.get('terminal_id') as string | null
+        await window.electron.cart.saveDraft({
+          companyId,
+          terminalId: terminalId ?? '',
+          cashierId:  cashier.id,
+          cart,
+          customer: selectedCustomer ?? null,
+        })
+      })()
+    }, 3000)
+
+    return () => clearTimeout(timer)
+  }, [cart, selectedCustomer, companyId, cashier.id])
 
   function handleNumKey(k: string) {
     if (paymentMode && activeMethod !== null) {
@@ -1103,7 +1228,7 @@ export default function POSScreen({
         customerCode: selectedCustomer?.code ?? null,
       }
       const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
-        productId: c.id,
+        productId: c.productId,
         productCode: c.code,
         productName: c.name,
         quantity: c.quantity,
@@ -1422,7 +1547,7 @@ export default function POSScreen({
       }
 
       const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
-        productId: c.id,
+        productId: c.productId,
         productCode: c.code,
         productName: c.name,
         quantity: -Math.abs(c.quantity),
@@ -1848,296 +1973,280 @@ export default function POSScreen({
       )}
 
       {smsPhonePanelOpen && pavoSettings && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 700 }}>SMS bildirimi</div>
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>5 ile başlayan 10 hane — 555 555 55 55</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSmsPhonePanelOpen(false)}
-                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
-              >✕</button>
-            </div>
-
-            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 26, fontWeight: 700, color: '#1565C0', letterSpacing: 0.5, minHeight: 52, wordBreak: 'break-all' }}>
-              {formatTrMobileSmsDisplay(smsPhoneDraft)}
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
-                const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
-                const disabledFirst = firstEmpty && k !== '5'
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    disabled={disabledFirst}
-                    onClick={() => {
-                      if (disabledFirst) return
-                      setSmsPhoneDraft(prev => appendTrMobileSmsDigit(prev, k))
-                    }}
-                    style={{
-                      padding: '14px 0',
-                      borderRadius: 10,
-                      border: '1px solid #E5E7EB',
-                      background: '#F9FAFB',
-                      fontSize: 18,
-                      fontWeight: 600,
-                      color: '#111827',
-                      cursor: disabledFirst ? 'default' : 'pointer',
-                      opacity: disabledFirst ? 0.38 : 1,
-                    }}
-                  >{k}</button>
-                )
-              })}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
-              <button
-                type="button"
-                onClick={() => setSmsPhoneDraft('')}
-                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
-              >C</button>
-              <button
-                type="button"
-                disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
-                onClick={() => {
-                  setSmsPhoneDraft(prev => appendTrMobileSmsDigit(prev, '0'))
-                }}
-                style={{
-                  padding: '14px 0',
-                  borderRadius: 10,
-                  border: '1px solid #E5E7EB',
-                  background: '#F9FAFB',
-                  fontSize: 18,
-                  fontWeight: 600,
-                  color: '#111827',
-                  cursor: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 'default' : 'pointer',
-                  opacity: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 0.38 : 1,
-                }}
-              >0</button>
-              <button
-                type="button"
-                onClick={() => setSmsPhoneDraft(prev => prev.replace(/\D/g, '').slice(0, -1))}
-                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: '#FEF2F2', fontSize: 18, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}
-              >⌫</button>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setSendSms(false)
-                  setSmsPhone('')
-                  setSmsPhoneDraft('')
-                  setSmsPhonePanelOpen(false)
-                }}
-                style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
-              >
-                SMS Kapat
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const digits = normalizeTrMobileForSms(smsPhoneDraft)
-                  if (digits.length !== SMS_MOBILE_LEN) {
-                    showErrorPopup('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın veya SMS Kapat kullanın.')
-                    return
-                  }
-                  setSmsPhone(digits)
-                  setSendSms(true)
-                  setSmsPhonePanelOpen(false)
-                }}
-                style={{ padding: '14px', borderRadius: 10, border: 'none', background: '#1565C0', fontSize: 15, fontWeight: 700, color: 'white', cursor: 'pointer' }}
-              >
-                Tamam
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {smsModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.45)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setSmsModalOpen(false)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 16, padding: 20,
-              width: 'min(320px, 90vw)',
-              display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-            {/* Başlık */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>SMS Numarası</div>
-                {selectedCustomer && (
-                  <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{selectedCustomer.name}</div>
-                )}
-              </div>
-              <button type="button" onClick={() => setSmsModalOpen(false)}
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16, padding: '20px 16px 24px',
+            width: '75vw', maxWidth: 380,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>SMS Bildirimi</div>
+              <button type="button" onClick={() => setSmsPhonePanelOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
-                  cursor: 'pointer', color: '#9CA3AF', padding: 0, lineHeight: 1 }}>✕</button>
+                  color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* Gösterge */}
-            <div style={{ textAlign: 'center', padding: '14px 0',
-              fontSize: 26, fontWeight: 600, color: '#E65100', letterSpacing: 2,
-              minHeight: 56, borderTop: '1px solid #F3F4F6',
-              borderBottom: '1px solid #F3F4F6' }}>
-              {smsPhone || '—'}
+            <div
+              role="switch"
+              aria-checked={sendSms}
+              tabIndex={0}
+              onClick={() => {
+                setSendSms(v => {
+                  const next = !v
+                  if (next) setSmsPhoneDraft(smsPhone)
+                  return next
+                })
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setSendSms(v => {
+                    const next = !v
+                    if (next) setSmsPhoneDraft(smsPhone)
+                    return next
+                  })
+                }
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', borderRadius: 10, background: '#F9FAFB',
+                border: '1px solid #E5E7EB', marginBottom: 14, cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>SMS Gönder</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF' }}>5 ile başlayan 10 hane</div>
+              </div>
+              <div
+                aria-hidden
+                style={{
+                  width: 44, height: 24, borderRadius: 12, flexShrink: 0,
+                  background: sendSms ? '#1565C0' : '#D1D5DB',
+                  position: 'relative', transition: 'background 0.2s',
+                  pointerEvents: 'none',
+                }}>
+                <div style={{
+                  position: 'absolute', top: 3,
+                  left: sendSms ? 23 : 3,
+                  width: 18, height: 18, borderRadius: 9,
+                  background: 'white', transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </div>
             </div>
 
-            {/* Numpad */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 'clamp(6px,1.5vw,12px)' }}>
-              {['7','8','9','4','5','6','1','2','3','+','0','⌫'].map(k => (
-                <button key={k} type="button"
-                  onMouseDown={e => {
-                    e.preventDefault()
-                    if (k === '⌫') setSmsPhone(p => p.slice(0,-1))
-                    else setSmsPhone(p => p + k)
-                  }}
-                  style={{
-                    padding: 'clamp(12px,2.5vw,18px) 0',
-                    fontSize: k === '⌫' ? 'clamp(16px,2vw,22px)' : 'clamp(18px,2.5vw,26px)',
-                    fontWeight: 500, borderRadius: 10,
-                    border: '1px solid #E5E7EB', background: 'white', cursor: 'pointer',
-                    color: k === '⌫' ? '#EF4444' : '#111',
-                  }}>
-                  {k}
-                </button>
-              ))}
-            </div>
+            {sendSms && (
+              <>
+                <div style={{
+                  textAlign: 'center', padding: '10px 0 14px',
+                  fontSize: 26, fontWeight: 700, color: '#1565C0',
+                  letterSpacing: 0.5, minHeight: 52,
+                }}>
+                  {formatTrMobileSmsDisplay(smsPhoneDraft)}
+                </div>
 
-            {/* C + Uygula */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 'clamp(6px,1.5vw,12px)' }}>
-              <button type="button" onMouseDown={e => { e.preventDefault(); setSmsPhone('') }}
-                style={{ padding: 'clamp(12px,2vw,16px) 0', fontSize: 'clamp(13px,1.6vw,16px)',
-                  fontWeight: 500, borderRadius: 10, border: '1px solid #E5E7EB',
-                  background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
-                C
-              </button>
-              <button type="button" onClick={() => { setSendSms(true); setSmsModalOpen(false) }}
-                style={{ padding: 'clamp(12px,2vw,16px) 0', fontSize: 'clamp(13px,1.6vw,16px)',
-                  fontWeight: 600, borderRadius: 10, border: 'none',
-                  background: '#E65100', color: 'white', cursor: 'pointer' }}>
-                Uygula
-              </button>
-            </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
+                    const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
+                    const disabledFirst = firstEmpty && k !== '5'
+                    return (
+                      <button key={k} type="button" disabled={disabledFirst}
+                        onClick={() => {
+                          if (!disabledFirst) setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, k))
+                        }}
+                        style={{ padding: '14px 0', borderRadius: 10,
+                          border: '1px solid #E5E7EB', background: '#F9FAFB',
+                          fontSize: 18, fontWeight: 600, color: '#111827',
+                          cursor: disabledFirst ? 'default' : 'pointer',
+                          opacity: disabledFirst ? 0.38 : 1 }}>
+                        {k}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
+                  <button type="button" onClick={() => setSmsPhoneDraft('')}
+                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                    C
+                  </button>
+                  <button type="button"
+                    disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
+                    onClick={() => setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, '0'))}
+                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827',
+                      cursor: 'pointer' }}>
+                    0
+                  </button>
+                  <button type="button"
+                    onClick={() => setSmsPhoneDraft(p => p.replace(/\D/g, '').slice(0, -1))}
+                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: '#FEF2F2', fontSize: 18, fontWeight: 600,
+                      color: '#EF4444', cursor: 'pointer' }}>
+                    ⌫
+                  </button>
+                </div>
+              </>
+            )}
+
+            <button type="button"
+              onClick={() => {
+                const norm = normalizeTrMobileForSms(smsPhoneDraft)
+                if (sendSms && norm.length !== SMS_MOBILE_LEN) {
+                  showErrorPopup('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın.')
+                  return
+                }
+                setSmsPhone(sendSms ? norm : '')
+                setSmsPhonePanelOpen(false)
+              }}
+              style={{ width: '100%', marginTop: 14, padding: '12px', borderRadius: 10,
+                border: 'none', background: '#1565C0', color: 'white',
+                fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              Tamam
+            </button>
           </div>
         </div>
       )}
 
       {mailModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.45)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setMailModalOpen(false)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 16, padding: 20,
-              width: 'min(480px, 94vw)',
-              display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-            {/* Başlık */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>E-Posta Adresi</div>
-                {selectedCustomer && (
-                  <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{selectedCustomer.name}</div>
-                )}
-              </div>
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16, padding: '20px 16px 24px',
+            width: '75vw', maxWidth: 380,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Mail Bildirimi</div>
               <button type="button" onClick={() => setMailModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
-                  cursor: 'pointer', color: '#9CA3AF', padding: 0, lineHeight: 1 }}>✕</button>
+                  color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
             </div>
 
-            {/* Gösterge */}
-            <div style={{ textAlign: 'center', padding: '12px 0',
-              fontSize: 18, fontWeight: 600, color: '#E65100', letterSpacing: 1,
-              minHeight: 48, borderTop: '1px solid #F3F4F6',
-              borderBottom: '1px solid #F3F4F6', wordBreak: 'break-all' }}>
-              {mailAddr || '—'}
-            </div>
-
-            {/* Sayı satırı */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10,1fr)', gap: 'clamp(3px,1%,8px)' }}>
-              {['1','2','3','4','5','6','7','8','9','0'].map(k => (
-                <button key={k} type="button"
-                  onMouseDown={e => { e.preventDefault(); setMailAddr(p => p + k) }}
-                  style={{ padding: 'clamp(8px,2vw,14px) 0',
-                    fontSize: 'clamp(13px,1.6vw,18px)', fontWeight: 500,
-                    borderRadius: 8, border: '1px solid #E5E7EB',
-                    background: '#F9FAFB', cursor: 'pointer', color: '#111' }}>
-                  {k}
-                </button>
-              ))}
-            </div>
-
-            {/* QWERTY satır 1–3 */}
-            {[
-              ['q','w','e','r','t','y','u','i','o','p'],
-              ['a','s','d','f','g','h','j','k','l'],
-              ['z','x','c','v','b','n','m'],
-            ].map((row, ri) => (
-              <div key={ri} style={{
-                display: 'grid',
-                gridTemplateColumns: `repeat(${row.length},1fr)`,
-                gap: 'clamp(3px,1%,8px)',
-                padding: ri === 1 ? '0 5%' : ri === 2 ? '0 10%' : '0',
-              }}>
-                {row.map(k => (
-                  <button key={k} type="button"
-                    onMouseDown={e => { e.preventDefault(); setMailAddr(p => p + k) }}
-                    style={{ padding: 'clamp(10px,2.5vw,18px) 0',
-                      fontSize: 'clamp(14px,1.8vw,20px)', fontWeight: 500,
-                      borderRadius: 8, border: '1px solid #E5E7EB',
-                      background: 'white', cursor: 'pointer', color: '#111' }}>
-                    {k}
-                  </button>
-                ))}
+            <div
+              role="switch"
+              aria-checked={sendEmail}
+              tabIndex={0}
+              onClick={() => setSendEmail(v => !v)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setSendEmail(v => !v)
+                }
+              }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '12px 14px', borderRadius: 10, background: '#F9FAFB',
+                border: '1px solid #E5E7EB', marginBottom: 14, cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Mail Gönder</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF' }}>ornek@mail.com</div>
               </div>
-            ))}
-
-            {/* Alt satır: @ . _ Temizle ⌫ */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 2fr 1fr', gap: 'clamp(3px,1%,8px)' }}>
-              {[
-                { k: '@',       style: { border: '1.5px solid #E65100', background: '#FFF3E0', color: '#E65100', fontWeight: 600 } },
-                { k: '.' },
-                { k: '_' },
-                { k: 'C', label: 'Temizle', style: { background: '#F9FAFB' } },
-                { k: '⌫',       style: { color: '#EF4444', background: '#F9FAFB' } },
-              ].map(({ k, label, style: s }) => (
-                <button key={k} type="button"
-                  onMouseDown={e => {
-                    e.preventDefault()
-                    if (k === 'C') setMailAddr('')
-                    else if (k === '⌫') setMailAddr(p => p.slice(0,-1))
-                    else setMailAddr(p => p + k)
-                  }}
-                  style={Object.assign(
-                    {
-                      padding: 'clamp(10px,2.5vw,18px) 0',
-                      fontSize: 'clamp(13px,1.6vw,18px)', fontWeight: 500,
-                      borderRadius: 8, border: '1px solid #E5E7EB',
-                      background: 'white', cursor: 'pointer', color: '#111',
-                    },
-                    s ?? {},
-                  )}>
-                  {label ?? k}
-                </button>
-              ))}
+              <div
+                aria-hidden
+                style={{
+                  width: 44, height: 24, borderRadius: 12, flexShrink: 0,
+                  background: sendEmail ? '#1565C0' : '#D1D5DB',
+                  position: 'relative', transition: 'background 0.2s',
+                  pointerEvents: 'none',
+                }}>
+                <div style={{
+                  position: 'absolute', top: 3,
+                  left: sendEmail ? 23 : 3,
+                  width: 18, height: 18, borderRadius: 9,
+                  background: 'white', transition: 'left 0.2s',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }} />
+              </div>
             </div>
 
-            {/* Uygula */}
-            <button type="button" onClick={() => { setSendEmail(true); setMailModalOpen(false) }}
-              style={{ width: '100%', padding: 'clamp(12px,2vw,18px) 0',
-                fontSize: 'clamp(14px,1.6vw,18px)', fontWeight: 600,
-                borderRadius: 10, border: 'none',
-                background: '#E65100', color: 'white', cursor: 'pointer' }}>
-              Uygula
+            {sendEmail && (
+              <div style={{ marginBottom: 14 }}>
+                <input
+                  type="email"
+                  value={mailAddr}
+                  onChange={e => setMailAddr(e.target.value)}
+                  placeholder="ornek@mail.com"
+                  autoFocus={!touchEnabled}
+                  readOnly={touchEnabled}
+                  onFocus={() => {
+                    if (!touchEnabled) return
+                    openKeyboard({
+                      title: 'E-posta',
+                      initial: mailAddr,
+                      type: 'qwerty',
+                      onConfirm: setMailAddr,
+                    })
+                  }}
+                  style={{ width: '100%', padding: '12px 14px', borderRadius: 10,
+                    border: `1.5px solid ${isValidNotifyEmail(mailAddr) ? '#1565C0' : '#E5E7EB'}`,
+                    fontSize: 14, outline: 'none', boxSizing: 'border-box' as const,
+                    cursor: touchEnabled ? 'default' : 'text' }}
+                />
+              </div>
+            )}
+
+            <button type="button"
+              onClick={() => {
+                if (sendEmail && !isValidNotifyEmail(mailAddr)) {
+                  showErrorPopup('E-posta bildirimi', 'Geçerli bir e-posta adresi girin.')
+                  return
+                }
+                setMailModalOpen(false)
+              }}
+              style={{ width: '100%', padding: '12px', borderRadius: 10,
+                border: 'none', background: '#1565C0', color: 'white',
+                fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+              Tamam
             </button>
+          </div>
+        </div>
+      )}
+
+      {draftModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 10002,
+          background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'white', borderRadius: 16, padding: 24,
+            width: 'min(380px, 92vw)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+            <div style={{ fontSize: 16, fontWeight: 700 }}>📂 Tamamlanmamış Satış</div>
+
+            <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>
+              <strong>{draftModal.savedAt}</strong> tarihinde kaydedilmiş
+              tamamlanmamış bir satış var.<br />
+              <strong>{draftModal.cart.length} kalem</strong>
+              {draftModal.customer ? `, müşteri: ${draftModal.customer.name}` : ''}.
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button"
+                onClick={() => {
+                  setCart(draftModal.cart.map(normalizeHeldCartItem))
+                  if (draftModal.customer) applyCustomerSelection(draftModal.customer)
+                  setDraftModal(null)
+                }}
+                style={{ flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+                  background: '#1565C0', color: 'white', fontWeight: 700,
+                  fontSize: 14, cursor: 'pointer' }}>
+                Geri Yükle
+              </button>
+              <button type="button"
+                onClick={() => {
+                  void window.electron.cart.clearDraft()
+                  setDraftModal(null)
+                }}
+                style={{ flex: 1, padding: '12px', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#F9FAFB',
+                  color: '#6B7280', fontSize: 14, cursor: 'pointer' }}>
+                Sil
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2476,7 +2585,7 @@ export default function POSScreen({
               <span style={{ fontSize: 11, color: '#9ca3af' }}>
                 {cart.length > 0 ? `${cart.length} kalem` : 'Boş'}
               </span>
-              {returnMode ? (
+              {returnMode && (
                 <button
                   type="button"
                   onClick={() => { setReturnMode(false); clearCart() }}
@@ -2484,28 +2593,6 @@ export default function POSScreen({
                     cursor: 'pointer', color: '#9CA3AF', fontSize: 12 }}>
                   İptal
                 </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setCancelMode(p => !p)}
-                    style={{
-                      fontSize: 11, color: cancelMode ? '#1565C0' : '#dc2626',
-                      background: 'none', border: 'none', cursor: 'pointer',
-                    }}
-                  >
-                    {cancelMode ? '← Geri' : '✕ İptal'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearCart}
-                    style={{
-                      fontSize: 11, background: '#dc2626', color: 'white',
-                      border: 'none', borderRadius: 8, padding: '4px 12px',
-                      cursor: 'pointer', fontWeight: 500,
-                    }}
-                  >Temizle</button>
-                </>
               )}
             </div>
           </div>
@@ -2513,7 +2600,7 @@ export default function POSScreen({
           {/* İptal ipucu */}
           {cancelMode && (
             <div style={{ background: 'rgba(198,40,40,0.12)', color: '#b71c1c', fontSize: 10, fontWeight: 600, textAlign: 'center', padding: 4, flexShrink: 0 }}>
-              Satıra tıklayarak kaldırın · barkod ile adet düşürün
+              Satıra tıklayın — 1 adet düşer · numpad ile miktar seçip tıklayın
             </div>
           )}
 
@@ -2606,7 +2693,7 @@ export default function POSScreen({
                 <div
                   key={item.id}
                   onClick={() => {
-                    if (cancelMode) removeFromCart(item.id)
+                    if (cancelMode) cancelOneFromCart(item.id)
                   }}
                   style={{
                     display: 'grid',
@@ -2845,64 +2932,45 @@ export default function POSScreen({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
 
             {/* SMS */}
-            <div style={{ borderRadius: 8, border: '1.5px solid',
-              borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
-              background: sendSms ? '#E8F5E9' : '#FAFAFA',
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              gap: 4, padding: '6% 4%', overflow: 'hidden' }}>
-              <button type="button" onClick={() => setSendSms(p => !p)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer',
-                  padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ width: 28, height: 16, borderRadius: 8,
-                  background: sendSms ? '#2E7D32' : '#D1D5DB',
-                  position: 'relative', flexShrink: 0 }}>
-                  <div style={{ position: 'absolute', top: 2,
-                    left: sendSms ? 14 : 2, width: 12, height: 12,
-                    borderRadius: '50%', background: 'white' }} />
-                </div>
-                <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
-              </button>
-              <button type="button" onClick={() => setSmsModalOpen(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer',
-                  padding: 0, width: '100%', textAlign: 'center' as const }}>
-                <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                  color: sendSms ? '#2E7D32' : '#9CA3AF',
-                  whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', display: 'block' }}>
-                  {smsPhone || 'SMS'}
-                </span>
-              </button>
-            </div>
+            <button type="button"
+              onClick={() => {
+                if (!pavoSettings) return
+                setSmsPhoneDraft(smsPhone)
+                setSmsPhonePanelOpen(true)
+              }}
+              style={{ borderRadius: 8, border: '1.5px solid',
+                borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
+                background: sendSms ? '#E8F5E9' : '#FAFAFA',
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 4, padding: '6% 4%', overflow: 'hidden',
+                cursor: pavoSettings ? 'pointer' : 'default',
+                opacity: pavoSettings ? 1 : 0.55 }}>
+              <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
+                color: sendSms ? '#2E7D32' : '#9CA3AF',
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
+                {smsPhone ? formatTrMobileSmsDisplay(smsPhone) : 'SMS'}
+              </span>
+            </button>
 
             {/* Mail */}
-            <div style={{ borderRadius: 8, border: '1.5px solid',
-              borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
-              background: sendEmail ? '#EFF6FF' : '#FAFAFA',
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              gap: 4, padding: '6% 4%', overflow: 'hidden' }}>
-              <button type="button" onClick={() => setSendEmail(p => !p)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer',
-                  padding: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ width: 28, height: 16, borderRadius: 8,
-                  background: sendEmail ? '#1565C0' : '#D1D5DB',
-                  position: 'relative', flexShrink: 0 }}>
-                  <div style={{ position: 'absolute', top: 2,
-                    left: sendEmail ? 14 : 2, width: 12, height: 12,
-                    borderRadius: '50%', background: 'white' }} />
-                </div>
-                <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
-              </button>
-              <button type="button" onClick={() => setMailModalOpen(true)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer',
-                  padding: 0, width: '100%', textAlign: 'center' as const }}>
-                <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                  color: sendEmail ? '#1565C0' : '#9CA3AF',
-                  whiteSpace: 'nowrap', overflow: 'hidden',
-                  textOverflow: 'ellipsis', display: 'block' }}>
-                  {mailAddr || 'Mail'}
-                </span>
-              </button>
-            </div>
+            <button type="button"
+              onClick={() => setMailModalOpen(true)}
+              style={{ borderRadius: 8, border: '1.5px solid',
+                borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
+                background: sendEmail ? '#EFF6FF' : '#FAFAFA',
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 4, padding: '6% 4%', overflow: 'hidden',
+                cursor: 'pointer' }}>
+              <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
+              <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
+                color: sendEmail ? '#1565C0' : '#9CA3AF',
+                whiteSpace: 'nowrap', overflow: 'hidden',
+                textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
+                {mailAddr || 'Mail'}
+              </span>
+            </button>
 
           </div>
 
@@ -2967,21 +3035,64 @@ export default function POSScreen({
             <>
               <div
                 role="presentation"
-                style={{ position: 'fixed', inset: 0, zIndex: 9990 }}
+                style={{ position: 'fixed', inset: 0, zIndex: 9990, background: 'rgba(0,0,0,0.35)' }}
                 onClick={() => setMenuOpen(null)}
               />
-              <div style={{
-                position: 'absolute', top: 0, left: '102%', zIndex: 9991,
-                background: 'white', border: '0.5px solid #E5E7EB',
-                borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
-                minWidth: 240, overflow: 'hidden',
-              }}>
-
-                <div style={{ padding: '12px 20px 8px', fontSize: 11, fontWeight: 600,
-                  color: '#9CA3AF', textTransform: 'uppercase' as const, letterSpacing: '0.5px',
-                  borderBottom: '0.5px solid #F3F4F6' }}>
-                  {{ islemler: 'İşlemler', belge: 'Belge işlemleri', musteri: 'Müşteri işlemleri' }[menuOpen]}
+              <div
+                style={{
+                  position: 'fixed',
+                  top: '50%', left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 9991,
+                  background: 'white',
+                  border: '0.5px solid #E5E7EB',
+                  borderRadius: 20,
+                  boxShadow: '0 12px 48px rgba(0,0,0,0.2)',
+                  width: 'min(92vw, 520px)',
+                  maxHeight: '85vh',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{
+                  padding: '18px 20px 16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  borderBottom: '1px solid #F3F4F6',
+                  flexShrink: 0,
+                  background: `${MENU_ACCENT[menuOpen]}08`,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>
+                      {{ islemler: 'İşlemler', belge: 'Belge İşlemleri', musteri: 'Müşteri İşlemleri' }[menuOpen]}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 3 }}>
+                      {{ islemler: 'Tahsilat, ödeme ve belge yönetimi', belge: 'İade işlemleri', musteri: 'Müşteri seçimi ve düzenleme' }[menuOpen]}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(null)}
+                    style={{
+                      width: 40, height: 40, borderRadius: 10,
+                      border: '1px solid #E5E7EB', background: 'white',
+                      fontSize: 18, color: '#6B7280', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >✕</button>
                 </div>
+
+                <div style={{
+                  padding: 16,
+                  overflowY: 'auto',
+                  display: 'grid',
+                  gridTemplateColumns: menuOpen === 'islemler' ? '1fr' : 'repeat(2, 1fr)',
+                  gap: 10,
+                }}>
 
                 {menuOpen === 'islemler' && [
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
@@ -2991,8 +3102,8 @@ export default function POSScreen({
                   { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
                   { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                   { icon: '✕', label: cancelMode ? 'Ürün iptal (kapat)' : 'Ürün iptal', disabled: cart.length === 0 },
-                ].map((item, i, arr) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} last={i === arr.length - 1}
+                ].map((item, i) => (
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler}
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label.startsWith('Cari tah')) {
@@ -3043,8 +3154,8 @@ export default function POSScreen({
                 {menuOpen === 'belge' && [
                   { icon: '↩️', label: 'İade Al', disabled: false },
                   { icon: '⚡', label: 'Hızlı İade', disabled: !pavoSettings },
-                ].map((item, i, arr) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} last={i === arr.length - 1}
+                ].map((item, i) => (
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
                     onClick={() => {
                       if (item.label === 'Hızlı İade') {
                         setQuickReturnModal({ step: 'search', saleNumber: '', selected: {} })
@@ -3071,8 +3182,8 @@ export default function POSScreen({
                     disabled: !selectedCustomer,
                     danger: true,
                   },
-                ].map((item, i, arr) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} last={i === arr.length - 1}
+                ].map((item, i) => (
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.musteri} layout="stack"
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label === 'Müşteri seç') { void loadCustomers(); setMenuOpen(null); return }
@@ -3085,6 +3196,7 @@ export default function POSScreen({
                     }} />
                 ))}
 
+                </div>
               </div>
             </>
           )}

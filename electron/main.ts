@@ -327,6 +327,18 @@ app.whenReady().then(async () => {
     }
   }
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cart_draft (
+      id          TEXT PRIMARY KEY DEFAULT 'current',
+      company_id  TEXT,
+      terminal_id TEXT,
+      cashier_id  TEXT,
+      cart        TEXT NOT NULL DEFAULT '[]',
+      customer    TEXT,
+      saved_at    TEXT
+    )
+  `)
+
   registerPrinterIpc(ipcMain, db)
   registerTemplatesIpc(ipcMain, db)
 
@@ -676,6 +688,49 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getLastSale', async () => {
     const { getLastSale } = await import('../db/operations')
     return getLastSale()
+  })
+
+  ipcMain.handle('cart:saveDraft', (_e, opts: {
+    companyId:  string
+    terminalId: string
+    cashierId:  string
+    cart:       unknown[]
+    customer:   unknown | null
+  }) => {
+    db.prepare(`
+      INSERT INTO cart_draft (id, company_id, terminal_id, cashier_id, cart, customer, saved_at)
+      VALUES ('current', ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        company_id  = excluded.company_id,
+        terminal_id = excluded.terminal_id,
+        cashier_id  = excluded.cashier_id,
+        cart        = excluded.cart,
+        customer    = excluded.customer,
+        saved_at    = excluded.saved_at
+    `).run(
+      opts.companyId,
+      opts.terminalId,
+      opts.cashierId,
+      JSON.stringify(opts.cart),
+      opts.customer ? JSON.stringify(opts.customer) : null,
+      new Date().toISOString(),
+    )
+    return { success: true as const }
+  })
+
+  ipcMain.handle('cart:loadDraft', () => {
+    const row = db.prepare('SELECT * FROM cart_draft WHERE id = ?').get('current') as Record<string, unknown> | undefined
+    if (!row) return null
+    return {
+      cart:     row.cart     ? JSON.parse(row.cart as string)     : [],
+      customer: row.customer ? JSON.parse(row.customer as string) : null,
+      savedAt:  row.saved_at as string,
+    }
+  })
+
+  ipcMain.handle('cart:clearDraft', () => {
+    db.prepare('DELETE FROM cart_draft WHERE id = ?').run('current')
+    return { success: true as const }
   })
 
   ipcMain.handle('pavo:getReturnableSale', async (_e, opts: { saleNumber: string }) => {
