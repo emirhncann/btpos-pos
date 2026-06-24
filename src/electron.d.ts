@@ -191,30 +191,52 @@ declare global {
           success: boolean
           message?: string
           data?: {
-            Id: number
-            SaleNumber: string
+            Id:           number
+            SaleNumber:   string
             CustomerInfo: { CustomerType?: number; CompanyName?: string } | null
             Items: Array<{
-              Id: number
-              ProductName: string
-              Quantity: number
+              Id:                 number
+              ProductName:        string
+              Quantity:           number
               ReturnableQuantity: number
-              UnitPrice: number
-              TotalPrice: number
+              UnitPrice:          number
+              TotalPrice:         number
+              VatRate?:           number
+              UnitName?:          string
+              TaxGroupId?:        number
             }>
             Payments: Array<{
-              Mediator: number
-              Amount: number
+              Mediator:         number
+              Amount:           number
               ReturnableAmount: number
-              PaymentId: number
+              PaymentId:        number
             }>
           }
         }>
-        partialReturn(opts: Record<string, unknown>): Promise<{
-          success: boolean
-          message?: string
-          data?: unknown
-        }>
+        partialReturn(opts: {
+          relatedSaleId:  number
+          addedSaleItems: Array<{
+            relatedSaleItemId: number
+            name:              string
+            itemQuantity:      number
+            unitPriceAmount:   number
+            grossPriceAmount:  number
+            totalPriceAmount:  number
+            vatAmount:         number
+            vatRate:           number
+            unitName:          string
+            taxGroupId:        number
+            convertedTotal:    number
+            returnAmount:      number
+          }>
+          paymentInformations: Array<{
+            mediator:          number
+            amount:            number
+            isVoid:            boolean
+            relatedPaymentId?: number
+          }>
+          receiptWidth?: '58mm' | '80mm'
+        }): Promise<{ success: boolean; message?: string; data?: unknown }>
       }
     }
   }

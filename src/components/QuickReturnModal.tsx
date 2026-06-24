@@ -7,6 +7,9 @@ export interface ReturnableSaleItem {
   ReturnableQuantity: number
   UnitPrice:          number
   TotalPrice:         number
+  VatRate?:           number
+  UnitName?:          string
+  TaxGroupId?:        number
 }
 
 export interface ReturnablePayment {

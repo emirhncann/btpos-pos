@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, sendReturnInvoice, resolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
-import { pavoCompleteSale, pavoGetReturnableSale, pavoPartialReturn, type PavoSettings } from '../lib/pavoService'
+import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
@@ -14,7 +14,72 @@ import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 import { buildSaleReceiptData } from '../lib/templateEngine'
 import { nextOrderNo } from '../lib/orderNo'
-import QuickReturnModal, { type QuickReturnModalState, type ReturnableSale } from '../components/QuickReturnModal'
+import QuickReturnModal, {
+  type QuickReturnModalState,
+  type ReturnablePayment,
+  type ReturnableSale,
+  type ReturnableSaleItem,
+} from '../components/QuickReturnModal'
+
+function mapRawReturnableSale(data: {
+  Id:           unknown
+  SaleNumber:   unknown
+  CustomerInfo: unknown
+  Items:        unknown[]
+  Payments:     unknown[]
+}): ReturnableSale {
+  const items: ReturnableSaleItem[] = data.Items.map((row) => {
+    const item = row as Record<string, unknown>
+    // main process zaten map etmiş olabilir
+    if (item.ProductName != null && item.ReturnableQuantity != null) {
+      return item as unknown as ReturnableSaleItem
+    }
+    const qty = Number(item.ItemQuantity ?? item.Quantity ?? 0)
+    return {
+      Id:                 Number(item.Id ?? item.RelatedSaleItemId ?? item.SaleItemId ?? 0),
+      ProductName:        String(item.Name ?? item.ProductName ?? ''),
+      Quantity:           qty,
+      ReturnableQuantity: Number(
+        item.ReturnableQuantity ??
+        item.RemainingReturnableQuantity ??
+        item.ReturnableItemQuantity ??
+        item.RemainingQuantity ??
+        qty,
+      ),
+      UnitPrice:          Number(item.UnitPriceAmount ?? item.UnitPrice ?? item.GrossPriceAmount ?? 0),
+      TotalPrice:         Number(item.TotalPriceAmount ?? item.TotalPrice ?? 0),
+      VatRate:            Number(item.VATRate ?? item.VatRate ?? 20),
+      UnitName:           String(item.UnitName ?? item.Unit ?? 'Adet'),
+      TaxGroupId:         Number(item.TaxGroupId ?? 74),
+    }
+  })
+
+  const payments: ReturnablePayment[] = data.Payments
+    .filter(p => Number((p as Record<string, unknown>).StatusId ?? 2) === 2)
+    .map((row) => {
+      const p = row as Record<string, unknown>
+      const amount = Number(p.PaymentAmount ?? p.Amount ?? 0)
+      return {
+        Mediator:         Number(p.PaymentMediatorId ?? p.Mediator ?? 0),
+        Amount:           amount,
+        ReturnableAmount: Number(p.RemainingVoidableAmount ?? p.ReturnableAmount ?? amount),
+        PaymentId:        Number(p.Id ?? p.PaymentId ?? 0),
+      }
+    })
+
+  const customerRaw = data.CustomerInfo
+  const customerInfo = customerRaw && typeof customerRaw === 'object'
+    ? customerRaw as { CustomerType?: number; CompanyName?: string }
+    : null
+
+  return {
+    Id:           Number(data.Id ?? 0),
+    SaleNumber:   String(data.SaleNumber ?? ''),
+    CustomerInfo: customerInfo,
+    Items:        items,
+    Payments:     payments,
+  }
+}
 
 const CART_GRID = '84px 1fr 72px 82px'
 
@@ -1341,23 +1406,18 @@ export default function POSScreen({
 
   async function searchReturnableSale(saleNumber: string) {
     if (!saleNumber.trim()) return
-    if (!pavoSettings) {
-      setQuickReturnError('Pavo cihazı yapılandırılmamış.')
-      return
-    }
     setQuickReturnLoading(true)
     setQuickReturnError(null)
 
     try {
-      const seq = await window.electron.db.nextPavoSequence()
-      const res = await pavoGetReturnableSale(pavoSettings, seq, saleNumber.trim())
+      const res = await window.electron.pavo.getReturnableSale({ saleNumber: saleNumber.trim() })
 
       if (!res.success || !res.data) {
         setQuickReturnError(res.message ?? 'Satış bulunamadı')
         return
       }
 
-      const sale = res.data as ReturnableSale
+      const sale = mapRawReturnableSale(res.data)
 
       const customerType = sale.CustomerInfo?.CustomerType
       if (customerType === 2 || sale.CustomerInfo?.CompanyName) {
@@ -1402,7 +1462,7 @@ export default function POSScreen({
   }
 
   async function confirmQuickReturn() {
-    if (!quickReturnModal?.saleData || !pavoSettings) return
+    if (!quickReturnModal?.saleData) return
     const sale     = quickReturnModal.saleData
     const selected = quickReturnModal.selected
 
@@ -1410,42 +1470,43 @@ export default function POSScreen({
     setQuickReturnError(null)
 
     try {
-      const addedItems = sale.Items
-        .filter(item => (selected[item.Id] ?? 0) > 0)
-        .map(item => {
-          const qty = selected[item.Id]
+      const addedSaleItems = sale.Items
+        .filter((item: ReturnableSaleItem) => (selected[item.Id] ?? 0) > 0)
+        .map((item: ReturnableSaleItem) => {
+          const qty       = selected[item.Id]
+          const total     = Math.round(qty * item.UnitPrice * 100) / 100
+          const vatAmount = Math.round(total * (item.VatRate ?? 20) / (100 + (item.VatRate ?? 20)) * 100) / 100
           return {
-            RelatedSaleItemId: item.Id,
-            ItemQuantity:      qty,
-            UnitPriceAmount:   item.UnitPrice,
-            TotalPriceAmount:  Math.round(qty * item.UnitPrice * 100) / 100,
+            relatedSaleItemId: item.Id,
+            name:              item.ProductName,
+            itemQuantity:      qty,
+            unitPriceAmount:   item.UnitPrice,
+            grossPriceAmount:  item.UnitPrice,
+            totalPriceAmount:  total,
+            vatAmount,
+            vatRate:           item.VatRate ?? 20,
+            unitName:          item.UnitName ?? 'Adet',
+            taxGroupId:        item.TaxGroupId ?? 74,
+            convertedTotal:    total,
+            returnAmount:      total,
           }
         })
 
-      const totalReturn = addedItems.reduce((s, i) => s + i.TotalPriceAmount, 0)
+      const totalReturn = addedSaleItems.reduce((s, i) => s + i.totalPriceAmount, 0)
 
-      const returnablePayments = sale.Payments.filter(p => p.ReturnableAmount > 0)
-      const returnablePayTotal = returnablePayments.reduce((s, p) => s + p.ReturnableAmount, 0)
+      const paymentInformations = sale.Payments
+        .filter((p: ReturnablePayment) => p.ReturnableAmount > 0)
+        .map((p: ReturnablePayment) => ({
+          mediator: p.Mediator,
+          amount:   Math.min(totalReturn, p.ReturnableAmount),
+          isVoid:   false,
+        }))
 
-      const paymentInformations = returnablePayments.map(p => ({
-        Mediator:         p.Mediator,
-        Amount:           returnablePayments.length === 1
-          ? totalReturn
-          : Math.round(totalReturn * (p.ReturnableAmount / returnablePayTotal) * 100) / 100,
-        IsVoid:           true,
-        RelatedPaymentId: p.PaymentId,
-      }))
-
-      const seq = await window.electron.db.nextPavoSequence()
-      const res = await pavoPartialReturn(pavoSettings, seq, {
-        RelatedSaleId:         sale.Id,
-        AddedSaleItems:        addedItems,
-        PaymentInformations:   paymentInformations,
-        SendPhoneNotification: false,
-        SendEMailNotification: false,
-        ReceiptWidth:          pavoSettings?.printWidth ?? '80mm',
-        PrintCustomerReceipt:  true,
-        PrintMerchantReceipt:  true,
+      const res = await window.electron.pavo.partialReturn({
+        relatedSaleId:       sale.Id,
+        addedSaleItems,
+        paymentInformations,
+        receiptWidth:        pavoSettings?.printWidth,
       })
 
       if (!res.success) {
@@ -1473,8 +1534,8 @@ export default function POSScreen({
       }
 
       const items = sale.Items
-        .filter(item => (selected[item.Id] ?? 0) > 0)
-        .map(item => {
+        .filter((item: ReturnableSaleItem) => (selected[item.Id] ?? 0) > 0)
+        .map((item: ReturnableSaleItem) => {
           const qty = selected[item.Id] ?? 0
           const lineTotal = Math.round(qty * item.UnitPrice * 100) / 100
           return {
@@ -1482,7 +1543,7 @@ export default function POSScreen({
             productName:    item.ProductName,
             quantity:       -qty,
             unitPrice:      item.UnitPrice,
-            vatRate:        20,
+            vatRate:        item.VatRate ?? 20,
             discountRate:   0,
             discountAmount: 0,
             lineTotal,
@@ -1492,11 +1553,28 @@ export default function POSScreen({
       const saleId = await window.electron.db.saveSale(saleRow, items, undefined)
 
       if (companyId) {
-        const invoiceCustomer = await resolveTorbaCustomer(companyId)
-        void sendReturnInvoice(companyId, saleId, invoiceCustomer, invoiceType, {
-          cashAmount: 0,
-          cardAmount: totalReturn,
-        })
+        try {
+          const { sendReturnInvoice, resolveTorbaCustomer } = await import('../lib/invoiceSend')
+          const settings = await window.electron.db.getPosSettings()
+          const queueInvoiceType: 'e_archive' | 'paper' =
+            settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
+
+          const torbaCari = await resolveTorbaCustomer(companyId)
+
+          await sendReturnInvoice(
+            companyId,
+            saleId,
+            torbaCari,
+            queueInvoiceType,
+            {
+              cashAmount: 0,
+              cardAmount: totalReturn,
+            },
+          )
+          console.log('[hızlı iade] Logo iade faturası kuyruğa eklendi')
+        } catch (e) {
+          console.warn('[hızlı iade] Logo iade faturası kuyruğa eklenemedi:', e)
+        }
       }
 
       window.alert(`✓ İade tamamlandı: ${totalReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`)
@@ -1560,10 +1638,28 @@ export default function POSScreen({
       })), undefined)
 
       if (companyId) {
-        void sendReturnInvoice(companyId, saleId, invoiceCustomer, invoiceType, {
-          cashAmount: cashAmt,
-          cardAmount: cardAmt,
-        })
+        try {
+          const { sendReturnInvoice, resolveTorbaCustomer } = await import('../lib/invoiceSend')
+          const settings = await window.electron.db.getPosSettings()
+          const queueInvoiceType: 'e_archive' | 'paper' =
+            settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
+
+          const customer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
+
+          await sendReturnInvoice(
+            companyId,
+            saleId,
+            customer,
+            queueInvoiceType,
+            {
+              cashAmount: cashAmt,
+              cardAmount: cardAmt,
+            },
+          )
+          console.log('[normal iade] Logo iade faturası kuyruğa eklendi')
+        } catch (e) {
+          console.warn('[normal iade] Logo iade faturası kuyruğa eklenemedi:', e)
+        }
       }
 
       const terminalLabelIade = posSettings.source?.trim() || 'Kasa'

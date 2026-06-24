@@ -154,7 +154,29 @@ contextBridge.exposeInMainWorld('electron', {
   pavo: {
     getReturnableSale: (opts: { saleNumber: string }) =>
       ipcRenderer.invoke('pavo:getReturnableSale', opts),
-    partialReturn: (opts: Record<string, unknown>) =>
-      ipcRenderer.invoke('pavo:partialReturn', opts),
+    partialReturn: (opts: {
+      relatedSaleId:  number
+      addedSaleItems: Array<{
+        relatedSaleItemId: number
+        name:              string
+        itemQuantity:      number
+        unitPriceAmount:   number
+        grossPriceAmount:  number
+        totalPriceAmount:  number
+        vatAmount:         number
+        vatRate:           number
+        unitName:          string
+        taxGroupId:        number
+        convertedTotal:    number
+        returnAmount:      number
+      }>
+      paymentInformations: Array<{
+        mediator:          number
+        amount:            number
+        isVoid:            boolean
+        relatedPaymentId?: number
+      }>
+      receiptWidth?: '58mm' | '80mm'
+    }) => ipcRenderer.invoke('pavo:partialReturn', opts),
   },
 })

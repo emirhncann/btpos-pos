@@ -2,11 +2,191 @@ import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog, screen } fro
 import { exec } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
+import type Database from 'better-sqlite3'
 import Store from 'electron-store'
 
 import { getDeviceUID, getDeviceInfo } from './device'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
+
+function pavoLocalISOString(): string {
+  const now = new Date()
+  const offset = now.getTimezoneOffset() * 60000
+  const local = new Date(now.getTime() - offset)
+  return local.toISOString().replace('Z', '').slice(0, 26)
+}
+
+function pavoTransactionHandle(serialNo: string, seq: number) {
+  return {
+    SerialNumber:        serialNo,
+    TransactionDate:     pavoLocalISOString(),
+    TransactionSequence: seq,
+    Fingerprint:         'test1',
+  }
+}
+
+function normalizePrintWidth(width: unknown): '58mm' | '80mm' {
+  const raw = String(width ?? '').toLowerCase().trim()
+  if (raw === '58' || raw === '58mm' || raw.includes('58')) return '58mm'
+  return '80mm'
+}
+
+function getPavoPrinterCfg(db: Database.Database): {
+  serial_no:   string
+  ip_address:  string
+  port:        number
+  print_width: '58mm' | '80mm'
+} | undefined {
+  const row = db.prepare(`
+    SELECT serial_no, ip_address, port, print_width FROM payment_device_settings
+    WHERE provider = 'pavo' AND is_active = 1
+    LIMIT 1
+  `).get() as {
+    serial_no?:   string
+    ip_address?:  string
+    port?:        number
+    print_width?: string
+  } | undefined
+  if (!row?.ip_address) return undefined
+  return {
+    serial_no:   row.serial_no ?? '',
+    ip_address:  row.ip_address,
+    port:        row.port ?? 9100,
+    print_width: normalizePrintWidth(row.print_width),
+  }
+}
+
+function pavoBaseUrl(cfg: { ip_address: string; port: number }): string {
+  return `http://${cfg.ip_address}:${cfg.port}`
+}
+
+function pavoReceiptInformation(printWidth: '58mm' | '80mm') {
+  return {
+    ReceiptImageEnabled:      false,
+    ReceiptWidth:             printWidth,
+    PrintCustomerReceipt:     true,
+    PrintCustomerReceiptCopy: false,
+    PrintMerchantReceipt:     true,
+  }
+}
+
+async function pavoPost(url: string, body: object): Promise<Record<string, unknown>> {
+  const postJson = async (payload: object): Promise<Record<string, unknown>> => {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    })
+    const text = await res.text()
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch {
+      const preview = text.trim().slice(0, 160) || '(boş yanıt)'
+      throw new Error(
+        res.ok
+          ? `Pavo JSON yanıtı bekleniyordu: ${preview}`
+          : `Pavo HTTP ${res.status} — ${preview}`,
+      )
+    }
+  }
+
+  const data = await postJson(body)
+
+  // 72/73: zaman toleransı veya sequence uyumsuzluğu — cihazın verdiği handle ile yeniden dene
+  if (data.HasError === true && [72, 73].includes(Number(data.ErrorCode))) {
+    const handle = data.TransactionHandle as Record<string, unknown> | undefined
+    if (handle) {
+      const retryBody = {
+        ...(body as Record<string, unknown>),
+        TransactionHandle: {
+          ...((body as Record<string, unknown>).TransactionHandle as object),
+          TransactionDate:     handle.TransactionDate,
+          TransactionSequence: handle.TransactionSequence,
+        },
+      }
+      const res2 = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(retryBody),
+      })
+      const retryText = await res2.text()
+      try {
+        return JSON.parse(retryText) as Record<string, unknown>
+      } catch {
+        const preview = retryText.trim().slice(0, 160) || '(boş yanıt)'
+        throw new Error(`Pavo yeniden deneme HTTP ${res2.status} — ${preview}`)
+      }
+    }
+  }
+
+  return data
+}
+
+function syncPavoSequence(db: Database.Database, data: Record<string, unknown>): void {
+  const handle = data.TransactionHandle as Record<string, unknown> | undefined
+  const pavoSeq = Number(handle?.TransactionSequence)
+  if (Number.isFinite(pavoSeq)) {
+    db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(pavoSeq)
+  }
+}
+
+function extractPavoSale(data: Record<string, unknown>): Record<string, unknown> | null {
+  if (data.Sale && typeof data.Sale === 'object') {
+    return data.Sale as Record<string, unknown>
+  }
+  const inner = data.Data as Record<string, unknown> | undefined
+  if (inner?.Sale && typeof inner.Sale === 'object') {
+    return inner.Sale as Record<string, unknown>
+  }
+  if (inner && typeof inner === 'object' && inner.Id != null) {
+    return inner
+  }
+  return null
+}
+
+function mapReturnableSaleItems(sale: Record<string, unknown>) {
+  const rawItems = sale.AddedSaleItems ?? sale.Items ?? sale.SaleItems
+  return (Array.isArray(rawItems) ? rawItems : []).map((row) => {
+    const item = row as Record<string, unknown>
+    const qty = Number(item.ItemQuantity ?? item.Quantity ?? 0)
+    const returnableQty = Number(
+      item.ReturnableQuantity ??
+      item.RemainingReturnableQuantity ??
+      item.ReturnableItemQuantity ??
+      item.RemainingQuantity ??
+      qty,
+    )
+    return {
+      Id:                 Number(item.Id ?? item.RelatedSaleItemId ?? item.SaleItemId ?? 0),
+      ProductName:        String(item.Name ?? item.ProductName ?? ''),
+      Quantity:           qty,
+      ReturnableQuantity: returnableQty,
+      UnitPrice:          Number(item.UnitPriceAmount ?? item.UnitPrice ?? item.GrossPriceAmount ?? 0),
+      TotalPrice:         Number(item.TotalPriceAmount ?? item.TotalPrice ?? 0),
+      VatRate:            Number(item.VATRate ?? item.VatRate ?? 20),
+      UnitName:           String(item.UnitName ?? item.Unit ?? 'Adet'),
+      TaxGroupId:         Number(item.TaxGroupId ?? 74),
+    }
+  })
+}
+
+function mapReturnableSalePayments(sale: Record<string, unknown>) {
+  const rawPayments = sale.AddedPayments ?? sale.Payments ?? sale.PaymentInformations
+  return (Array.isArray(rawPayments) ? rawPayments : [])
+    .filter(p => Number((p as Record<string, unknown>).StatusId ?? 2) === 2)
+    .map((row) => {
+      const p = row as Record<string, unknown>
+      const amount = Number(p.PaymentAmount ?? p.Amount ?? 0)
+      return {
+        Mediator:         Number(p.PaymentMediatorId ?? p.Mediator ?? 0),
+        Amount:           amount,
+        ReturnableAmount: Number(
+          p.RemainingVoidableAmount ?? p.ReturnableAmount ?? p.RemainingReturnableAmount ?? amount,
+        ),
+        PaymentId:        Number(p.Id ?? p.PaymentId ?? 0),
+      }
+    })
+}
 
 const store = new Store()
 
@@ -301,17 +481,17 @@ app.whenReady().then(async () => {
 
   const posCols = (db.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string }[]).map(c => c.name)
   if (!posCols.includes('touch_keyboard')) {
-    db.run('ALTER TABLE pos_settings_cache ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
+    db.exec('ALTER TABLE pos_settings_cache ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
   }
   const posTempCols = (db.prepare('PRAGMA table_info(pos_settings_temp)').all() as { name: string }[]).map(c => c.name)
   if (!posTempCols.includes('touch_keyboard')) {
-    db.run('ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
+    db.exec('ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
   }
   if (!posCols.includes('customer_display')) {
-    db.run('ALTER TABLE pos_settings_cache ADD COLUMN customer_display INTEGER DEFAULT 1')
+    db.exec('ALTER TABLE pos_settings_cache ADD COLUMN customer_display INTEGER DEFAULT 1')
   }
   if (!posTempCols.includes('customer_display')) {
-    db.run('ALTER TABLE pos_settings_temp ADD COLUMN customer_display INTEGER DEFAULT 1')
+    db.exec('ALTER TABLE pos_settings_temp ADD COLUMN customer_display INTEGER DEFAULT 1')
   }
   const workplaceCols = [
     'terminal_number', 'workplace_name', 'workplace_address',
@@ -320,10 +500,10 @@ app.whenReady().then(async () => {
   ] as const
   for (const col of workplaceCols) {
     if (!posCols.includes(col)) {
-      db.run(`ALTER TABLE pos_settings_cache ADD COLUMN ${col} TEXT`)
+      db.exec(`ALTER TABLE pos_settings_cache ADD COLUMN ${col} TEXT`)
     }
     if (!posTempCols.includes(col)) {
-      db.run(`ALTER TABLE pos_settings_temp ADD COLUMN ${col} TEXT`)
+      db.exec(`ALTER TABLE pos_settings_temp ADD COLUMN ${col} TEXT`)
     }
   }
 
@@ -734,13 +914,143 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('pavo:getReturnableSale', async (_e, opts: { saleNumber: string }) => {
-    const { pavoGetReturnableSale } = await import('./pavoApi')
-    return pavoGetReturnableSale(opts.saleNumber)
+    try {
+      const printerCfg = getPavoPrinterCfg(db)
+      if (!printerCfg) return { success: false, message: 'Pavo ayarı yok veya cihaz pasif' }
+
+      const seq = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
+      const nextSeq = (seq?.seq ?? 0) + 1
+      db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(nextSeq)
+
+      const body = {
+        TransactionHandle: pavoTransactionHandle(printerCfg.serial_no, nextSeq),
+        Sale: {
+          SaleNumber:          opts.saleNumber,
+          ReceiptImageEnabled: false,
+          ReceiptJsonEnabled:  false,
+          ReceiptTextEnabled:  false,
+        },
+      }
+
+      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/GetReturnableSale`, body)
+      syncPavoSequence(db, data)
+
+      if (data.HasError || data.IsError) {
+        return {
+          success: false,
+          message: String(data.ErrorMessage ?? data.Message ?? 'Satış bulunamadı'),
+        }
+      }
+
+      const sale = extractPavoSale(data)
+      if (!sale) {
+        return { success: false, message: 'Satış bulunamadı' }
+      }
+
+      const customerRaw = sale.CustomerInfo ?? sale.CustomerParty
+      const customerInfo = customerRaw && typeof customerRaw === 'object'
+        ? customerRaw as { CustomerType?: number; CompanyName?: string }
+        : null
+
+      return {
+        success: true,
+        data: {
+          Id:           Number(sale.Id ?? 0),
+          SaleNumber:   String(sale.SaleNumber ?? opts.saleNumber),
+          CustomerInfo: customerInfo ?? null,
+          Items:        mapReturnableSaleItems(sale),
+          Payments:     mapReturnableSalePayments(sale),
+        },
+      }
+    } catch (e) {
+      return { success: false, message: String(e) }
+    }
   })
 
-  ipcMain.handle('pavo:partialReturn', async (_e, opts: Record<string, unknown>) => {
-    const { pavoPartialReturn } = await import('./pavoApi')
-    return pavoPartialReturn(opts)
+  ipcMain.handle('pavo:partialReturn', async (_e, opts: {
+    relatedSaleId:  number
+    addedSaleItems: Array<{
+      relatedSaleItemId: number
+      name:              string
+      itemQuantity:      number
+      unitPriceAmount:   number
+      grossPriceAmount:  number
+      totalPriceAmount:  number
+      vatAmount:         number
+      vatRate:           number
+      unitName:          string
+      taxGroupId:        number
+      convertedTotal:    number
+      returnAmount:      number
+    }>
+    paymentInformations: Array<{
+      mediator:          number
+      amount:            number
+      isVoid:            boolean
+      relatedPaymentId?: number
+    }>
+    receiptWidth?: '58mm' | '80mm'
+  }) => {
+    try {
+      const printerCfg = getPavoPrinterCfg(db)
+      if (!printerCfg) return { success: false, message: 'Pavo ayarı yok veya cihaz pasif' }
+
+      const printWidth = normalizePrintWidth(opts.receiptWidth ?? printerCfg.print_width)
+
+      const seq = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
+      const nextSeq = (seq?.seq ?? 0) + 1
+      db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(nextSeq)
+
+      const body = {
+        TransactionHandle: pavoTransactionHandle(printerCfg.serial_no, nextSeq),
+        Sale: {
+          RefererApp:            'BTPOS',
+          RefererAppVersion:     '1.0.0',
+          RelatedSaleId:         opts.relatedSaleId,
+          SendPhoneNotification: false,
+          SendEMailNotification: false,
+          SkipAmountCash:        true,
+          ReceiptInformation:    pavoReceiptInformation(printWidth),
+          AddedSaleItems: opts.addedSaleItems.map(i => ({
+            RelatedSaleItemId: i.relatedSaleItemId,
+            Name:              i.name,
+            ItemQuantity:      i.itemQuantity,
+            UnitPriceAmount:   i.unitPriceAmount,
+            GrossPriceAmount:  i.grossPriceAmount,
+            TotalPriceAmount:  i.totalPriceAmount,
+            VATAmount:         i.vatAmount,
+            VATRate:           i.vatRate,
+            UnitName:          i.unitName,
+            TaxGroupId:        i.taxGroupId,
+            IsGeneric:         false,
+            ConvertedTotal:    i.convertedTotal,
+            ReturnAmount:      i.returnAmount,
+          })),
+          PaymentInformations: opts.paymentInformations.map(p => ({
+            Mediator:        p.mediator,
+            Amount:          p.amount,
+            CurrencyCode:    'TRY',
+            ExchangeRate:    1.0,
+            IsVoid:          p.isVoid,
+            ...(p.relatedPaymentId ? { RelatedPaymentId: p.relatedPaymentId } : {}),
+          })),
+        },
+      }
+
+      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/PartialReturn`, body)
+      syncPavoSequence(db, data)
+
+      if (data.HasError || data.IsError) {
+        return {
+          success: false,
+          message: String(data.ErrorMessage ?? data.Message ?? 'İade başarısız'),
+        }
+      }
+
+      return { success: true, data }
+    } catch (e) {
+      return { success: false, message: String(e) }
+    }
   })
 })
 
