@@ -11,6 +11,7 @@ import { useConnectionStatus } from './hooks/useConnectionStatus'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
 import { api } from './lib/api'
 import { sendPendingInvoices } from './lib/invoiceSend'
+import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -90,6 +91,11 @@ export default function App() {
   const [cartSettings, setCartSettings] = useState<CartSettings>(DEFAULT_CART_SETTINGS)
   const [showSplash, setShowSplash]     = useState(true)
   const isOnline = useConnectionStatus(30) === 'online'
+  const { processQueue } = useQueueWorker({
+    companyId: companyId ?? '',
+    isOnline:  Boolean(companyId) && isOnline,
+    onToast:   () => {},
+  })
 
   const showMerkezToast = useCallback((msg: string) => {
     setMerkezToast(msg)
@@ -165,11 +171,14 @@ export default function App() {
   useEffect(() => {
     if (!isOnline || !companyId) return
     window.electron.db.getPendingInvoices()
-      .then(pending => {
-        if (pending.length > 0) void sendPendingInvoices(companyId, { silent: true })
+      .then(async pending => {
+        if (pending.length > 0) {
+          await sendPendingInvoices(companyId, { silent: true })
+          scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
+        }
       })
       .catch(() => {})
-  }, [isOnline, companyId])
+  }, [isOnline, companyId, processQueue])
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 5000)

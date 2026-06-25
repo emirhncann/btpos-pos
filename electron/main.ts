@@ -166,6 +166,9 @@ function mapReturnableSaleItems(sale: Record<string, unknown>) {
       VatRate:            Number(item.VATRate ?? item.VatRate ?? 20),
       UnitName:           String(item.UnitName ?? item.Unit ?? 'Adet'),
       TaxGroupId:         Number(item.TaxGroupId ?? 74),
+      ProductCode:        String(item.ProductCode ?? item.Barcode ?? item.Code ?? ''),
+      StockRef:           Number(item.StockRef ?? item.stockRef ?? 0) || undefined,
+      ProductId:          Number(item.ProductId ?? item.productId ?? 0) || undefined,
     }
   })
 }
@@ -758,6 +761,10 @@ app.whenReady().then(async () => {
     const { getSaleItems } = await import('../db/operations')
     return getSaleItems(saleId)
   })
+  ipcMain.handle('db:getSaleByReceiptNo', async (_e, receiptNo: string) => {
+    const { getSaleByReceiptNo } = await import('../db/operations')
+    return getSaleByReceiptNo(receiptNo)
+  })
   ipcMain.handle('db:saveSalePayments', async (_e, payments: unknown) => {
     const { saveSalePayments } = await import('../db/operations')
     saveSalePayments(db, payments as import('../db/operations').SalePaymentRow[])
@@ -778,6 +785,10 @@ app.whenReady().then(async () => {
     const { getProductByCode } = await import('../db/operations')
     return getProductByCode(code)
   })
+  ipcMain.handle('db:getProductByName', async (_e, name: string) => {
+    const { getProductByName } = await import('../db/operations')
+    return getProductByName(name)
+  })
   ipcMain.handle('db:getProductIdByCode', async (_e, code: string) => {
     const { getProductIdByCode } = await import('../db/operations')
     return getProductIdByCode(code)
@@ -794,9 +805,21 @@ app.whenReady().then(async () => {
     type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
     payload: Record<string, unknown>
     label?: string
+    status?: 'pending' | 'pending_dayend'
   }) => {
     const { enqueueOperation } = await import('../db/operations')
     enqueueOperation(params)
+  })
+
+  ipcMain.handle('db:getPendingReturnInvoices', async (_e, companyId: string) => {
+    const { getPendingReturnInvoices } = await import('../db/operations')
+    return getPendingReturnInvoices(companyId)
+  })
+
+  ipcMain.handle('db:markOperationDone', async (_e, id: string) => {
+    const { markOperationDone } = await import('../db/operations')
+    markOperationDone(id)
+    return { success: true as const }
   })
 
   ipcMain.handle('db:getPendingOperations', async (_e, companyId: string) => {
@@ -949,7 +972,12 @@ app.whenReady().then(async () => {
 
       const customerRaw = sale.CustomerInfo ?? sale.CustomerParty
       const customerInfo = customerRaw && typeof customerRaw === 'object'
-        ? customerRaw as { CustomerType?: number; CompanyName?: string }
+        ? customerRaw as {
+            CustomerType?: number
+            CompanyName?: string
+            TaxNumber?:   string
+            FirstName?:   string
+          }
         : null
 
       return {

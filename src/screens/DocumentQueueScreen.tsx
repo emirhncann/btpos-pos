@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-type OpStatus = 'pending' | 'processing' | 'success' | 'failed'
+type OpStatus = 'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
 
 interface OpRow {
   id:          string
@@ -22,17 +22,26 @@ const TYPE_LABEL: Record<string, string> = {
 }
 
 const STATUS_STYLE: Record<OpStatus, { bg: string; color: string; label: string }> = {
-  pending:    { bg: '#FFF3E0', color: '#E65100', label: 'Bekliyor' },
-  processing: { bg: '#E3F2FD', color: '#1565C0', label: 'Gönderiliyor' },
-  success:    { bg: '#E8F5E9', color: '#2E7D32', label: 'Gönderildi' },
-  failed:     { bg: '#FFEBEE', color: '#C62828', label: 'Hata' },
+  pending:        { bg: '#FFF3E0', color: '#E65100', label: 'Bekliyor' },
+  pending_dayend:   { bg: '#FEF2F2', color: '#991B1B', label: 'Gün Sonu Bekliyor' },
+  processing:       { bg: '#E3F2FD', color: '#1565C0', label: 'Gönderiliyor' },
+  success:          { bg: '#E8F5E9', color: '#2E7D32', label: 'Gönderildi' },
+  failed:           { bg: '#FFEBEE', color: '#C62828', label: 'Hata' },
+  done:             { bg: '#F3F4F6', color: '#6B7280', label: 'Tamamlandı' },
 }
 
-export function DocumentQueueScreen({ companyId }: { companyId: string }) {
+export function DocumentQueueScreen({
+  companyId,
+  onAfterEnqueue,
+}: {
+  companyId: string
+  onAfterEnqueue?: () => void
+}) {
   const [ops, setOps]       = useState<OpRow[]>([])
   const [loading, setLoading]   = useState(true)
   const [filter, setFilter]    = useState<OpStatus | 'all'>('all')
   const [retrying, setRetrying]  = useState<string | null>(null)
+  const [sending, setSending]    = useState(false)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -62,14 +71,34 @@ export function DocumentQueueScreen({ companyId }: { companyId: string }) {
     await reload()
   }
 
+  async function handleSendBatchReturn() {
+    setSending(true)
+    try {
+      const { sendBatchReturnInvoice } = await import('../lib/invoiceSend')
+      await sendBatchReturnInvoice(companyId)
+      onAfterEnqueue?.()
+      await reload()
+      window.alert('Toplu iade faturası oluşturuldu ve kuyruğa eklendi.')
+    } catch (e) {
+      window.alert('Hata: ' + String(e))
+    } finally {
+      setSending(false)
+    }
+  }
+
   const filtered = filter === 'all' ? ops : ops.filter(o => o.status === filter)
 
+  const pendingReturns = ops.filter(o =>
+    o.type === 'return_invoice' && o.status === 'pending_dayend',
+  )
+
   const counts = {
-    all:        ops.length,
-    pending:    ops.filter(o => o.status === 'pending').length,
-    processing: ops.filter(o => o.status === 'processing').length,
-    success:    ops.filter(o => o.status === 'success').length,
-    failed:     ops.filter(o => o.status === 'failed').length,
+    all:            ops.length,
+    pending:        ops.filter(o => o.status === 'pending').length,
+    pending_dayend: ops.filter(o => o.status === 'pending_dayend').length,
+    processing:     ops.filter(o => o.status === 'processing').length,
+    success:        ops.filter(o => o.status === 'success').length,
+    failed:         ops.filter(o => o.status === 'failed').length,
   }
 
   return (
@@ -100,6 +129,35 @@ export function DocumentQueueScreen({ companyId }: { companyId: string }) {
           </button>
         ))}
       </div>
+
+      {pendingReturns.length > 0 && (
+        <div style={{
+          padding: '12px 16px', borderRadius: 10,
+          background: '#FEF2F2', border: '1px solid #FECACA',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 12,
+        }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
+              Bekleyen İadeler
+            </div>
+            <div style={{ fontSize: 12, color: '#9CA3AF' }}>
+              {pendingReturns.length} iade — toplu fatura olarak gönderilecek
+            </div>
+          </div>
+          <button type="button"
+            onClick={() => void handleSendBatchReturn()}
+            disabled={sending}
+            style={{
+              padding: '8px 16px', borderRadius: 8, border: 'none',
+              background: '#DC2626', color: 'white', fontWeight: 600,
+              fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer',
+              opacity: sending ? 0.6 : 1,
+            }}>
+            {sending ? 'Gönderiliyor...' : 'Toplu İade Gönder'}
+          </button>
+        </div>
+      )}
 
       {counts.failed > 0 && (
         <div style={{ marginBottom: 12, padding: '8px 14px', background: '#FFF3E0',

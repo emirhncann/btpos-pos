@@ -46,18 +46,36 @@ interface UseQueueWorkerOpts {
   onToast:    (toast: QueueToastPayload) => void
 }
 
-export function useQueueWorker({ companyId, isOnline, onToast }: UseQueueWorkerOpts) {
-  const runningRef = useRef(false)
+interface ProcessQueueOpts {
+  companyId:      string
+  isOnline:       boolean
+  onToast:        (toast: QueueToastPayload) => void
+  includeDayEnd?: boolean
+}
 
-  const processQueue = useCallback(async () => {
-    if (!companyId || !isOnline || runningRef.current) return
-    runningRef.current = true
+let queueRunning = false
 
-    try {
-      const pending = await window.electron.db.getPendingOperations(companyId)
-      if (pending.length === 0) return
+export type ProcessQueueOptions = { includeDayEnd?: boolean }
 
-      for (const op of pending) {
+export async function processOperationQueue({
+  companyId,
+  isOnline,
+  onToast,
+  includeDayEnd,
+}: ProcessQueueOpts): Promise<void> {
+  if (!companyId || !isOnline || queueRunning) return
+  queueRunning = true
+
+  try {
+    const pending = await window.electron.db.getPendingOperations(companyId)
+    const toProcess = pending.filter(op => {
+      if (op.type === 'day_end_invoice') return includeDayEnd === true
+      if (op.type === 'return_invoice') return includeDayEnd === true
+      return true
+    })
+    if (toProcess.length === 0) return
+
+    for (const op of toProcess) {
         await window.electron.db.markOperationProcessing(op.id)
         const payload = JSON.parse(op.payload) as Record<string, unknown>
 
@@ -231,11 +249,26 @@ export function useQueueWorker({ companyId, isOnline, onToast }: UseQueueWorkerO
           await window.electron.db.markOperationFailed(op.id, errMsg)
           onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
         }
-      }
-    } finally {
-      runningRef.current = false
     }
-  }, [companyId, isOnline, onToast])
+  } finally {
+    queueRunning = false
+  }
+}
+
+export function scheduleProcessQueue(
+  processQueue: (opts?: ProcessQueueOptions) => void | Promise<void>,
+  delayMs = 500,
+  opts?: ProcessQueueOptions,
+): void {
+  setTimeout(() => void processQueue(opts), delayMs)
+}
+
+export function useQueueWorker({ companyId, isOnline, onToast }: UseQueueWorkerOpts) {
+  const processQueue = useCallback(
+    (opts?: ProcessQueueOptions) =>
+      processOperationQueue({ companyId, isOnline, onToast, includeDayEnd: opts?.includeDayEnd }),
+    [companyId, isOnline, onToast],
+  )
 
   useEffect(() => {
     if (isOnline) void processQueue()

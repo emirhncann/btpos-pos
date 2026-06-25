@@ -141,11 +141,15 @@ declare global {
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
+        getSaleByReceiptNo(receiptNo: string): Promise<{ id: string; receiptNo: string } | null>
         saveSalePayments:  (payments: SalePaymentRow[]) => Promise<void>
         getSalePayments:   (saleId: string) => Promise<SalePaymentRow[]>
         getCardTotalsByBank: (saleIds: string[]) => Promise<Record<string, { amount: number; acquirerName: string }>>
         getCashTotal:      (saleIds: string[]) => Promise<number>
         getProductByCode:  (code: string) => Promise<ProductRow | null>
+        getProductByName:  (name: string) => Promise<{
+          id: string; code: string; name: string; vatRate: number; unit: string
+        } | null>
         getProductIdByCode: (code: string) => Promise<string | null>
         upsertCustomer:    (row: CustomerRow) => Promise<void>
         enqueueOperation:  (params: {
@@ -154,7 +158,10 @@ declare global {
           type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
           payload: Record<string, unknown>
           label?: string
+          status?: 'pending' | 'pending_dayend'
         }) => Promise<void>
+        getPendingReturnInvoices(companyId: string): Promise<OperationQueueRow[]>
+        markOperationDone(id: string): Promise<{ success: boolean }>
         getPendingOperations: (companyId: string) => Promise<OperationQueueRow[]>
         getAllOperations:  (companyId: string, limit?: number) => Promise<OperationQueueRow[]>
         markOperationProcessing: (id: string) => Promise<void>
@@ -193,7 +200,7 @@ declare global {
           data?: {
             Id:           number
             SaleNumber:   string
-            CustomerInfo: { CustomerType?: number; CompanyName?: string } | null
+            CustomerInfo: { CustomerType?: number; CompanyName?: string; TaxNumber?: string; FirstName?: string } | null
             Items: Array<{
               Id:                 number
               ProductName:        string
@@ -204,6 +211,9 @@ declare global {
               VatRate?:           number
               UnitName?:          string
               TaxGroupId?:        number
+              ProductCode?:       string
+              StockRef?:          number
+              ProductId?:         number
             }>
             Payments: Array<{
               Mediator:         number
@@ -246,7 +256,7 @@ declare global {
     companyId:   string
     type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
     payload:     string
-    status:      'pending' | 'processing' | 'success' | 'failed'
+    status:      'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
     attempts:    number
     maxAttempts: number
     error:       string | null

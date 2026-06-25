@@ -10,6 +10,9 @@ export interface ReturnableSaleItem {
   VatRate?:           number
   UnitName?:          string
   TaxGroupId?:        number
+  ProductCode?:       string
+  StockRef?:          number
+  ProductId?:         number
 }
 
 export interface ReturnablePayment {
@@ -22,7 +25,12 @@ export interface ReturnablePayment {
 export interface ReturnableSale {
   Id:           number
   SaleNumber:   string
-  CustomerInfo: { CustomerType?: number; CompanyName?: string } | null
+  CustomerInfo: {
+    CustomerType?: number
+    CompanyName?: string
+    TaxNumber?:   string
+    FirstName?:   string
+  } | null
   Items:        ReturnableSaleItem[]
   Payments:     ReturnablePayment[]
 }

@@ -51,6 +51,9 @@ function mapRawReturnableSale(data: {
       VatRate:            Number(item.VATRate ?? item.VatRate ?? 20),
       UnitName:           String(item.UnitName ?? item.Unit ?? 'Adet'),
       TaxGroupId:         Number(item.TaxGroupId ?? 74),
+      ProductCode:        String(item.ProductCode ?? item.Barcode ?? item.Code ?? ''),
+      StockRef:           Number(item.StockRef ?? item.stockRef ?? 0) || undefined,
+      ProductId:          Number(item.ProductId ?? item.productId ?? 0) || undefined,
     }
   })
 
@@ -69,7 +72,12 @@ function mapRawReturnableSale(data: {
 
   const customerRaw = data.CustomerInfo
   const customerInfo = customerRaw && typeof customerRaw === 'object'
-    ? customerRaw as { CustomerType?: number; CompanyName?: string }
+    ? customerRaw as {
+        CustomerType?: number
+        CompanyName?: string
+        TaxNumber?:   string
+        FirstName?:   string
+      }
     : null
 
   return {
@@ -396,7 +404,7 @@ export default function POSScreen({
     }, 4000)
   }, [])
 
-  useQueueWorker({
+  const { processQueue } = useQueueWorker({
     companyId,
     isOnline,
     onToast: handleQueueToast,
@@ -1419,9 +1427,14 @@ export default function POSScreen({
 
       const sale = mapRawReturnableSale(res.data)
 
-      const customerType = sale.CustomerInfo?.CustomerType
-      if (customerType === 2 || sale.CustomerInfo?.CompanyName) {
-        setQuickReturnError('Bu satışa ait müşteri carili (tüzel) — hızlı iade alınamaz.')
+      if (sale.CustomerInfo && (
+        sale.CustomerInfo.CompanyName ||
+        sale.CustomerInfo.TaxNumber ||
+        sale.CustomerInfo.FirstName
+      )) {
+        setQuickReturnError(
+          'Bu satış cari hesaba ait. İade için karşı tarafın iade faturası düzenlemesi gerekir.',
+        )
         return
       }
 
@@ -1514,6 +1527,39 @@ export default function POSScreen({
         return
       }
 
+      const logoItems = await Promise.all(
+        sale.Items
+          .filter((item: ReturnableSaleItem) => (selected[item.Id] ?? 0) > 0)
+          .map(async (item: ReturnableSaleItem) => {
+            const qty = selected[item.Id] ?? 0
+
+            const product = await window.electron.db.getProductByName(item.ProductName)
+            if (!product) {
+              console.warn('[iade] ürün bulunamadı:', item.ProductName)
+            }
+
+            const unitName = product?.unit ?? 'Adet'
+            const unitCode = await window.electron.db.getUnitPavoCode(unitName)
+
+            return {
+              productCode: product?.code ?? '',
+              productName: product?.name ?? item.ProductName,
+              quantity:    qty,
+              unitPrice:   item.UnitPrice,
+              vatRate:     product?.vatRate ?? 20,
+              unitName,
+              unitCode,
+            }
+          }),
+      )
+
+      const notFound = logoItems.filter(i => !i.productCode?.trim())
+      if (notFound.length > 0) {
+        console.warn('[iade] eşleşmeyen ürünler:', notFound.map(i => i.productName))
+      }
+
+      console.log('[iade] pavo items:', sale.Items.length, 'logo items:', logoItems.length)
+
       const receiptNo = nextReceiptNo(posSettings.terminalNumber)
       const saleRow = {
         receiptNo,
@@ -1554,26 +1600,23 @@ export default function POSScreen({
 
       if (companyId) {
         try {
-          const { sendReturnInvoice, resolveTorbaCustomer } = await import('../lib/invoiceSend')
           const settings = await window.electron.db.getPosSettings()
           const queueInvoiceType: 'e_archive' | 'paper' =
             settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
 
-          const torbaCari = await resolveTorbaCustomer(companyId)
+          const { enqueueQuickReturnInvoice } = await import('../lib/invoiceSend')
 
-          await sendReturnInvoice(
-            companyId,
-            saleId,
-            torbaCari,
-            queueInvoiceType,
-            {
-              cashAmount: 0,
-              cardAmount: totalReturn,
-            },
-          )
+          await enqueueQuickReturnInvoice(companyId, {
+            receiptNo,
+            totalReturn,
+            invoiceType: queueInvoiceType,
+            cashAmount:  0,
+            cardAmount:  totalReturn,
+            items:       logoItems,
+          })
           console.log('[hızlı iade] Logo iade faturası kuyruğa eklendi')
         } catch (e) {
-          console.warn('[hızlı iade] Logo iade faturası kuyruğa eklenemedi:', e)
+          console.warn('[hızlı iade] Logo kuyruğa eklenemedi:', e)
         }
       }
 

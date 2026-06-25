@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
 import { sendPendingInvoices } from '../lib/invoiceSend'
+import { useConnectionStatus } from '../hooks/useConnectionStatus'
+import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
 import PrinterSettingsPanel from '../components/PrinterSettingsPanel'
 
@@ -81,6 +83,13 @@ export default function DashboardScreen({
   const [showQueue, setShowQueue] = useState(false)
   const [invoiceSending, setInvoiceSending] = useState(false)
 
+  const isOnline = useConnectionStatus(30) === 'online'
+  const { processQueue } = useQueueWorker({
+    companyId,
+    isOnline,
+    onToast: () => {},
+  })
+
   const refreshCmdHistory = useCallback(() => {
     window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
   }, [])
@@ -130,6 +139,7 @@ export default function DashboardScreen({
     setInvoiceSending(true)
     try {
       await sendPendingInvoices(companyId, { silent: false })
+      scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
       await loadDailySummary()
     } catch {
       window.alert('Fatura gönderimi başlatılamadı.')
@@ -335,7 +345,10 @@ export default function DashboardScreen({
               >✕</button>
             </div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
-              <DocumentQueueScreen companyId={companyId} />
+              <DocumentQueueScreen
+                companyId={companyId}
+                onAfterEnqueue={() => scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })}
+              />
             </div>
           </div>
         </div>

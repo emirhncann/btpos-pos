@@ -274,6 +274,13 @@ export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
   }))
 }
 
+export function getSaleByReceiptNo(receiptNo: string): { id: string; receiptNo: string } | null {
+  const sqlite = getSqlite()
+  return sqlite.prepare(
+    'SELECT id, receipt_no AS receiptNo FROM sales WHERE receipt_no = ? LIMIT 1',
+  ).get(receiptNo) as { id: string; receiptNo: string } | null
+}
+
 export function saveSalePayments(
   db: BetterSqlite3.Database,
   payments: SalePaymentRow[],
@@ -1154,6 +1161,45 @@ export function getProductIdByCode(code: string): string | null {
   return row?.id ?? null
 }
 
+export function getProductByName(name: string): {
+  id:      string
+  code:    string
+  name:    string
+  vatRate: number
+  unit:    string
+} | null {
+  const sqlite = getSqlite()
+
+  const mapRow = (row: {
+    id:       string
+    code:     string
+    name:     string
+    vat_rate: number | null
+    unit:     string | null
+  }) => ({
+    id:      row.id,
+    code:    row.code ?? '',
+    name:    row.name,
+    vatRate: row.vat_rate ?? 20,
+    unit:    row.unit?.trim() || 'Adet',
+  })
+
+  const exact = sqlite.prepare(
+    'SELECT id, code, name, vat_rate, unit FROM products WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1',
+  ).get(name) as {
+    id: string; code: string; name: string; vat_rate: number | null; unit: string | null
+  } | undefined
+  if (exact) return mapRow(exact)
+
+  const like = sqlite.prepare(
+    'SELECT id, code, name, vat_rate, unit FROM products WHERE LOWER(name) LIKE LOWER(?) LIMIT 1',
+  ).get(`%${name.trim()}%`) as {
+    id: string; code: string; name: string; vat_rate: number | null; unit: string | null
+  } | undefined
+
+  return like ? mapRow(like) : null
+}
+
 // Pavo sequence — her islemde +1
 export function nextPavoSequence(): number {
   const db = getSqlite()
@@ -1633,7 +1679,7 @@ export interface OperationQueueRow {
   companyId:   string
   type:        OperationQueueType
   payload:     string
-  status:      'pending' | 'processing' | 'success' | 'failed'
+  status:      'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
   attempts:    number
   maxAttempts: number
   error:       string | null
@@ -1645,7 +1691,9 @@ export interface OperationQueueRow {
 function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
   const st = String(r.status ?? 'pending')
   const status: OperationQueueRow['status'] =
-    st === 'processing' || st === 'success' || st === 'failed' ? st : 'pending'
+    st === 'pending_dayend' || st === 'processing' || st === 'success' || st === 'failed' || st === 'done'
+      ? st
+      : 'pending'
   const tp = String(r.type ?? '')
   const type = (['invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment'].includes(tp)
     ? tp
@@ -1703,19 +1751,41 @@ export function enqueueOperation(params: {
   type:      OperationQueueType
   payload:   Record<string, unknown>
   label?:    string
+  status?:   'pending' | 'pending_dayend'
 }): void {
   const db = getSqlite()
+  const status = params.status ?? 'pending'
   db.prepare(`
     INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
-    VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?)
   `).run(
     params.id,
     params.companyId,
     params.type,
     JSON.stringify(params.payload),
+    status,
     new Date().toISOString(),
     params.label ?? null,
   )
+}
+
+export function markOperationDone(id: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue SET status = 'done', sent_at = ? WHERE id = ?
+  `).run(new Date().toISOString(), id)
+}
+
+export function getPendingReturnInvoices(companyId: string): OperationQueueRow[] {
+  const db = getSqlite()
+  const rows = db.prepare(`
+    SELECT * FROM operation_queue
+    WHERE company_id = ?
+      AND type = 'return_invoice'
+      AND status = 'pending_dayend'
+    ORDER BY created_at ASC
+  `).all(companyId) as Record<string, unknown>[]
+  return rows.map(mapOperationQueueRow)
 }
 
 export function getPendingOperations(companyId: string): OperationQueueRow[] {

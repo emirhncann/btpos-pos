@@ -108,14 +108,20 @@ contextBridge.exposeInMainWorld('electron', {
     markInvoiceError:  (saleId: string, error: string) =>
       ipcRenderer.invoke('db:markInvoiceError', saleId, error),
     getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
+    getSaleByReceiptNo: (receiptNo: string) => ipcRenderer.invoke('db:getSaleByReceiptNo', receiptNo),
     saveSalePayments: (payments: unknown) => ipcRenderer.invoke('db:saveSalePayments', payments),
     getSalePayments: (saleId: string) => ipcRenderer.invoke('db:getSalePayments', saleId),
     getCardTotalsByBank: (saleIds: string[]) => ipcRenderer.invoke('db:getCardTotalsByBank', saleIds),
     getCashTotal: (saleIds: string[]) => ipcRenderer.invoke('db:getCashTotal', saleIds),
     getProductByCode:  (code: string) => ipcRenderer.invoke('db:getProductByCode', code),
+    getProductByName:  (name: string) => ipcRenderer.invoke('db:getProductByName', name),
     getProductIdByCode: (code: string) => ipcRenderer.invoke('db:getProductIdByCode', code),
     upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),
     enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
+    getPendingReturnInvoices: (companyId: string) =>
+      ipcRenderer.invoke('db:getPendingReturnInvoices', companyId),
+    markOperationDone: (id: string) =>
+      ipcRenderer.invoke('db:markOperationDone', id),
     getPendingOperations: (companyId: string) =>
       ipcRenderer.invoke('db:getPendingOperations', companyId),
     getAllOperations:  (companyId: string, limit?: number) =>
