@@ -189,13 +189,17 @@ export function getPendingInvoices(onlyAnonymous = false): (typeof sales.$inferS
       .where(and(
         eq(sales.invoiceSent, 0),
         or(isNull(sales.customerId), eq(sales.customerId, '')),
+        or(isNull(sales.isReturn), eq(sales.isReturn, 0)),
       ))
       .orderBy(asc(sales.createdAt))
       .limit(200)
       .all()
   }
   return db.select().from(sales)
-    .where(inArray(sales.invoiceSent, [0, 2]))
+    .where(and(
+      inArray(sales.invoiceSent, [0, 2]),
+      or(isNull(sales.isReturn), eq(sales.isReturn, 0)),
+    ))
     .orderBy(asc(sales.createdAt))
     .limit(50)
     .all()
@@ -372,42 +376,107 @@ export interface LastSaleRow {
   orderNo:         string | null
 }
 
-/** Son satış — hızlı iade için Pavo satış numarası varsa döner */
-export function getLastSale(): LastSaleRow | null {
-  const db = getDB()
-  const row = db.select().from(sales)
-    .where(eq(sales.isReturn, 0))
-    .orderBy(desc(sales.createdAt))
-    .limit(1)
-    .get()
+export interface RecentSaleRow {
+  id:             string
+  receiptNo:      string
+  pavoSaleNumber: string | null
+  orderNo:        string | null
+  netAmount:      number
+  createdAt:      string
+  customerName:   string | null
+  cashierName:    string | null
+}
 
-  if (!row) return null
-
+function parsePavoFromPaymentData(paymentDeviceData: string | null | undefined): {
+  pavoSaleNumber: string | null
+  orderNo:        string | null
+} {
   let pavoSaleNumber: string | null = null
   let orderNo: string | null = null
-  if (row.paymentDeviceData) {
-    try {
-      const pd = JSON.parse(row.paymentDeviceData) as Record<string, unknown>
-      const raw = (pd.raw ?? pd) as Record<string, unknown>
-      const data = raw.Data as Record<string, unknown> | undefined
-      const sale = data?.Sale as Record<string, unknown> | undefined
-      const saleNum = data?.SaleNumber ?? sale?.SaleNumber
-      if (saleNum != null && String(saleNum).trim()) {
-        pavoSaleNumber = String(saleNum).trim()
-      }
-      const ord = data?.OrderNo ?? sale?.OrderNo
-      if (ord != null && String(ord).trim()) {
-        orderNo = String(ord).trim()
-      }
-    } catch {
-      // payment_device_data parse hatası — receiptNo kullanılır
+  if (!paymentDeviceData) return { pavoSaleNumber, orderNo }
+  try {
+    const pd = JSON.parse(paymentDeviceData) as Record<string, unknown>
+    const raw = (pd.raw ?? pd) as Record<string, unknown>
+    const data = raw.Data as Record<string, unknown> | undefined
+    const sale = data?.Sale as Record<string, unknown> | undefined
+    const saleNum = data?.SaleNumber ?? sale?.SaleNumber
+    if (saleNum != null && String(saleNum).trim()) {
+      pavoSaleNumber = String(saleNum).trim()
     }
+    const ord = data?.OrderNo ?? sale?.OrderNo
+    if (ord != null && String(ord).trim()) {
+      orderNo = String(ord).trim()
+    }
+  } catch {
+    // payment_device_data parse hatası — receiptNo kullanılır
+  }
+  return { pavoSaleNumber, orderNo }
+}
+
+/** Son satışlar — hızlı iade listesi (iade olmayan, yeniden eskiye) */
+export interface GetRecentSalesOpts {
+  limit?:    number
+  dateFrom?: string
+  dateTo?:   string
+  timeFrom?: string
+  timeTo?:   string
+}
+
+export function getRecentSales(opts: GetRecentSalesOpts = {}): RecentSaleRow[] {
+  const db = getSqlite()
+  const limit = opts.limit ?? 20
+  const conditions = ['is_return = 0']
+  const params: unknown[] = []
+
+  if (opts.dateFrom) {
+    conditions.push('date(created_at) >= ?')
+    params.push(opts.dateFrom)
+  }
+  if (opts.dateTo) {
+    conditions.push('date(created_at) <= ?')
+    params.push(opts.dateTo)
+  }
+  if (opts.timeFrom) {
+    conditions.push(`strftime('%H:%M', datetime(created_at)) >= ?`)
+    params.push(opts.timeFrom)
+  }
+  if (opts.timeTo) {
+    conditions.push(`strftime('%H:%M', datetime(created_at)) <= ?`)
+    params.push(opts.timeTo)
   }
 
+  const rows = db.prepare(`
+    SELECT * FROM sales
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(...params, limit) as Record<string, unknown>[]
+
+  return rows.map(row => {
+    const { pavoSaleNumber, orderNo } = parsePavoFromPaymentData(
+      row.payment_device_data as string | null | undefined,
+    )
+    return {
+      id:             String(row.id),
+      receiptNo:      String(row.receipt_no),
+      pavoSaleNumber,
+      orderNo,
+      netAmount:      Number(row.net_amount),
+      createdAt:      String(row.created_at),
+      customerName:   row.customer_name != null ? String(row.customer_name) : null,
+      cashierName:    row.cashier_name  != null ? String(row.cashier_name)  : null,
+    }
+  })
+}
+
+/** Son satış — hızlı iade için Pavo satış numarası varsa döner */
+export function getLastSale(): LastSaleRow | null {
+  const recent = getRecentSales({ limit: 1 })[0]
+  if (!recent) return null
   return {
-    receiptNo: row.receiptNo,
-    pavoSaleNumber,
-    orderNo,
+    receiptNo:      recent.receiptNo,
+    pavoSaleNumber: recent.pavoSaleNumber,
+    orderNo:        recent.orderNo,
   }
 }
 
@@ -1843,4 +1912,173 @@ export function retryOperation(id: string): void {
 export function deleteOperation(id: string): void {
   const db = getSqlite()
   db.prepare(`DELETE FROM operation_queue WHERE id = ?`).run(id)
+}
+
+export interface SalesReportRow {
+  id:           string
+  receiptNo:    string
+  type:         'sale' | 'return' | 'payment'
+  netAmount:    number
+  cashAmount:   number
+  cardAmount:   number
+  customerName: string | null
+  cashierName:  string | null
+  createdAt:    string
+  invoiceSent:  number
+  invoiceId:    string | null
+  invoiceError: string | null
+  isReturn:     number
+  payments: Array<{
+    method:       string
+    amount:       number
+    acquirerName: string | null
+  }>
+}
+
+export function getSalesReport(opts: {
+  dateFrom: string
+  dateTo:   string
+}): SalesReportRow[] {
+  const db = getSqlite()
+
+  const rows = db.prepare(`
+    SELECT
+      s.id, s.receipt_no, s.net_amount, s.cash_amount, s.card_amount,
+      s.customer_name, s.cashier_name, s.created_at,
+      s.invoice_sent, s.invoice_id, s.invoice_error, s.is_return
+    FROM sales s
+    WHERE date(s.created_at) >= ? AND date(s.created_at) <= ?
+    ORDER BY s.created_at DESC
+  `).all(opts.dateFrom, opts.dateTo) as Record<string, unknown>[]
+
+  const payStmt = db.prepare(`
+    SELECT method, amount, acquirer_name
+    FROM sale_payments WHERE sale_id = ?
+  `)
+
+  return rows.map(s => {
+    const payments = payStmt.all(String(s.id)) as {
+      method: string
+      amount: number
+      acquirer_name: string | null
+    }[]
+
+    return {
+      id:           String(s.id),
+      receiptNo:    String(s.receipt_no),
+      type:         s.is_return ? 'return' as const : 'sale' as const,
+      netAmount:    Number(s.net_amount),
+      cashAmount:   Number(s.cash_amount ?? 0),
+      cardAmount:   Number(s.card_amount ?? 0),
+      customerName: s.customer_name ? String(s.customer_name) : null,
+      cashierName:  s.cashier_name  ? String(s.cashier_name)  : null,
+      createdAt:    String(s.created_at),
+      invoiceSent:  Number(s.invoice_sent ?? 0),
+      invoiceId:    s.invoice_id    ? String(s.invoice_id)    : null,
+      invoiceError: s.invoice_error ? String(s.invoice_error) : null,
+      isReturn:     Number(s.is_return ?? 0),
+      payments: payments.map(p => ({
+        method:       p.method,
+        amount:       p.amount,
+        acquirerName: p.acquirer_name,
+      })),
+    }
+  })
+}
+
+export function getDayEndReport(opts: {
+  dateFrom: string
+  dateTo:   string
+}): Array<{
+  id: string
+  label: string | null
+  status: string
+  created_at: string
+  sent_at: string | null
+  error: string | null
+}> {
+  const db = getSqlite()
+  const rows = db.prepare(`
+    SELECT id, label, status, created_at, sent_at, error
+    FROM operation_queue
+    WHERE type = 'day_end_invoice'
+      AND date(created_at) >= ? AND date(created_at) <= ?
+    ORDER BY created_at DESC
+  `).all(opts.dateFrom, opts.dateTo) as Record<string, unknown>[]
+
+  return rows.map(r => ({
+    id:         String(r.id),
+    label:      r.label != null ? String(r.label) : null,
+    status:     String(r.status),
+    created_at: String(r.created_at),
+    sent_at:    r.sent_at != null ? String(r.sent_at) : null,
+    error:      r.error != null ? String(r.error) : null,
+  }))
+}
+
+export interface CariPaymentSaveRow {
+  id:           string
+  companyId:    string
+  type:         'tahsilat' | 'odeme'
+  amount:       number
+  customerId?:  string
+  customerName?: string
+  customerCode?: string
+  cashierId?:   string
+  cashierName?: string
+  description?: string
+  createdAt:    string
+}
+
+export interface CariPaymentReportRow {
+  id:            string
+  type:          'tahsilat' | 'odeme'
+  amount:        number
+  customer_name: string | null
+  customer_code: string | null
+  cashier_name:  string | null
+  description:   string | null
+  created_at:    string
+}
+
+export function saveCariPayment(row: CariPaymentSaveRow): void {
+  const db = getSqlite()
+  db.prepare(`
+    INSERT INTO cari_payments
+      (id, company_id, type, amount, customer_id, customer_name,
+       customer_code, cashier_id, cashier_name, description, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.id, row.companyId, row.type, row.amount,
+    row.customerId ?? null, row.customerName ?? null,
+    row.customerCode ?? null, row.cashierId ?? null,
+    row.cashierName ?? null, row.description ?? null,
+    row.createdAt,
+  )
+}
+
+export function getCariPayments(opts: {
+  dateFrom:  string
+  dateTo:    string
+  companyId: string
+}): CariPaymentReportRow[] {
+  const db = getSqlite()
+  const rows = db.prepare(`
+    SELECT * FROM cari_payments
+    WHERE company_id = ?
+      AND date(created_at) >= ?
+      AND date(created_at) <= ?
+    ORDER BY created_at DESC
+  `).all(opts.companyId, opts.dateFrom, opts.dateTo) as Record<string, unknown>[]
+
+  return rows.map(r => ({
+    id:            String(r.id),
+    type:          String(r.type) as 'tahsilat' | 'odeme',
+    amount:        Number(r.amount),
+    customer_name: r.customer_name != null ? String(r.customer_name) : null,
+    customer_code: r.customer_code != null ? String(r.customer_code) : null,
+    cashier_name:  r.cashier_name  != null ? String(r.cashier_name)  : null,
+    description:   r.description   != null ? String(r.description)   : null,
+    created_at:    String(r.created_at),
+  }))
 }

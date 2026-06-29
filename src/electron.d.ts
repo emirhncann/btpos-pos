@@ -169,6 +169,29 @@ declare global {
         markOperationFailed: (id: string, error: string) => Promise<void>
         retryOperation:    (id: string) => Promise<void>
         deleteOperation:   (id: string) => Promise<void>
+        getSalesReport: (opts: { dateFrom: string; dateTo: string }) => Promise<SalesReportRow[]>
+        getDayEndReport: (opts: { dateFrom: string; dateTo: string }) => Promise<Array<{
+          id: string
+          label: string | null
+          status: string
+          created_at: string
+          sent_at: string | null
+          error: string | null
+        }>>
+        saveCariPayment(row: {
+          id: string
+          companyId: string
+          type: 'tahsilat' | 'odeme'
+          amount: number
+          customerId?: string
+          customerName?: string
+          customerCode?: string
+          cashierId?: string
+          cashierName?: string
+          description?: string
+          createdAt: string
+        }): Promise<{ success: boolean }>
+        getCariPayments(opts: { dateFrom: string; dateTo: string; companyId: string }): Promise<CariPaymentReportRow[]>
         getPaymentDeviceSettings: (provider?: string) => Promise<PaymentDeviceRow | undefined>
         upsertPaymentDeviceSettings: (row: PaymentDeviceRow) => Promise<void>
         nextPavoSequence: () => Promise<number>
@@ -177,6 +200,13 @@ declare global {
         upsertUnitMapping: (row: { companyId: string; unitName: string; pavoCode: string }) => Promise<void>
         getAllUnitMappings: (companyId: string) => Promise<unknown[]>
         getLastSale: () => Promise<{ receiptNo: string; pavoSaleNumber: string | null; orderNo: string | null } | null>
+        getRecentSales: (opts?: {
+          limit?: number
+          dateFrom?: string
+          dateTo?: string
+          timeFrom?: string
+          timeTo?: string
+        }) => Promise<RecentSaleRow[]>
       }
       cart: {
         saveDraft(opts: {
@@ -194,12 +224,13 @@ declare global {
         clearDraft(): Promise<{ success: boolean }>
       }
       pavo: {
-        getReturnableSale(opts: { saleNumber: string }): Promise<{
+        getReturnableSale(opts: { searchBy: 'order' | 'sale'; query: string }): Promise<{
           success: boolean
           message?: string
           data?: {
             Id:           number
             SaleNumber:   string
+            OrderNo?:     string | null
             CustomerInfo: { CustomerType?: number; CompanyName?: string; TaxNumber?: string; FirstName?: string } | null
             Items: Array<{
               Id:                 number
@@ -249,6 +280,49 @@ declare global {
         }): Promise<{ success: boolean; message?: string; data?: unknown }>
       }
     }
+  }
+
+  interface RecentSaleRow {
+    id:             string
+    receiptNo:      string
+    pavoSaleNumber: string | null
+    orderNo:        string | null
+    netAmount:      number
+    createdAt:      string
+    customerName:   string | null
+    cashierName:    string | null
+  }
+
+  interface CariPaymentReportRow {
+    id:            string
+    type:          'tahsilat' | 'odeme'
+    amount:        number
+    customer_name: string | null
+    customer_code: string | null
+    cashier_name:  string | null
+    description:   string | null
+    created_at:    string
+  }
+
+  interface SalesReportRow {
+    id:           string
+    receiptNo:    string
+    type:         'sale' | 'return' | 'payment'
+    netAmount:    number
+    cashAmount:   number
+    cardAmount:   number
+    customerName: string | null
+    cashierName:  string | null
+    createdAt:    string
+    invoiceSent:  number
+    invoiceId:    string | null
+    invoiceError: string | null
+    isReturn:     number
+    payments: Array<{
+      method:       string
+      amount:       number
+      acquirerName: string | null
+    }>
   }
 
   interface OperationQueueRow {

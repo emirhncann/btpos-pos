@@ -93,7 +93,10 @@ function pavoErrorMessage(data: Record<string, unknown>, fallback: string): stri
   return String(data.ErrorMessage ?? data.Message ?? fallback)
 }
 
-export async function pavoGetReturnableSale(saleNumber: string): Promise<{
+export async function pavoGetReturnableSale(opts: {
+  searchBy: 'order' | 'sale'
+  query:    string
+}): Promise<{
   success: boolean
   message?: string
   data?: {
@@ -120,15 +123,24 @@ export async function pavoGetReturnableSale(saleNumber: string): Promise<{
     const settings = await getActivePavoDevice()
     if (!settings) return { success: false, message: 'Pavo ayarı yok veya cihaz pasif' }
 
+    const query = opts.query.trim()
+    if (!query) return { success: false, message: 'Arama değeri boş' }
+
     const seq = nextPavoSequence()
+    const salePayload: Record<string, unknown> = {
+      ReceiptImageEnabled: false,
+      ReceiptJsonEnabled:  false,
+      ReceiptTextEnabled:  false,
+    }
+    if (opts.searchBy === 'sale') {
+      salePayload.SaleNumber = query
+    } else {
+      salePayload.OrderNo = query
+    }
+
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/GetReturnableSale`, {
       TransactionHandle: transactionHandle(settings, seq),
-      Sale: {
-        SaleNumber: saleNumber,
-        ReceiptImageEnabled: false,
-        ReceiptJsonEnabled:  false,
-        ReceiptTextEnabled:  false,
-      },
+      Sale: salePayload,
     })
 
     await syncSequenceFromResponse(data)
@@ -179,7 +191,7 @@ export async function pavoGetReturnableSale(saleNumber: string): Promise<{
       success: true,
       data: {
         Id:           Number(sale.Id ?? 0),
-        SaleNumber:   String(sale.SaleNumber ?? saleNumber),
+        SaleNumber:   String(sale.SaleNumber ?? (opts.searchBy === 'sale' ? query : '')),
         CustomerInfo: customerInfo ?? null,
         Items:        items,
         Payments:     payments,

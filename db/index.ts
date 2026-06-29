@@ -577,6 +577,22 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
     )
   `)
   sqlite.exec(`INSERT OR IGNORE INTO pavo_sequence (id, seq) VALUES (1, 0)`)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cari_payments (
+      id            TEXT PRIMARY KEY,
+      company_id    TEXT NOT NULL,
+      type          TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      customer_id   TEXT,
+      customer_name TEXT,
+      customer_code TEXT,
+      cashier_id    TEXT,
+      cashier_name  TEXT,
+      description   TEXT,
+      created_at    TEXT NOT NULL
+    )
+  `)
 }
 
 export function getDB() {

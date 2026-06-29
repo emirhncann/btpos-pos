@@ -114,33 +114,53 @@ function transactionHandle(settings: PavoSettings, seq: number) {
   }
 }
 
-async function pavoRequest(url: string, body: object): Promise<Record<string, unknown>> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const data = await res.json() as Record<string, unknown>
+function isPavoSequenceError(data: Record<string, unknown>): boolean {
+  if ([72, 73].includes(Number(data.ErrorCode))) return true
+  const msg = String(data.ErrorMessage ?? data.Message ?? '').toLocaleLowerCase('tr-TR')
+  return msg.includes('sıra') || msg.includes('sequence') || msg.includes('seq')
+}
 
-  if (data.HasError === true && [72, 73].includes(Number(data.ErrorCode))) {
-    const handle = data.TransactionHandle as Record<string, unknown> | undefined
-    if (handle) {
-      const retryBody = {
-        ...(body as Record<string, unknown>),
-        TransactionHandle: {
-          ...((body as Record<string, unknown>).TransactionHandle as object),
-          TransactionDate: handle.TransactionDate,
-          TransactionSequence: handle.TransactionSequence,
-        },
-      }
-      const res2 = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(retryBody),
-      })
-      return res2.json() as Promise<Record<string, unknown>>
-    }
+function pavoRetryHandle(data: Record<string, unknown>): Record<string, unknown> | null {
+  const handle = data.TransactionHandle as Record<string, unknown> | undefined
+  if (!handle) return null
+  if (handle.TransactionDate == null || handle.TransactionSequence == null) return null
+  return handle
+}
+
+async function pavoRequest(url: string, body: object): Promise<Record<string, unknown>> {
+  const postJson = async (payload: object): Promise<Record<string, unknown>> => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    return res.json() as Promise<Record<string, unknown>>
   }
+
+  let data = await postJson(body)
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const hasError = data.HasError === true || data.IsError === true
+    if (!hasError) break
+    if (!isPavoSequenceError(data)) break
+
+    const handle = pavoRetryHandle(data)
+    if (!handle) break
+
+    await syncPavoSequenceFromResponse(data)
+
+    const retryBody = {
+      ...(body as Record<string, unknown>),
+      TransactionHandle: {
+        ...((body as Record<string, unknown>).TransactionHandle as object),
+        TransactionDate:     handle.TransactionDate,
+        TransactionSequence: handle.TransactionSequence,
+      },
+    }
+    data = await postJson(retryBody)
+  }
+
+  await syncPavoSequenceFromResponse(data)
 
   return data
 }
@@ -367,17 +387,24 @@ async function syncPavoSequenceFromResponse(data: Record<string, unknown>): Prom
 export async function pavoGetReturnableSale(
   settings: PavoSettings,
   seq: number,
-  saleNumber: string,
+  opts: { searchBy: 'order' | 'sale'; query: string },
 ): Promise<{ success: boolean; message?: string; data?: PavoReturnableSale }> {
   try {
+    const query = opts.query.trim()
+    const salePayload: Record<string, unknown> = {
+      ReceiptImageEnabled: false,
+      ReceiptJsonEnabled:  false,
+      ReceiptTextEnabled:  false,
+    }
+    if (opts.searchBy === 'sale') {
+      salePayload.SaleNumber = query
+    } else {
+      salePayload.OrderNo = query
+    }
+
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/GetReturnableSale`, {
       TransactionHandle: transactionHandle(settings, seq),
-      Sale: {
-        SaleNumber: saleNumber,
-        ReceiptImageEnabled: false,
-        ReceiptJsonEnabled:  false,
-        ReceiptTextEnabled:  false,
-      },
+      Sale: salePayload,
     })
 
     await syncPavoSequenceFromResponse(data)
@@ -403,7 +430,7 @@ export async function pavoGetReturnableSale(
       success: true,
       data: {
         Id:           Number(sale.Id ?? 0),
-        SaleNumber:   String(sale.SaleNumber ?? saleNumber),
+        SaleNumber:   String(sale.SaleNumber ?? (opts.searchBy === 'sale' ? query : '')),
         CustomerInfo: customerInfo ?? null,
         Items:        items,
         Payments:     payments,

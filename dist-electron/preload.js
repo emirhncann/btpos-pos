@@ -101,6 +101,10 @@ electron.contextBridge.exposeInMainWorld("electron", {
     markOperationFailed: (id, error) => electron.ipcRenderer.invoke("db:markOperationFailed", id, error),
     retryOperation: (id) => electron.ipcRenderer.invoke("db:retryOperation", id),
     deleteOperation: (id) => electron.ipcRenderer.invoke("db:deleteOperation", id),
+    getSalesReport: (opts) => electron.ipcRenderer.invoke("db:getSalesReport", opts),
+    getDayEndReport: (opts) => electron.ipcRenderer.invoke("db:getDayEndReport", opts),
+    saveCariPayment: (row) => electron.ipcRenderer.invoke("db:saveCariPayment", row),
+    getCariPayments: (opts) => electron.ipcRenderer.invoke("db:getCariPayments", opts),
     getPaymentDeviceSettings: (provider) => electron.ipcRenderer.invoke("db:getPaymentDeviceSettings", provider),
     upsertPaymentDeviceSettings: (row) => electron.ipcRenderer.invoke("db:upsertPaymentDeviceSettings", row),
     nextPavoSequence: () => electron.ipcRenderer.invoke("db:nextPavoSequence"),
@@ -108,7 +112,8 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),
     upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
     getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId),
-    getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale")
+    getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale"),
+    getRecentSales: (opts) => electron.ipcRenderer.invoke("db:getRecentSales", opts)
   },
   cart: {
     saveDraft: (opts) => electron.ipcRenderer.invoke("cart:saveDraft", opts),

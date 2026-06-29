@@ -70,7 +70,24 @@ function pavoReceiptInformation(printWidth: '58mm' | '80mm') {
   }
 }
 
-async function pavoPost(url: string, body: object): Promise<Record<string, unknown>> {
+function isPavoSequenceError(data: Record<string, unknown>): boolean {
+  if ([72, 73].includes(Number(data.ErrorCode))) return true
+  const msg = String(data.ErrorMessage ?? data.Message ?? '').toLocaleLowerCase('tr-TR')
+  return msg.includes('sıra') || msg.includes('sequence') || msg.includes('seq')
+}
+
+function pavoRetryHandle(data: Record<string, unknown>): Record<string, unknown> | null {
+  const handle = data.TransactionHandle as Record<string, unknown> | undefined
+  if (!handle) return null
+  if (handle.TransactionDate == null || handle.TransactionSequence == null) return null
+  return handle
+}
+
+async function pavoPost(
+  url: string,
+  body: object,
+  db?: Database.Database,
+): Promise<Record<string, unknown>> {
   const postJson = async (payload: object): Promise<Record<string, unknown>> => {
     const res = await fetch(url, {
       method:  'POST',
@@ -90,36 +107,40 @@ async function pavoPost(url: string, body: object): Promise<Record<string, unkno
     }
   }
 
-  const data = await postJson(body)
+  let data = await postJson(body)
 
-  // 72/73: zaman toleransı veya sequence uyumsuzluğu — cihazın verdiği handle ile yeniden dene
-  if (data.HasError === true && [72, 73].includes(Number(data.ErrorCode))) {
-    const handle = data.TransactionHandle as Record<string, unknown> | undefined
-    if (handle) {
-      const retryBody = {
-        ...(body as Record<string, unknown>),
-        TransactionHandle: {
-          ...((body as Record<string, unknown>).TransactionHandle as object),
-          TransactionDate:     handle.TransactionDate,
-          TransactionSequence: handle.TransactionSequence,
-        },
-      }
-      const res2 = await fetch(url, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(retryBody),
-      })
-      const retryText = await res2.text()
-      try {
-        return JSON.parse(retryText) as Record<string, unknown>
-      } catch {
-        const preview = retryText.trim().slice(0, 160) || '(boş yanıt)'
-        throw new Error(`Pavo yeniden deneme HTTP ${res2.status} — ${preview}`)
-      }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const hasError = data.HasError === true || data.IsError === true
+    if (!hasError) break
+
+    if (db) syncPavoSequence(db, data)
+
+    if (!isPavoSequenceError(data)) break
+
+    const handle = pavoRetryHandle(data)
+    if (!handle) break
+
+    const retryBody = {
+      ...(body as Record<string, unknown>),
+      TransactionHandle: {
+        ...((body as Record<string, unknown>).TransactionHandle as object),
+        TransactionDate:     handle.TransactionDate,
+        TransactionSequence: handle.TransactionSequence,
+      },
     }
+    data = await postJson(retryBody)
   }
 
+  if (db) syncPavoSequence(db, data)
+
   return data
+}
+
+function allocPavoSequence(db: Database.Database): number {
+  const row = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
+  const nextSeq = (row?.seq ?? 0) + 1
+  db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(nextSeq)
+  return nextSeq
 }
 
 function syncPavoSequence(db: Database.Database, data: Record<string, unknown>): void {
@@ -522,6 +543,22 @@ app.whenReady().then(async () => {
     )
   `)
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cari_payments (
+      id            TEXT PRIMARY KEY,
+      company_id    TEXT NOT NULL,
+      type          TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      customer_id   TEXT,
+      customer_name TEXT,
+      customer_code TEXT,
+      cashier_id    TEXT,
+      cashier_name  TEXT,
+      description   TEXT,
+      created_at    TEXT NOT NULL
+    )
+  `)
+
   registerPrinterIpc(ipcMain, db)
   registerTemplatesIpc(ipcMain, db)
 
@@ -857,6 +894,27 @@ app.whenReady().then(async () => {
     deleteOperation(id)
   })
 
+  ipcMain.handle('db:getSalesReport', async (_e, opts: { dateFrom: string; dateTo: string }) => {
+    const { getSalesReport } = await import('../db/operations')
+    return getSalesReport(opts)
+  })
+
+  ipcMain.handle('db:getDayEndReport', async (_e, opts: { dateFrom: string; dateTo: string }) => {
+    const { getDayEndReport } = await import('../db/operations')
+    return getDayEndReport(opts)
+  })
+
+  ipcMain.handle('db:saveCariPayment', async (_e, row: unknown) => {
+    const { saveCariPayment } = await import('../db/operations')
+    saveCariPayment(row as import('../db/operations').CariPaymentSaveRow)
+    return { success: true }
+  })
+
+  ipcMain.handle('db:getCariPayments', async (_e, opts: { dateFrom: string; dateTo: string; companyId: string }) => {
+    const { getCariPayments } = await import('../db/operations')
+    return getCariPayments(opts)
+  })
+
   ipcMain.handle('db:getPaymentDeviceSettings', async (_e, provider?: string) => {
     const { getPaymentDeviceSettings } = await import('../db/operations')
     return getPaymentDeviceSettings(provider ?? 'pavo')
@@ -891,6 +949,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getLastSale', async () => {
     const { getLastSale } = await import('../db/operations')
     return getLastSale()
+  })
+
+  ipcMain.handle('db:getRecentSales', async (_e, opts?: import('../db/operations').GetRecentSalesOpts) => {
+    const { getRecentSales } = await import('../db/operations')
+    return getRecentSales(opts ?? { limit: 20 })
   })
 
   ipcMain.handle('cart:saveDraft', (_e, opts: {
@@ -936,27 +999,36 @@ app.whenReady().then(async () => {
     return { success: true as const }
   })
 
-  ipcMain.handle('pavo:getReturnableSale', async (_e, opts: { saleNumber: string }) => {
+  ipcMain.handle('pavo:getReturnableSale', async (_e, opts: {
+    searchBy: 'order' | 'sale'
+    query:    string
+  }) => {
     try {
       const printerCfg = getPavoPrinterCfg(db)
       if (!printerCfg) return { success: false, message: 'Pavo ayarı yok veya cihaz pasif' }
 
-      const seq = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
-      const nextSeq = (seq?.seq ?? 0) + 1
-      db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(nextSeq)
+      const query = opts.query.trim()
+      if (!query) return { success: false, message: 'Arama değeri boş' }
+
+      const nextSeq = allocPavoSequence(db)
+
+      const salePayload: Record<string, unknown> = {
+        ReceiptImageEnabled: false,
+        ReceiptJsonEnabled:  false,
+        ReceiptTextEnabled:  false,
+      }
+      if (opts.searchBy === 'sale') {
+        salePayload.SaleNumber = query
+      } else {
+        salePayload.OrderNo = query
+      }
 
       const body = {
         TransactionHandle: pavoTransactionHandle(printerCfg.serial_no, nextSeq),
-        Sale: {
-          SaleNumber:          opts.saleNumber,
-          ReceiptImageEnabled: false,
-          ReceiptJsonEnabled:  false,
-          ReceiptTextEnabled:  false,
-        },
+        Sale: salePayload,
       }
 
-      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/GetReturnableSale`, body)
-      syncPavoSequence(db, data)
+      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/GetReturnableSale`, body, db)
 
       if (data.HasError || data.IsError) {
         return {
@@ -984,7 +1056,8 @@ app.whenReady().then(async () => {
         success: true,
         data: {
           Id:           Number(sale.Id ?? 0),
-          SaleNumber:   String(sale.SaleNumber ?? opts.saleNumber),
+          SaleNumber:   String(sale.SaleNumber ?? (opts.searchBy === 'sale' ? query : '')),
+          OrderNo:      sale.OrderNo != null ? String(sale.OrderNo) : null,
           CustomerInfo: customerInfo ?? null,
           Items:        mapReturnableSaleItems(sale),
           Payments:     mapReturnableSalePayments(sale),
@@ -1025,9 +1098,7 @@ app.whenReady().then(async () => {
 
       const printWidth = normalizePrintWidth(opts.receiptWidth ?? printerCfg.print_width)
 
-      const seq = db.prepare('SELECT seq FROM pavo_sequence WHERE id = 1').get() as { seq: number } | undefined
-      const nextSeq = (seq?.seq ?? 0) + 1
-      db.prepare('UPDATE pavo_sequence SET seq = ? WHERE id = 1').run(nextSeq)
+      const nextSeq = allocPavoSequence(db)
 
       const body = {
         TransactionHandle: pavoTransactionHandle(printerCfg.serial_no, nextSeq),
@@ -1065,8 +1136,7 @@ app.whenReady().then(async () => {
         },
       }
 
-      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/PartialReturn`, body)
-      syncPavoSequence(db, data)
+      const data = await pavoPost(`${pavoBaseUrl(printerCfg)}/PartialReturn`, body, db)
 
       if (data.HasError || data.IsError) {
         return {

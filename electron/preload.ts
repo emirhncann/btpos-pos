@@ -134,6 +134,25 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:markOperationFailed', id, error),
     retryOperation:    (id: string) => ipcRenderer.invoke('db:retryOperation', id),
     deleteOperation:   (id: string) => ipcRenderer.invoke('db:deleteOperation', id),
+    getSalesReport: (opts: { dateFrom: string; dateTo: string }) =>
+      ipcRenderer.invoke('db:getSalesReport', opts),
+    getDayEndReport: (opts: { dateFrom: string; dateTo: string }) =>
+      ipcRenderer.invoke('db:getDayEndReport', opts),
+    saveCariPayment: (row: {
+      id: string
+      companyId: string
+      type: 'tahsilat' | 'odeme'
+      amount: number
+      customerId?: string
+      customerName?: string
+      customerCode?: string
+      cashierId?: string
+      cashierName?: string
+      description?: string
+      createdAt: string
+    }) => ipcRenderer.invoke('db:saveCariPayment', row),
+    getCariPayments: (opts: { dateFrom: string; dateTo: string; companyId: string }) =>
+      ipcRenderer.invoke('db:getCariPayments', opts),
     getPaymentDeviceSettings: (provider?: string) =>
       ipcRenderer.invoke('db:getPaymentDeviceSettings', provider),
     upsertPaymentDeviceSettings: (row: unknown) =>
@@ -145,6 +164,13 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:upsertUnitMapping', row),
     getAllUnitMappings: (companyId: string) => ipcRenderer.invoke('db:getAllUnitMappings', companyId),
     getLastSale: () => ipcRenderer.invoke('db:getLastSale'),
+    getRecentSales: (opts?: {
+      limit?: number
+      dateFrom?: string
+      dateTo?: string
+      timeFrom?: string
+      timeTo?: string
+    }) => ipcRenderer.invoke('db:getRecentSales', opts),
   },
   cart: {
     saveDraft: (opts: {
@@ -158,7 +184,7 @@ contextBridge.exposeInMainWorld('electron', {
     clearDraft: () => ipcRenderer.invoke('cart:clearDraft'),
   },
   pavo: {
-    getReturnableSale: (opts: { saleNumber: string }) =>
+    getReturnableSale: (opts: { searchBy: 'order' | 'sale'; query: string }) =>
       ipcRenderer.invoke('pavo:getReturnableSale', opts),
     partialReturn: (opts: {
       relatedSaleId:  number

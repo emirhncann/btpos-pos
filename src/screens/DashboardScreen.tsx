@@ -4,7 +4,10 @@ import { sendPendingInvoices } from '../lib/invoiceSend'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
+import { SalesReportScreen } from './SalesReportScreen'
 import PrinterSettingsPanel from '../components/PrinterSettingsPanel'
+import AlertDialog from '../components/AlertDialog'
+import { useAlertDialog } from '../hooks/useAlertDialog'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -81,6 +84,7 @@ export default function DashboardScreen({
   const [settingsTab, setSettingsTab] = useState<'screen' | 'payment'>('screen')
   const [pavoDeviceInfo, setPavoDeviceInfo] = useState<{ ip: string; port: number } | null>(null)
   const [showQueue, setShowQueue] = useState(false)
+  const [showSalesReport, setShowSalesReport] = useState(false)
   const [invoiceSending, setInvoiceSending] = useState(false)
 
   const isOnline = useConnectionStatus(30) === 'online'
@@ -89,6 +93,7 @@ export default function DashboardScreen({
     isOnline,
     onToast: () => {},
   })
+  const { dialogProps, showError } = useAlertDialog()
 
   const refreshCmdHistory = useCallback(() => {
     window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
@@ -142,7 +147,7 @@ export default function DashboardScreen({
       scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
       await loadDailySummary()
     } catch {
-      window.alert('Fatura gönderimi başlatılamadı.')
+      showError('Hata', 'Fatura gönderimi başlatılamadı.')
     } finally {
       setInvoiceSending(false)
     }
@@ -252,6 +257,18 @@ export default function DashboardScreen({
           </button>
           <button
             type="button"
+            onClick={() => setShowSalesReport(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
+              background: '#F3E5F5', border: '1px solid #CE93D8',
+              fontSize: 13, fontWeight: 500, color: '#6A1B9A',
+            }}
+          >
+            📈 Belge Raporu
+          </button>
+          <button
+            type="button"
             onClick={onStartSale}
             style={{ background: '#1565C0', color: 'white', border: 'none', borderRadius: 16, cursor: 'pointer', width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22, fontWeight: 600 }}
           >
@@ -349,6 +366,37 @@ export default function DashboardScreen({
                 companyId={companyId}
                 onAfterEnqueue={() => scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSalesReport && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.45)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+          overflow: 'auto',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 14, width: '100%', maxWidth: 900,
+            maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '12px 16px', borderBottom: '1px solid #F0F0F0', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 15, fontWeight: 700 }}>Belge Raporu</span>
+              <button
+                type="button"
+                onClick={() => setShowSalesReport(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9E9E9E' }}
+              >✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <SalesReportScreen companyId={companyId} />
             </div>
           </div>
         </div>
@@ -542,6 +590,7 @@ export default function DashboardScreen({
           {toast ?? merkezToast}
         </div>
       )}
+      <AlertDialog {...dialogProps} />
     </div>
   )
 }

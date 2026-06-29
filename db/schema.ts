@@ -254,6 +254,20 @@ export const cashiersTemp = sqliteTable('cashiers_temp', {
 })
 
 /** Buluta gidecek işlemler kuyruğu */
+export const cariPayments = sqliteTable('cari_payments', {
+  id:           text('id').primaryKey(),
+  companyId:    text('company_id').notNull(),
+  type:         text('type').notNull(),
+  amount:       real('amount').notNull(),
+  customerId:   text('customer_id'),
+  customerName: text('customer_name'),
+  customerCode: text('customer_code'),
+  cashierId:    text('cashier_id'),
+  cashierName:  text('cashier_name'),
+  description:  text('description'),
+  createdAt:    text('created_at').notNull(),
+})
+
 export const operationQueue = sqliteTable('operation_queue', {
   id:          text('id').primaryKey(),
   companyId:   text('company_id').notNull(),

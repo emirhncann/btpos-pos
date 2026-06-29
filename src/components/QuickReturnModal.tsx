@@ -22,9 +22,12 @@ export interface ReturnablePayment {
   PaymentId:          number
 }
 
+export type ReturnSearchBy = 'order' | 'sale'
+
 export interface ReturnableSale {
   Id:           number
   SaleNumber:   string
+  OrderNo?:     string | null
   CustomerInfo: {
     CustomerType?: number
     CompanyName?: string
@@ -35,11 +38,32 @@ export interface ReturnableSale {
   Payments:     ReturnablePayment[]
 }
 
+export interface RecentSalesFilter {
+  dateFrom: string
+  dateTo:   string
+  timeFrom: string
+  timeTo:   string
+}
+
+export interface RecentSaleOption {
+  id:             string
+  receiptNo:      string
+  pavoSaleNumber: string | null
+  orderNo:        string | null
+  netAmount:      number
+  createdAt:      string
+  customerName:   string | null
+  cashierName:    string | null
+}
+
 export interface QuickReturnModalState {
-  step:       'search' | 'review'
-  saleNumber: string
-  saleData?:  ReturnableSale
-  selected:   Record<number, number>
+  step:         'search' | 'recent' | 'review'
+  searchBy:     ReturnSearchBy
+  saleNumber:   string
+  saleData?:    ReturnableSale
+  selected:     Record<number, number>
+  recentSales?: RecentSaleOption[]
+  recentFilters?: RecentSalesFilter
 }
 
 interface Props {
@@ -48,8 +72,13 @@ interface Props {
   error:          string | null
   onClose:        () => void
   onSaleNumberChange: (saleNumber: string) => void
-  onSearch:       (saleNumber: string) => void
-  onSearchLast:   () => void
+  onSearchByChange:   (searchBy: ReturnSearchBy) => void
+  onSearch:       (query: string, searchBy: ReturnSearchBy) => void
+  onShowRecent:   () => void
+  onReloadRecent: (filters: RecentSalesFilter) => void
+  onRecentFiltersChange: (filters: RecentSalesFilter) => void
+  onSelectRecent: (query: string, searchBy: ReturnSearchBy) => void
+  onBackFromRecent: () => void
   onBack:         () => void
   onConfirm:      () => void
   onSelectAll:    () => void
@@ -78,14 +107,48 @@ const panel: CSSProperties = {
   flexDirection: 'column',
 }
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function offsetDateStr(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+const inputSm: CSSProperties = {
+  fontSize: 12,
+  padding: '5px 8px',
+  borderRadius: 6,
+  border: '1px solid #E5E7EB',
+}
+
+const chipBtn = (active: boolean): CSSProperties => ({
+  padding: '4px 10px',
+  borderRadius: 16,
+  fontSize: 11,
+  fontWeight: 500,
+  border: '1px solid',
+  cursor: 'pointer',
+  background: active ? '#374151' : 'white',
+  color: active ? 'white' : '#374151',
+  borderColor: active ? '#374151' : '#E5E7EB',
+})
+
 export default function QuickReturnModal({
   modal,
   loading,
   error,
   onClose,
   onSaleNumberChange,
+  onSearchByChange,
   onSearch,
-  onSearchLast,
+  onShowRecent,
+  onReloadRecent,
+  onRecentFiltersChange,
+  onSelectRecent,
+  onBackFromRecent,
   onBack,
   onConfirm,
   onSelectAll,
@@ -93,6 +156,210 @@ export default function QuickReturnModal({
   onToggleItem,
   onQtyChange,
 }: Props) {
+  function recentSearchValue(s: RecentSaleOption, searchBy: ReturnSearchBy) {
+    if (searchBy === 'order') {
+      return s.orderNo ?? s.receiptNo
+    }
+    return s.pavoSaleNumber ?? s.receiptNo
+  }
+
+  const searchLabel = modal.searchBy === 'order' ? 'Sipariş No' : 'Satış No'
+  const searchPlaceholder = modal.searchBy === 'order'
+    ? 'Sipariş No (örn: 001250624143052)'
+    : 'Satış No (örn: 0001-000123)'
+
+  if (modal.step === 'recent') {
+    const list = modal.recentSales ?? []
+    const filters = modal.recentFilters ?? {
+      dateFrom: todayStr(),
+      dateTo:   todayStr(),
+      timeFrom: '',
+      timeTo:   '',
+    }
+
+    const setFilters = (next: RecentSalesFilter) => {
+      onRecentFiltersChange(next)
+    }
+
+    const applyQuick = (dateFrom: string, dateTo: string) => {
+      const next = { ...filters, dateFrom, dateTo }
+      setFilters(next)
+      onReloadRecent(next)
+    }
+
+    return (
+      <div style={overlay}>
+        <div style={{ ...panel, padding: 24, gap: 12, maxHeight: '90vh' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>📋 Son Satışlar</div>
+              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                En fazla 20 kayıt · İade edilecek satışı seçin
+              </div>
+            </div>
+            <button type="button" onClick={onClose}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="return-search-by-recent"
+                checked={modal.searchBy === 'order'}
+                onChange={() => onSearchByChange('order')}
+              />
+              Sipariş No ile ara
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="return-search-by-recent"
+                checked={modal.searchBy === 'sale'}
+                onChange={() => onSearchByChange('sale')}
+              />
+              Satış No ile ara
+            </label>
+          </div>
+
+          {/* Hızlı tarih filtreleri */}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {([
+              ['today',    'Bugün',     todayStr(),     todayStr()],
+              ['yesterday','Dün',       offsetDateStr(-1), offsetDateStr(-1)],
+              ['week',     'Son 7 Gün', offsetDateStr(-6), todayStr()],
+              ['all',      'Tümü',      '',             ''],
+            ] as const).map(([key, label, from, to]) => {
+              const active = key === 'all'
+                ? !filters.dateFrom && !filters.dateTo
+                : filters.dateFrom === from && filters.dateTo === to
+              return (
+                <button key={key} type="button"
+                  onClick={() => applyQuick(from, to)}
+                  style={chipBtn(active)}>
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Tarih + saat */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="date" value={filters.dateFrom}
+              onChange={e => setFilters({ ...filters, dateFrom: e.target.value })}
+              style={inputSm} />
+            <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+            <input type="date" value={filters.dateTo}
+              onChange={e => setFilters({ ...filters, dateTo: e.target.value })}
+              style={inputSm} />
+            <span style={{ color: '#D1D5DB', fontSize: 12 }}>|</span>
+            <span style={{ fontSize: 11, color: '#6B7280' }}>Saat</span>
+            <input type="time" value={filters.timeFrom}
+              onChange={e => setFilters({ ...filters, timeFrom: e.target.value })}
+              style={inputSm} />
+            <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+            <input type="time" value={filters.timeTo}
+              onChange={e => setFilters({ ...filters, timeTo: e.target.value })}
+              style={inputSm} />
+            <button type="button"
+              disabled={loading}
+              onClick={() => onReloadRecent(filters)}
+              style={{
+                padding: '5px 12px', borderRadius: 8, border: 'none',
+                background: '#1565C0', color: 'white',
+                fontSize: 12, fontWeight: 600, cursor: loading ? 'wait' : 'pointer',
+                opacity: loading ? 0.6 : 1,
+              }}>
+              {loading ? '...' : 'Listele'}
+            </button>
+            {(filters.timeFrom || filters.timeTo) && (
+              <button type="button"
+                onClick={() => {
+                  const next = { ...filters, timeFrom: '', timeTo: '' }
+                  setFilters(next)
+                  onReloadRecent(next)
+                }}
+                style={{
+                  padding: '5px 10px', borderRadius: 8,
+                  border: '1px solid #E5E7EB', background: 'white',
+                  fontSize: 11, color: '#6B7280', cursor: 'pointer',
+                }}>
+                Saati temizle
+              </button>
+            )}
+          </div>
+
+          {error && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 13,
+              background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+            }}>
+              {error}
+            </div>
+          )}
+
+          <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+            {list.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 32, color: '#9CA3AF', fontSize: 13 }}>
+                Bu filtreye uygun satış bulunamadı
+              </div>
+            ) : list.map(s => {
+              const searchValue = recentSearchValue(s, modal.searchBy)
+              return (
+              <button
+                key={s.id}
+                type="button"
+                disabled={loading}
+                onClick={() => onSelectRecent(searchValue, modal.searchBy)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '12px 14px', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: 'white',
+                  cursor: loading ? 'wait' : 'pointer', textAlign: 'left',
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                <div style={{ fontSize: 20 }}>🧾</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace', color: '#111827' }}>
+                    {searchValue}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                    {new Date(s.createdAt).toLocaleString('tr-TR')}
+                    {s.customerName && ` · ${s.customerName}`}
+                    {s.cashierName && ` · ${s.cashierName}`}
+                  </div>
+                  {modal.searchBy === 'order' && s.pavoSaleNumber && (
+                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                      Satış: {s.pavoSaleNumber}
+                    </div>
+                  )}
+                  {modal.searchBy === 'sale' && s.orderNo && (
+                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                      Sipariş: {s.orderNo}
+                    </div>
+                  )}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1565C0', flexShrink: 0 }}>
+                  {s.netAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                </div>
+              </button>
+            )})}
+          </div>
+
+          <button type="button" onClick={onBackFromRecent}
+            style={{
+              padding: '12px 16px', borderRadius: 10,
+              border: '1px solid #E5E7EB', background: '#F9FAFB',
+              color: '#6B7280', fontSize: 14, cursor: 'pointer',
+            }}>
+            ← Geri
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (modal.step === 'search') {
     return (
       <div style={overlay}>
@@ -104,14 +371,35 @@ export default function QuickReturnModal({
           </div>
 
           <div style={{ fontSize: 12, color: '#6B7280' }}>
-            Satış numarasını girin veya barkod okutun
+            {searchLabel} girin veya barkod okutun
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="return-search-by"
+                checked={modal.searchBy === 'order'}
+                onChange={() => onSearchByChange('order')}
+              />
+              Sipariş No
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="return-search-by"
+                checked={modal.searchBy === 'sale'}
+                onChange={() => onSearchByChange('sale')}
+              />
+              Satış No
+            </label>
           </div>
 
           <input
             value={modal.saleNumber}
             onChange={e => onSaleNumberChange(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') onSearch(modal.saleNumber) }}
-            placeholder="Satış No (örn: 0001-000123)"
+            onKeyDown={e => { if (e.key === 'Enter') onSearch(modal.saleNumber, modal.searchBy) }}
+            placeholder={searchPlaceholder}
             autoFocus
             style={{
               padding: '12px 14px', borderRadius: 10, border: '1.5px solid #E5E7EB',
@@ -130,7 +418,7 @@ export default function QuickReturnModal({
 
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button"
-              onClick={() => onSearch(modal.saleNumber)}
+              onClick={() => onSearch(modal.saleNumber, modal.searchBy)}
               disabled={!modal.saleNumber.trim() || loading}
               style={{
                 flex: 1, padding: '12px', borderRadius: 10, border: 'none',
@@ -140,14 +428,14 @@ export default function QuickReturnModal({
               {loading ? 'Aranıyor...' : 'Ara'}
             </button>
             <button type="button"
-              onClick={onSearchLast}
+              onClick={onShowRecent}
               disabled={loading}
               style={{
                 flex: 1, padding: '12px', borderRadius: 10,
                 border: '1px solid #E5E7EB', background: '#F9FAFB',
                 color: '#374151', fontWeight: 500, fontSize: 14, cursor: 'pointer',
               }}>
-              📋 Son Satış
+              📋 Son Satışlar
             </button>
           </div>
         </div>
@@ -178,7 +466,9 @@ export default function QuickReturnModal({
           <div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>İade Önizleme</div>
             <div style={{ fontSize: 12, color: '#6B7280', fontFamily: 'monospace' }}>
-              {sale.SaleNumber}
+              {sale.OrderNo && <span>Sipariş: {sale.OrderNo}</span>}
+              {sale.OrderNo && sale.SaleNumber && ' · '}
+              {sale.SaleNumber && <span>Satış: {sale.SaleNumber}</span>}
             </div>
           </div>
           <button type="button" onClick={onClose}

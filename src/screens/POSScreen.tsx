@@ -16,14 +16,18 @@ import { buildSaleReceiptData } from '../lib/templateEngine'
 import { nextOrderNo } from '../lib/orderNo'
 import QuickReturnModal, {
   type QuickReturnModalState,
+  type RecentSalesFilter,
   type ReturnablePayment,
   type ReturnableSale,
   type ReturnableSaleItem,
 } from '../components/QuickReturnModal'
+import AlertDialog from '../components/AlertDialog'
+import { useAlertDialog } from '../hooks/useAlertDialog'
 
 function mapRawReturnableSale(data: {
   Id:           unknown
   SaleNumber:   unknown
+  OrderNo?:     unknown
   CustomerInfo: unknown
   Items:        unknown[]
   Payments:     unknown[]
@@ -83,6 +87,7 @@ function mapRawReturnableSale(data: {
   return {
     Id:           Number(data.Id ?? 0),
     SaleNumber:   String(data.SaleNumber ?? ''),
+    OrderNo:      data.OrderNo != null ? String(data.OrderNo) : null,
     CustomerInfo: customerInfo,
     Items:        items,
     Payments:     payments,
@@ -379,7 +384,7 @@ export default function POSScreen({
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
   const [pavoError, setPavoError] = useState<string | null>(null)
-  const [errorPopup, setErrorPopup] = useState<{ title: string; message: string } | null>(null)
+  const { dialogProps, showError, showSuccess, showInfo, confirm } = useAlertDialog()
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
   const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
@@ -629,10 +634,6 @@ export default function POSScreen({
     setTimeout(() => setCancelWarning(null), 3000)
   }
 
-  function showErrorPopup(title: string, message: string) {
-    setErrorPopup({ title, message })
-  }
-
   useEffect(() => {
     if (!lineDiscountTarget) {
       setLineDiscRateIn('')
@@ -662,7 +663,7 @@ export default function POSScreen({
         const scannedCode = searchQ
         setSearchQ('')
         setQuickReturnModal(m => m ? { ...m, saleNumber: scannedCode } : m)
-        void searchReturnableSale(scannedCode)
+        void searchReturnableSale(scannedCode, quickReturnModal.searchBy)
         return
       }
 
@@ -767,7 +768,7 @@ export default function POSScreen({
     const amt = discMode === 'amt' ? parseFloat(lineDiscAmtIn.replace(',', '.')) || 0 : 0
     const maxPct = posSettings.maxLineDiscountPct ?? 100
     if (rate > maxPct) {
-      showErrorPopup('İndirim Limiti', `Maksimum satır indirimi %${maxPct}`)
+      showError('İndirim Limiti', `Maksimum satır indirimi %${maxPct}`)
       return
     }
     if (amt > 0) {
@@ -775,7 +776,7 @@ export default function POSScreen({
       if (target && target.lineTotal > 0) {
         const effectivePct = (amt / target.lineTotal) * 100
         if (effectivePct > maxPct) {
-          showErrorPopup('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum %${maxPct}`)
+          showError('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum %${maxPct}`)
           return
         }
       }
@@ -1023,6 +1024,20 @@ export default function POSScreen({
         setCariPaymentAmt('')
         setCariPaymentDesc('')
 
+        await window.electron.db.saveCariPayment({
+          id:           crypto.randomUUID(),
+          companyId,
+          type:         cariPaymentModal,
+          amount,
+          customerId:   cariPaymentCust.id,
+          customerName: cariPaymentCust.name,
+          customerCode: cariPaymentCust.code ?? '',
+          cashierId:    cashier.id,
+          cashierName:  cashier.fullName,
+          description:  paymentDesc || undefined,
+          createdAt:    new Date().toISOString(),
+        })
+
         void printIfTemplate(cariPaymentModal, {
           sale_payments: {
             amount,
@@ -1199,12 +1214,12 @@ export default function POSScreen({
           const msg = smsNorm.length === 0
             ? 'SMS için 5 ile başlayan 10 haneli cep numarası girin veya cari seçin.'
             : 'Cep numarası 5 ile başlamalı ve 10 hane olmalı (ör. 555 555 55 55).'
-          showErrorPopup('SMS Bildirimi', msg)
+          showError('SMS Bildirimi', msg)
           return
         }
 
         if (sendEmail && !isValidNotifyEmail(mailAddr)) {
-          showErrorPopup('E-posta bildirimi', 'Geçerli bir e-posta girin veya Mail bildirimini kapatın.')
+          showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya Mail bildirimini kapatın.')
           return
         }
 
@@ -1227,11 +1242,11 @@ export default function POSScreen({
         )
 
         if (!deviceResult.success) {
-          showErrorPopup('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
+          showError('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
           return
         }
       } catch (e) {
-        showErrorPopup('Pavo Bağlantı Hatası', String(e))
+        showError('Pavo Bağlantı Hatası', String(e))
         return
       } finally {
         setPavoLoading(false)
@@ -1406,19 +1421,22 @@ export default function POSScreen({
       clearCart()
       searchRef.current?.focus()
     } catch (e) {
-      showErrorPopup('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
+      showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
     }
   }
 
-  async function searchReturnableSale(saleNumber: string) {
-    if (!saleNumber.trim()) return
+  async function searchReturnableSale(query: string, searchBy: 'order' | 'sale' = 'order') {
+    if (!query.trim()) return
     setQuickReturnLoading(true)
     setQuickReturnError(null)
 
     try {
-      const res = await window.electron.pavo.getReturnableSale({ saleNumber: saleNumber.trim() })
+      const res = await window.electron.pavo.getReturnableSale({
+        searchBy,
+        query: query.trim(),
+      })
 
       if (!res.success || !res.data) {
         setQuickReturnError(res.message ?? 'Satış bulunamadı')
@@ -1447,7 +1465,8 @@ export default function POSScreen({
 
       setQuickReturnModal({
         step:       'review',
-        saleNumber: sale.SaleNumber,
+        searchBy,
+        saleNumber: query.trim(),
         saleData:   sale,
         selected,
       })
@@ -1458,20 +1477,46 @@ export default function POSScreen({
     }
   }
 
-  async function searchLastSale() {
+  async function loadRecentSales(filters: RecentSalesFilter) {
     setQuickReturnLoading(true)
     setQuickReturnError(null)
     try {
-      const lastSale = await window.electron.db.getLastSale()
-      const saleNo = lastSale?.pavoSaleNumber ?? lastSale?.receiptNo
-      if (!saleNo) {
-        setQuickReturnError('Son satış bulunamadı.')
-        return
-      }
-      await searchReturnableSale(saleNo)
+      const list = await window.electron.db.getRecentSales({
+        limit:    20,
+        dateFrom: filters.dateFrom || undefined,
+        dateTo:   filters.dateTo   || undefined,
+        timeFrom: filters.timeFrom || undefined,
+        timeTo:   filters.timeTo   || undefined,
+      })
+      setQuickReturnModal(m => m ? {
+        ...m,
+        step: 'recent',
+        recentSales: list,
+        recentFilters: filters,
+      } : m)
+    } catch (e) {
+      setQuickReturnError('Liste yüklenemedi: ' + String(e))
     } finally {
       setQuickReturnLoading(false)
     }
+  }
+
+  function openRecentSales() {
+    const today = new Date().toISOString().slice(0, 10)
+    const filters: RecentSalesFilter = {
+      dateFrom: today,
+      dateTo:   today,
+      timeFrom: '',
+      timeTo:   '',
+    }
+    setQuickReturnModal(m => m ? { ...m, step: 'recent', recentFilters: filters } : {
+      step: 'recent',
+      searchBy: 'order',
+      saleNumber: '',
+      selected: {},
+      recentFilters: filters,
+    })
+    void loadRecentSales(filters)
   }
 
   async function confirmQuickReturn() {
@@ -1620,7 +1665,10 @@ export default function POSScreen({
         }
       }
 
-      window.alert(`✓ İade tamamlandı: ${totalReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`)
+      showSuccess(
+        'İade Tamamlandı',
+        `İade tamamlandı: ${totalReturn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+      )
       setQuickReturnModal(null)
       setQuickReturnError(null)
     } catch (e) {
@@ -1640,7 +1688,7 @@ export default function POSScreen({
       const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
 
       if (cardAmt > 0 && pavoSettings) {
-        window.alert('Kart iadesi için Pavo entegrasyonu bir sonraki adımda gelecek.')
+        showInfo('Bilgi', 'Kart iadesi için Pavo entegrasyonu bir sonraki adımda gelecek.')
         return
       }
 
@@ -1751,7 +1799,7 @@ export default function POSScreen({
       setLastReceipt(receiptNo)
       searchRef.current?.focus()
     } catch (e) {
-      showErrorPopup('İade Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
+      showError('İade Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
     }
@@ -2084,7 +2132,7 @@ export default function POSScreen({
                   if (docDiscMode === 'rate') {
                     const maxPct = posSettings.maxDocDiscountPct ?? 100
                     if (val > maxPct) {
-                      showErrorPopup('İndirim Limiti', `Maksimum belge indirimi %${maxPct}`)
+                      showError('İndirim Limiti', `Maksimum belge indirimi %${maxPct}`)
                       return
                     }
                     setDocDiscountRate(val)
@@ -2094,7 +2142,7 @@ export default function POSScreen({
                     if (lineSubtotal > 0) {
                       const effectivePct = (val / lineSubtotal) * 100
                       if (effectivePct > maxPct) {
-                        showErrorPopup('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum belge indirimi %${maxPct}`)
+                        showError('İndirim Limiti', `Bu tutar %${effectivePct.toFixed(1)} indirime karşılık geliyor. Maksimum belge indirimi %${maxPct}`)
                         return
                       }
                     }
@@ -2234,7 +2282,7 @@ export default function POSScreen({
               onClick={() => {
                 const norm = normalizeTrMobileForSms(smsPhoneDraft)
                 if (sendSms && norm.length !== SMS_MOBILE_LEN) {
-                  showErrorPopup('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın.')
+                  showError('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın.')
                   return
                 }
                 setSmsPhone(sendSms ? norm : '')
@@ -2333,7 +2381,7 @@ export default function POSScreen({
             <button type="button"
               onClick={() => {
                 if (sendEmail && !isValidNotifyEmail(mailAddr)) {
-                  showErrorPopup('E-posta bildirimi', 'Geçerli bir e-posta adresi girin.')
+                  showError('E-posta bildirimi', 'Geçerli bir e-posta adresi girin.')
                   return
                 }
                 setMailModalOpen(false)
@@ -2399,10 +2447,24 @@ export default function POSScreen({
           onSaleNumberChange={saleNumber =>
             setQuickReturnModal(m => m ? { ...m, saleNumber } : m)
           }
-          onSearch={saleNumber => void searchReturnableSale(saleNumber)}
-          onSearchLast={() => void searchLastSale()}
+          onSearchByChange={searchBy =>
+            setQuickReturnModal(m => m ? { ...m, searchBy, saleNumber: '' } : m)
+          }
+          onSearch={(query, searchBy) => void searchReturnableSale(query, searchBy)}
+          onShowRecent={() => openRecentSales()}
+          onReloadRecent={filters => void loadRecentSales(filters)}
+          onRecentFiltersChange={filters =>
+            setQuickReturnModal(m => m ? { ...m, recentFilters: filters } : m)
+          }
+          onSelectRecent={(query, searchBy) => void searchReturnableSale(query, searchBy)}
+          onBackFromRecent={() => {
+            setQuickReturnModal(m => m ? {
+              ...m, step: 'search', recentSales: undefined, recentFilters: undefined,
+            } : m)
+            setQuickReturnError(null)
+          }}
           onBack={() => {
-            setQuickReturnModal(m => m ? { ...m, step: 'search', saleData: undefined } : m)
+            setQuickReturnModal(m => m ? { ...m, step: 'search', saleData: undefined, selected: {} } : m)
             setQuickReturnError(null)
           }}
           onConfirm={() => void confirmQuickReturn()}
@@ -2437,43 +2499,7 @@ export default function POSScreen({
         />
       )}
 
-      {errorPopup && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ width: '100%', maxWidth: 420, background: 'white', borderRadius: 16, border: '1px solid #374151', boxShadow: '0 14px 32px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
-            <div style={{ background: '#111827', borderBottom: '1px solid #374151', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{
-                  height: 28,
-                  minWidth: 54,
-                  borderRadius: 8,
-                  padding: '0 8px',
-                  background: 'transparent',
-                  border: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <AppLogo height={20} />
-                </div>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#FCA5A5' }}>{errorPopup.title}</span>
-              </div>
-              <button onClick={() => setErrorPopup(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: '#FCA5A5', cursor: 'pointer' }}>✕</button>
-            </div>
-            <div style={{ padding: '14px 16px 6px', fontSize: 13, color: '#374151', lineHeight: 1.5 }}>
-              {errorPopup.message}
-            </div>
-            <div style={{ padding: '10px 16px 16px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => setErrorPopup(null)}
-                style={{ padding: '10px 16px', borderRadius: 9, border: 'none', background: '#B91C1C', color: 'white', fontWeight: 700, cursor: 'pointer' }}
-              >
-                Tamam
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <AlertDialog {...dialogProps} />
 
       {/* ── MODALLER ── */}
 
@@ -3282,7 +3308,15 @@ export default function POSScreen({
                         setDocDiscountMode(true)
                         return
                       }
-                      if (item.label.startsWith('Belge iptal')) { clearCart(); return }
+                      if (item.label.startsWith('Belge iptal')) {
+                        void confirm({
+                          title:   'Belge İptal',
+                          message: 'Belgeyi iptal etmek istediğinize emin misiniz?',
+                          confirmLabel: 'Evet, İptal Et',
+                          cancelLabel:  'Vazgeç',
+                        }).then(ok => { if (ok) clearCart() })
+                        return
+                      }
                       if (item.label.startsWith('Ürün iptal')) {
                         setCancelMode(m => !m)
                         setMenuOpen(null)
@@ -3297,7 +3331,7 @@ export default function POSScreen({
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
                     onClick={() => {
                       if (item.label === 'Hızlı İade') {
-                        setQuickReturnModal({ step: 'search', saleNumber: '', selected: {} })
+                        setQuickReturnModal({ step: 'search', searchBy: 'order', saleNumber: '', selected: {} })
                         setQuickReturnError(null)
                         setMenuOpen(null)
                         return
