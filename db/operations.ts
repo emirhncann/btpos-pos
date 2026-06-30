@@ -771,6 +771,30 @@ function mapPluGroups(
   })
 }
 
+export function deleteCashierPluForTerminal(terminalId: string): void {
+  const sqlite = getSqlite()
+
+  const groupIds = sqlite.prepare(`
+    SELECT id FROM plu_groups_cache
+    WHERE terminal_id = ? AND cashier_id IS NOT NULL
+  `).all(terminalId) as { id: string }[]
+
+  if (groupIds.length === 0) return
+
+  const ids = groupIds.map(g => g.id)
+  const placeholders = ids.map(() => '?').join(',')
+
+  sqlite.prepare(`
+    DELETE FROM plu_items_cache WHERE group_id IN (${placeholders})
+  `).run(...ids)
+
+  sqlite.prepare(`
+    DELETE FROM plu_groups_cache WHERE id IN (${placeholders})
+  `).run(...ids)
+
+  console.log(`[plu] ${ids.length} kasiyer bazlı grup temizlendi (terminal: ${terminalId})`)
+}
+
 export function getPluGroups(
   companyId: string,
   workplaceId?: string | null,

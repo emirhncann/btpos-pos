@@ -94,6 +94,8 @@ contextBridge.exposeInMainWorld('electron', {
     getCommandHistory:  (limit?: number)                     => ipcRenderer.invoke('db:getCommandHistory', limit),
     syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),
     syncPluGroupsAcid:  (groups: unknown[], mode?: string)                    => ipcRenderer.invoke('db:syncPluGroupsAcid', groups, mode ?? 'full'),
+    deleteCashierPluForTerminal: (terminalId: string) =>
+      ipcRenderer.invoke('db:deleteCashierPluForTerminal', terminalId),
     syncCashiersAcid:   (cashiers: unknown[], companyId: string, mode?: string) => ipcRenderer.invoke('db:syncCashiersAcid', cashiers, companyId, mode ?? 'full'),
     syncCustomersAcid:  (items: unknown[], companyId: string, mode?: string) =>
       ipcRenderer.invoke('db:syncCustomersAcid', items, companyId, mode ?? 'full'),

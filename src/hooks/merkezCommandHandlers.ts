@@ -125,6 +125,40 @@ async function refreshPluDisplay(
   onPluUpdated(cached)
 }
 
+export async function syncCashierPluOnLogin(
+  companyId:   string,
+  workplaceId: string | null,
+  terminalId:  string,
+  cashierId:   string,
+): Promise<PluGroupCacheRow[]> {
+  const terminalSettings = await window.electron.db.getPosSettings()
+
+  if (terminalSettings.pluMode !== 'cashier') {
+    return window.electron.db.getPluGroups(companyId, workplaceId ?? undefined, null)
+  }
+
+  try {
+    const groups = await Promise.race([
+      fetchPluGroupsFromServer(companyId, workplaceId, terminalId, cashierId),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PLU yükleme zaman aşımı')), 8000),
+      ),
+    ])
+
+    if (groups.length > 0) {
+      await window.electron.db.deleteCashierPluForTerminal(terminalId)
+      const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, cashierId)
+      await window.electron.db.syncPluGroupsAcid(cacheRows, 'full')
+    } else {
+      console.warn('[login] Kasiyer için PLU bulunamadı, eski cache kullanılacak:', cashierId)
+    }
+  } catch (e) {
+    console.warn('[login] PLU API hatası, eski cache kullanılacak:', e)
+  }
+
+  return window.electron.db.getPluGroups(companyId, workplaceId ?? undefined, cashierId)
+}
+
 async function syncSettings(
   companyId: string,
   workplaceId: string | null,

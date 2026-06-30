@@ -74,6 +74,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
     syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),
     syncPluGroupsAcid: (groups, mode) => electron.ipcRenderer.invoke("db:syncPluGroupsAcid", groups, mode ?? "full"),
+    deleteCashierPluForTerminal: (terminalId) => electron.ipcRenderer.invoke("db:deleteCashierPluForTerminal", terminalId),
     syncCashiersAcid: (cashiers, companyId, mode) => electron.ipcRenderer.invoke("db:syncCashiersAcid", cashiers, companyId, mode ?? "full"),
     syncCustomersAcid: (items, companyId, mode) => electron.ipcRenderer.invoke("db:syncCustomersAcid", items, companyId, mode ?? "full"),
     getCustomers: (companyId, query) => electron.ipcRenderer.invoke("db:getCustomers", companyId, query),

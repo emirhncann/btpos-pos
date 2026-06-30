@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
+import { syncCashierPluOnLogin } from '../hooks/merkezCommandHandlers'
 
 interface Props {
   companyId:   string
+  terminalId:  string
   posSettings: PosSettingsRow
-  onLogin:     (cashier: CashierRow) => void
+  onLogin:     (cashier: CashierRow, pluGroups: PluGroupCacheRow[]) => void
 }
 
 // Barkod okuyucu tespiti — bu sürede tüm karakterler geldiyse kart olarak algıla
 const BARCODE_TIMEOUT_MS = 150
 
-export default function CashierLoginScreen({ companyId, posSettings, onLogin }: Props) {
-  void companyId
-  // Sadece kart açıksa → kart modu, yoksa kod modu başlangıç
+type LoginStage = 'idle' | 'auth' | 'plu'
+
+export default function CashierLoginScreen({ companyId, terminalId, posSettings, onLogin }: Props) {
   const initialMode = !posSettings.loginWithCode && posSettings.loginWithCard
     ? 'kart'
     : 'kod'
@@ -21,11 +23,11 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
   const [code, setCode]         = useState('')
   const [password, setPassword] = useState('')
   const [error, setError]       = useState('')
-  const [loading, setLoading]   = useState(false)
+  const [loggingIn, setLoggingIn] = useState(false)
+  const [loginStage, setLoginStage] = useState<LoginStage>('idle')
   const [showNumpad, setShowNumpad] = useState(false)
   const [numpadTarget, setNumpadTarget] = useState<'code' | 'password'>('password')
 
-  // Barkod buffer — hızlı tuş basımını yakalar
   const barcodeBuffer   = useRef('')
   const barcodeTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const codeRef         = useRef<HTMLInputElement>(null)
@@ -35,11 +37,22 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
     codeRef.current?.focus()
   }, [])
 
-  // Global keydown — barkod okuyucu tespiti
-  // Her iki modda da (kod ve kart) çalışır
+  const loadingLabel = loginStage === 'auth'
+    ? 'Giriş yapılıyor...'
+    : loginStage === 'plu'
+      ? 'Ürünler yükleniyor...'
+      : 'Doğrulanıyor...'
+
+  async function finishLogin(cashier: CashierRow) {
+    setLoginStage('plu')
+    const wpRaw = await window.electron.store.get('workplace_id').catch(() => null)
+    const workplaceId = (typeof wpRaw === 'string' && wpRaw) ? wpRaw : null
+    const groups = await syncCashierPluOnLogin(companyId, workplaceId, terminalId, cashier.id)
+    onLogin(cashier, groups)
+  }
+
   const handleGlobalKey = useCallback((e: KeyboardEvent) => {
-    if (!posSettings.loginWithCard) return
-    // Input alanı odaktaysa normal klavye girişi, barkod değil
+    if (!posSettings.loginWithCard || loggingIn) return
     const tag = (e.target as HTMLElement)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
@@ -55,22 +68,21 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
       barcodeBuffer.current += e.key
       if (barcodeTimer.current) clearTimeout(barcodeTimer.current)
       barcodeTimer.current = setTimeout(() => {
-        // Timeout doldu — yeterince hızlı gelmedi, barkod değil
         barcodeBuffer.current = ''
       }, BARCODE_TIMEOUT_MS)
     }
-  }, [posSettings.loginWithCard])
+  }, [posSettings.loginWithCard, loggingIn])
 
   useEffect(() => {
     window.addEventListener('keydown', handleGlobalKey)
     return () => window.removeEventListener('keydown', handleGlobalKey)
   }, [handleGlobalKey])
 
-  // Kart/barkod ile giriş — şifresiz
   async function handleCardLogin(cardNumber: string) {
     if (!posSettings.loginWithCard) return
-    if (loading) return
-    setLoading(true)
+    if (loggingIn) return
+    setLoggingIn(true)
+    setLoginStage('auth')
     setError('')
     try {
       const cashier = await window.electron.db.verifyCashierByCard(cardNumber)
@@ -79,21 +91,22 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
         setTimeout(() => setError(''), 2000)
         return
       }
-      onLogin(cashier)
-    } catch {
-      setError('Kart okuma hatası.')
+      await finishLogin(cashier)
+    } catch (e) {
+      setError('Giriş yapılamadı: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
-      setLoading(false)
+      setLoggingIn(false)
+      setLoginStage('idle')
     }
   }
 
-  // Kod + şifre ile giriş
   async function handleLogin() {
     if (!code.trim() || !password.trim()) {
       setError('Kasiyer kodu ve şifre zorunludur.')
       return
     }
-    setLoading(true)
+    setLoggingIn(true)
+    setLoginStage('auth')
     setError('')
     try {
       const cashier = await window.electron.db.verifyCashier(code.trim(), password.trim())
@@ -104,15 +117,17 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
         codeRef.current?.focus()
         return
       }
-      onLogin(cashier)
+      await finishLogin(cashier)
     } catch (e) {
-      setError('Giriş hatası: ' + (e instanceof Error ? e.message : 'Bilinmeyen hata'))
+      setError('Giriş yapılamadı: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
-      setLoading(false)
+      setLoggingIn(false)
+      setLoginStage('idle')
     }
   }
 
   function handleNumpadKey(key: string) {
+    if (loggingIn) return
     if (key === 'KAPAT') {
       setShowNumpad(false)
       return
@@ -145,7 +160,6 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
   return (
     <div className="flex h-screen items-center justify-center bg-gray-950">
       <div className="w-full max-w-sm bg-gray-900 rounded-2xl p-8 shadow-2xl border border-gray-800">
-        {/* Logo + başlık */}
         <div className="text-center mb-6">
           <div className="flex justify-center mb-3">
             <AppLogo height={48} className="mx-auto" />
@@ -153,11 +167,11 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
           <p className="text-gray-400 text-sm mt-1">Kasiyer Girişi</p>
         </div>
 
-        {/* İki yöntem de açıksa sekme göster, sadece biri açıksa sekme gizle */}
         {posSettings.loginWithCode && posSettings.loginWithCard && (
           <div className="flex gap-2 mb-6 p-1 bg-gray-800 rounded-lg">
             <button
               type="button"
+              disabled={loggingIn}
               onClick={() => { setMode('kod'); setError('') }}
               className="flex-1 py-2 rounded-md text-sm font-medium transition-colors"
               style={{
@@ -169,6 +183,7 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
             </button>
             <button
               type="button"
+              disabled={loggingIn}
               onClick={() => { setMode('kart'); setError('') }}
               className="flex-1 py-2 rounded-md text-sm font-medium transition-colors"
               style={{
@@ -181,7 +196,6 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
           </div>
         )}
 
-        {/* Hiçbiri açık değilse uyarı */}
         {!posSettings.loginWithCode && !posSettings.loginWithCard && (
           <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
             ⚠️ Giriş yöntemi tanımlanmamış. Yöneticiye bildirin.
@@ -193,6 +207,7 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
             <div className="flex justify-end">
               <button
                 type="button"
+                disabled={loggingIn}
                 onClick={() => {
                   setShowNumpad(true)
                   setNumpadTarget(code ? 'password' : 'code')
@@ -210,9 +225,10 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
                 ref={codeRef}
                 type="text"
                 value={code}
+                disabled={loggingIn}
                 onChange={e => setCode(e.target.value)}
                 onFocus={() => setNumpadTarget('code')}
-                onKeyDown={e => e.key === 'Enter' && (password
+                onKeyDown={e => e.key === 'Enter' && !loggingIn && (password
                   ? void handleLogin()
                   : document.getElementById('cashier-pw')?.focus()
                 )}
@@ -229,9 +245,10 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
                 ref={passwordRef}
                 type="password"
                 value={password}
+                disabled={loggingIn}
                 onChange={e => setPassword(e.target.value)}
                 onFocus={() => setNumpadTarget('password')}
-                onKeyDown={e => e.key === 'Enter' && void handleLogin()}
+                onKeyDown={e => e.key === 'Enter' && !loggingIn && void handleLogin()}
                 placeholder="••••••"
                 className="w-full bg-gray-800 text-white border border-gray-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-blue-500"
               />
@@ -242,29 +259,30 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
               </div>
             )}
             <button
+              type="button"
               onClick={() => void handleLogin()}
-              disabled={loading}
+              disabled={loggingIn}
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
+              style={{ opacity: loggingIn ? 0.7 : 1 }}
             >
-              {loading ? 'Doğrulanıyor...' : 'Giriş Yap'}
+              {loggingIn ? loadingLabel : 'Giriş Yap'}
             </button>
           </div>
         )}
 
         {posSettings.loginWithCard && mode === 'kart' && (
           <div className="flex flex-col items-center gap-6 py-4">
-            {/* Kart bekleniyor görseli */}
             <div style={{
               width: 120, height: 120, borderRadius: 16,
-              background: loading ? '#1565C0' : '#1f2937',
-              border: `2px solid ${loading ? '#1565C0' : '#374151'}`,
+              background: loggingIn ? '#1565C0' : '#1f2937',
+              border: `2px solid ${loggingIn ? '#1565C0' : '#374151'}`,
               display: 'flex', flexDirection: 'column',
               alignItems: 'center', justifyContent: 'center', gap: 8,
               transition: 'all 0.2s',
             }}>
-              <span style={{ fontSize: 40 }}>{loading ? '⏳' : '🏷️'}</span>
+              <span style={{ fontSize: 40 }}>{loggingIn ? '⏳' : '🏷️'}</span>
               <span style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', lineHeight: 1.3 }}>
-                {loading ? 'Doğrulanıyor...' : 'Kartı okutun'}
+                {loggingIn ? loadingLabel : 'Kartı okutun'}
               </span>
             </div>
 
@@ -276,6 +294,7 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
               <p className="text-gray-500 text-xs text-center">
                 veya <button
                   type="button"
+                  disabled={loggingIn}
                   onClick={() => setMode('kod')}
                   className="text-blue-400 underline"
                 >kod ile giriş yapın</button>
@@ -291,7 +310,7 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
         )}
       </div>
 
-      {showNumpad && (
+      {showNumpad && !loggingIn && (
         <div className="fixed inset-0 z-[9999] bg-black/60 flex items-end justify-center p-3">
           <div className="w-full max-w-xs bg-gray-900 border border-gray-700 rounded-xl p-3">
             <div className="flex items-center justify-between mb-3">
@@ -337,6 +356,25 @@ export default function CashierLoginScreen({ companyId, posSettings, onLogin }: 
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {loggingIn && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000,
+          background: 'rgba(255,255,255,0.92)',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 12,
+        }}>
+          <div style={{
+            width: 36, height: 36, border: '3px solid #E5E7EB',
+            borderTopColor: '#1565C0', borderRadius: '50%',
+            animation: 'cashier-login-spin 0.8s linear infinite',
+          }} />
+          <div style={{ fontSize: 14, color: '#374151', fontWeight: 500 }}>
+            {loadingLabel}
+          </div>
+          <style>{`@keyframes cashier-login-spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       )}
     </div>

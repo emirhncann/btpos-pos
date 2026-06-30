@@ -265,43 +265,14 @@ export default function App() {
     setState('cashier_login')
   }
 
-  async function handleCashierLogin(c: CashierRow) {
+  async function handleCashierLogin(c: CashierRow, groups: PluGroupCacheRow[]) {
     setCashier(c)
+    setPluGroups(groups)
     if (companyId) {
-      const wpRaw       = await window.electron.store.get('workplace_id').catch(() => null)
-      const workplaceId = (typeof wpRaw === 'string' && wpRaw) ? wpRaw : undefined
-
-      // 1. Settings — SQLite'tan oku (API'ye gitme)
       try {
         const cached = await window.electron.db.getPosSettings(c.id)
         setPosSettings(cached)
       } catch { /* mevcut state kalır */ }
-
-      // 2. PLU — SQLite'tan oku (API'ye gitme)
-      // cashierId'yi posSettings.pluMode'dan belirle
-      // Not: getPosSettings sonrası fresh state henüz React'a yansımadı
-      // Bu yüzden direkt db'den oku
-      try {
-        const fresh = await window.electron.db.getPosSettings(c.id)
-        // pluMode=cashier -> o kasiyerin PLU'su, terminal -> terminal bazlı (null)
-        const cashierIdForPlu = fresh.pluMode === 'cashier' ? c.id : null
-        const cached = await window.electron.db.getPluGroups(
-          companyId,
-          workplaceId ?? null,
-          cashierIdForPlu,
-        )
-        if (cached.length > 0) {
-          setPluGroups(cached)
-        } else {
-          // Kasiyer bazlı PLU yoksa terminal/işyeri fallback'i tekrar dene
-          const fallback = await window.electron.db.getPluGroups(
-            companyId,
-            workplaceId ?? null,
-            null,
-          )
-          if (fallback.length > 0) setPluGroups(fallback)
-        }
-      } catch { /* PLU boş kalır, sync_plu komutu ile gelecek */ }
     }
     setState('dashboard')
   }
@@ -343,7 +314,14 @@ export default function App() {
     return <ActivationScreen onActivated={handleActivated} />
 
   if (state === 'cashier_login')
-    return <CashierLoginScreen companyId={companyId!} posSettings={terminalSettings} onLogin={handleCashierLogin} />
+    return (
+      <CashierLoginScreen
+        companyId={companyId!}
+        terminalId={terminalId!}
+        posSettings={terminalSettings}
+        onLogin={handleCashierLogin}
+      />
+    )
 
   if (terminalLocked && cashier && (state === 'dashboard' || state === 'pos')) {
     return (

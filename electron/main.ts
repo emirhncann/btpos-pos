@@ -762,6 +762,12 @@ app.whenReady().then(async () => {
     return syncPluGroupsAcid(groups as import('../db/operations').PluGroupCacheRow[], (mode === 'diff' ? 'diff' : 'full'))
   })
 
+  ipcMain.handle('db:deleteCashierPluForTerminal', async (_e, terminalId: string) => {
+    const { deleteCashierPluForTerminal } = await import('../db/operations')
+    deleteCashierPluForTerminal(terminalId)
+    return { success: true }
+  })
+
   ipcMain.handle('db:syncCashiersAcid', async (_e, cashierList, companyId, mode) => {
     const { syncCashiersAcid } = await import('../db/operations')
     return syncCashiersAcid(cashierList as import('../db/operations').CashierRow[], companyId, (mode === 'diff' ? 'diff' : 'full'))

@@ -133,6 +133,7 @@ declare global {
         getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
         syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
         syncPluGroupsAcid:  (groups: PluGroupCacheRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
+        deleteCashierPluForTerminal(terminalId: string): Promise<{ success: boolean }>
         syncCashiersAcid:   (cashiers: CashierRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
