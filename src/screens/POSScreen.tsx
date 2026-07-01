@@ -100,11 +100,18 @@ const CART_GRID = '84px 1fr 72px 82px'
 const SMS_MOBILE_LEN = 10
 
 function normalizeTrMobileForSms(raw: string): string {
+  if (!raw) return ''
+
   let d = raw.replace(/\D/g, '')
+
   if (d.startsWith('90')) d = d.slice(2)
-  while (d.startsWith('0')) d = d.slice(1)
+
+  if (d.startsWith('0')) d = d.slice(1)
+
   d = d.slice(0, SMS_MOBILE_LEN)
-  if (d.length > 0 && d[0] !== '5') return ''
+
+  if (!d.startsWith('5')) return ''
+
   return d
 }
 
@@ -394,6 +401,7 @@ export default function POSScreen({
     savedAt:  string
   } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
 
@@ -438,8 +446,16 @@ export default function POSScreen({
       return
     }
     if (c.phone?.trim()) {
-      setSmsPhone(c.phone.trim())
-      setSendSms(true)
+      const normalized = normalizeTrMobileForSms(c.phone)
+      if (normalized.length === SMS_MOBILE_LEN) {
+        setSmsPhone(normalized)
+        setSmsPhoneDraft(normalized)
+        setSendSms(true)
+      } else {
+        setSmsPhone('')
+        setSmsPhoneDraft('')
+        setSendSms(false)
+      }
     } else {
       setSmsPhone('')
       setSendSms(false)
@@ -655,6 +671,85 @@ export default function POSScreen({
     prevCartLenRef.current = cart.length
   }, [cart.length])
 
+  const applyFiyatGorScan = useCallback((code: string) => {
+    setFiyatGorQ(code)
+    setFiyatGorItem(null)
+    const found = allProducts.find(p => p.barcode === code || p.code === code)
+    if (found) setFiyatGorItem(found)
+  }, [allProducts])
+
+  useEffect(() => {
+    if (menuOpen === 'fiyatgor') {
+      setTimeout(() => fiyatGorInputRef.current?.focus(), 50)
+    }
+  }, [menuOpen])
+
+  /* ── Global barkod okuyucu ── */
+  useEffect(() => {
+    let barcodeBuffer = ''
+    let barcodeTimer: ReturnType<typeof setTimeout> | null = null
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (smsPhonePanelOpen || mailModalOpen || showHeld || showCustomer) return
+      if (quickReturnModal) return
+
+      if (menuOpen === 'fiyatgor') {
+        const tag = (e.target as HTMLElement)?.tagName
+        const inputFocused = tag === 'INPUT' || tag === 'TEXTAREA'
+        if (!touchEnabled && inputFocused) return
+
+        if (e.key === 'Enter') {
+          if (barcodeBuffer.length >= 3) applyFiyatGorScan(barcodeBuffer)
+          barcodeBuffer = ''
+          if (barcodeTimer) clearTimeout(barcodeTimer)
+          e.preventDefault()
+          return
+        }
+        if (e.key.length === 1) {
+          barcodeBuffer += e.key
+          setFiyatGorQ(prev => prev + e.key)
+          if (barcodeTimer) clearTimeout(barcodeTimer)
+          barcodeTimer = setTimeout(() => { barcodeBuffer = '' }, 100)
+          e.preventDefault()
+          return
+        }
+        return
+      }
+
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'Enter') {
+        if (barcodeBuffer.length >= 3) {
+          setSearchQ(barcodeBuffer)
+        }
+        barcodeBuffer = ''
+        if (barcodeTimer) clearTimeout(barcodeTimer)
+        return
+      }
+
+      if (e.key.length === 1) {
+        barcodeBuffer += e.key
+        if (barcodeTimer) clearTimeout(barcodeTimer)
+        barcodeTimer = setTimeout(() => {
+          barcodeBuffer = ''
+        }, 100)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    smsPhonePanelOpen,
+    mailModalOpen,
+    showHeld,
+    showCustomer,
+    quickReturnModal,
+    menuOpen,
+    applyFiyatGorScan,
+    touchEnabled,
+  ])
+
   /* ── Barkod okuyucu ── */
   useEffect(() => {
     if (searchQ.length < 2) return
@@ -812,11 +907,10 @@ export default function POSScreen({
         })
       }
 
-      const next = prev.filter(c => c.id !== id)
-      if (next.length === 0) setCancelMode(false)
-      return next
+      return prev.filter(c => c.id !== id)
     })
 
+    setCancelMode(false)
     setNumBuf('')
   }
 
@@ -3395,18 +3489,14 @@ export default function POSScreen({
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
-                    autoFocus={!touchEnabled}
+                    ref={fiyatGorInputRef}
+                    autoFocus
                     value={fiyatGorQ}
                     readOnly={touchEnabled}
                     onChange={e => {
                       if (!touchEnabled) {
                         const v = e.target.value
-                        setFiyatGorQ(v)
-                        setFiyatGorItem(null)
-                        const found = allProducts.find(p =>
-                          p.barcode === v || p.code === v
-                        )
-                        if (found) setFiyatGorItem(found)
+                        applyFiyatGorScan(v)
                       }
                     }}
                     placeholder="Barkod okut veya ürün adı gir..."
@@ -3421,14 +3511,7 @@ export default function POSScreen({
                       title:     'Ürün ara',
                       initial:   fiyatGorQ,
                       type:      'qwerty',
-                      onConfirm: (v) => {
-                        setFiyatGorQ(v)
-                        setFiyatGorItem(null)
-                        const found = allProducts.find(p =>
-                          p.barcode === v || p.code === v
-                        )
-                        if (found) setFiyatGorItem(found)
-                      },
+                      onConfirm: (v) => applyFiyatGorScan(v),
                     })}
                     style={{ padding: '12px 14px', borderRadius: 10,
                       border: '1.5px solid #E5E7EB', background: '#F9FAFB',
