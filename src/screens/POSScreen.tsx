@@ -125,14 +125,28 @@ function formatTrMobileSmsDisplay(digits: string): string {
   return out
 }
 
-function calcPluFontSize(name: string, baseFontSize: number, cols: number): number {
+function calcPluFonts(
+  name: string,
+  baseName: number,
+  basePrice: number,
+  cols: number,
+  rows: number,
+): { nameFontSize: number; priceFontSize: number } {
+  void rows
   const len = name.length
-  const normalLimit = Math.max(8, Math.floor(60 / cols))
 
-  if (len <= normalLimit) return baseFontSize
-  if (len <= normalLimit * 1.8) return Math.max(baseFontSize - 1, 10)
-  if (len <= normalLimit * 2.5) return Math.max(baseFontSize - 2, 10)
-  return Math.max(baseFontSize - 3, 10)
+  const charsPerLine = Math.floor(55 / cols)
+  const estimatedLines = Math.ceil(len / Math.max(charsPerLine, 1))
+
+  let scale = 1
+  if (estimatedLines > 3) scale = 0.75
+  else if (estimatedLines > 2) scale = 0.85
+  else if (estimatedLines > 1) scale = 0.95
+
+  return {
+    nameFontSize:  Math.max(Math.round(baseName  * scale), 9),
+    priceFontSize: Math.max(Math.round(basePrice * scale), 9),
+  }
 }
 
 function isValidNotifyEmail(s: string): boolean {
@@ -3952,7 +3966,9 @@ export default function POSScreen({
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
-                const nameFontSize = calcPluFontSize(p.name, fontSizeName, pluCols)
+                const { nameFontSize, priceFontSize } = calcPluFonts(
+                  p.name, fontSizeName, fontSizePrice, pluCols, pluRows,
+                )
                 return (
                   <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
                     style={{
@@ -4011,7 +4027,7 @@ export default function POSScreen({
                     )}
                     {posSettings.showPrice && (
                       <div style={{
-                        fontSize: fontSizePrice,
+                        fontSize: priceFontSize,
                         fontWeight: 700,
                         color: activeColor,
                         marginTop: 3,
