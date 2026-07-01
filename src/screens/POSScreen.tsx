@@ -6,6 +6,7 @@ import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
+import { PluButton } from '../components/PluButton'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -123,30 +124,6 @@ function formatTrMobileSmsDisplay(digits: string): string {
   if (x.length > 6) out += ' ' + x.slice(6, 8)
   if (x.length > 8) out += ' ' + x.slice(8, 10)
   return out
-}
-
-function calcPluFonts(
-  name:      string,
-  baseName:  number,
-  basePrice: number,
-  cols:      number,
-  rows:      number,
-): { nameFontSize: number; priceFontSize: number; estimatedLines: number } {
-  void rows
-
-  const charsPerLine = Math.max(5, Math.floor(48 / cols))
-  const estimatedLines = Math.ceil(name.length / charsPerLine)
-
-  let scale = 1
-  if (estimatedLines > 4) scale = 0.60
-  else if (estimatedLines > 3) scale = 0.72
-  else if (estimatedLines > 2) scale = 0.85
-  else if (estimatedLines > 1) scale = 0.93
-
-  const nameFontSize  = Math.max(Math.round(baseName  * scale), 8)
-  const priceFontSize = Math.max(Math.round(basePrice * scale), 8)
-
-  return { nameFontSize, priceFontSize, estimatedLines }
 }
 
 function isValidNotifyEmail(s: string): boolean {
@@ -3965,83 +3942,28 @@ export default function POSScreen({
             }}>
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
-                if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
-                const { nameFontSize, priceFontSize, estimatedLines } = calcPluFonts(
-                  p.name, fontSizeName, fontSizePrice, pluCols, pluRows,
+                if (!p) return (
+                  <div key={`e${i}`} style={{
+                    borderRadius: 8,
+                    background: '#fafafa',
+                    border: '1px dashed #f0f0f0',
+                  }} />
                 )
-                const showPrice = posSettings.showPrice
-                const showCode  = posSettings.showCode || posSettings.showBarcode
                 return (
-                  <div
+                  <PluButton
                     key={`${p.id}-${i}`}
+                    name={p.name}
+                    price={p.price}
+                    code={p.code}
+                    barcode={p.barcode}
+                    showPrice={posSettings.showPrice}
+                    showCode={posSettings.showCode}
+                    showBarcode={posSettings.showBarcode}
+                    activeColor={activeColor}
+                    activeSoft={activeSoft}
+                    baseFontSize={fontSizeName}
                     onClick={() => handlePluClick(p)}
-                    style={{
-                      borderRadius:   8,
-                      padding:        '6px 4px',
-                      cursor:         'pointer',
-                      display:        'flex',
-                      flexDirection:  'column',
-                      alignItems:     'center',
-                      justifyContent: showPrice ? 'space-between' : 'center',
-                      border:         '2px solid transparent',
-                      background:     activeSoft,
-                      transition:     'all 0.15s',
-                      overflow:       'hidden',
-                      minHeight:      0,
-                      minWidth:       0,
-                      width:          '100%',
-                      boxSizing:      'border-box',
-                    }}
-                    onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
-                    onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}
-                    onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
-                    onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
-                  >
-                    <div style={{
-                      fontSize:     nameFontSize,
-                      fontWeight:   600,
-                      color:        '#374151',
-                      textAlign:    'center',
-                      lineHeight:   1.25,
-                      wordBreak:    'break-word',
-                      overflowWrap: 'break-word',
-                      overflow:     'hidden',
-                      width:        '100%',
-                      minWidth:     0,
-                      display:      'block',
-                    }}>
-                      {p.name}
-                    </div>
-
-                    {showCode && estimatedLines <= 2 && (
-                      <div style={{
-                        fontSize:     8,
-                        color:        '#9ca3af',
-                        textAlign:    'center',
-                        overflow:     'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace:   'nowrap',
-                        width:        '100%',
-                        marginTop:    2,
-                      }}>
-                        {posSettings.showCode && p.code}
-                        {posSettings.showBarcode && p.barcode}
-                      </div>
-                    )}
-
-                    {showPrice && (
-                      <div style={{
-                        fontSize:   priceFontSize,
-                        fontWeight: 700,
-                        color:      activeColor,
-                        textAlign:  'center',
-                        marginTop:  4,
-                        flexShrink: 0,
-                      }}>
-                        {fmt(p.price)}
-                      </div>
-                    )}
-                  </div>
+                  />
                 )
               })}
             </div>
