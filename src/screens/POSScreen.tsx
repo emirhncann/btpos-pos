@@ -125,6 +125,16 @@ function formatTrMobileSmsDisplay(digits: string): string {
   return out
 }
 
+function calcPluFontSize(name: string, baseFontSize: number, cols: number): number {
+  const len = name.length
+  const normalLimit = Math.max(8, Math.floor(60 / cols))
+
+  if (len <= normalLimit) return baseFontSize
+  if (len <= normalLimit * 1.8) return Math.max(baseFontSize - 1, 10)
+  if (len <= normalLimit * 2.5) return Math.max(baseFontSize - 2, 10)
+  return Math.max(baseFontSize - 3, 10)
+}
+
 function isValidNotifyEmail(s: string): boolean {
   const t = s.trim()
   if (t.length < 5 || !t.includes('@')) return false
@@ -3942,6 +3952,7 @@ export default function POSScreen({
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
+                const nameFontSize = calcPluFontSize(p.name, fontSizeName, pluCols)
                 return (
                   <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
                     style={{
@@ -3965,22 +3976,23 @@ export default function POSScreen({
                     onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
                   >
                     <div style={{
-                      fontSize: fontSizeName,
+                      fontSize: nameFontSize,
                       fontWeight: 600,
                       color: '#374151',
                       textAlign: 'center',
-                      lineHeight: 1.2,
-                      overflow: 'hidden',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
+                      lineHeight: 1.25,
                       wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                      overflow: 'hidden',
                       flex: 1,
                       width: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}>
                       {p.name}
                     </div>
-                    {(posSettings.showCode || posSettings.showBarcode) && (
+                    {(posSettings.showCode || posSettings.showBarcode) && p.name.length < 30 && (
                       <div style={{
                         fontSize: Math.max(7, fontSizeCode - 1),
                         color: '#9ca3af',
