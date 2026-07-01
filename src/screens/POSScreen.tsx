@@ -3970,6 +3970,11 @@ export default function POSScreen({
                 const { nameFontSize, priceFontSize, estimatedLines } = calcPluFonts(
                   p.name, fontSizeName, fontSizePrice, pluCols, pluRows,
                 )
+                const showPrice = posSettings.showPrice
+                const showCode  = Boolean(
+                  (posSettings.showCode || posSettings.showBarcode) && estimatedLines <= 2,
+                )
+                const onlyName  = !showPrice && !showCode
                 return (
                   <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
                     style={{
@@ -3979,13 +3984,16 @@ export default function POSScreen({
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
+                      justifyContent: onlyName ? 'center' : 'space-between',
                       gap: 0,
                       border: '2px solid transparent',
                       background: activeSoft,
                       transition: 'all 0.15s',
                       overflow: 'hidden',
                       minHeight: 0,
+                      minWidth: 0,
+                      width: '100%',
+                      boxSizing: 'border-box',
                     }}
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}
@@ -4001,14 +4009,18 @@ export default function POSScreen({
                       wordBreak: 'break-all',
                       overflowWrap: 'anywhere',
                       overflow: 'hidden',
-                      flex: 1,
                       width: '100%',
-                      maxHeight: '3.75em',
-                      display: 'block',
+                      minWidth: 0,
+                      flex: onlyName ? 'unset' : 1,
+                      maxHeight: onlyName ? undefined : '3.75em',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxSizing: 'border-box',
                     }}>
                       {p.name}
                     </div>
-                    {(posSettings.showCode || posSettings.showBarcode) && estimatedLines <= 2 && (
+                    {showCode && (
                       <div style={{
                         fontSize: 8,
                         color: '#9ca3af',
@@ -4018,19 +4030,18 @@ export default function POSScreen({
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                         width: '100%',
-                        marginTop: 2,
+                        flexShrink: 0,
                       }}>
                         {posSettings.showCode && p.code}
                         {posSettings.showCode && posSettings.showBarcode && p.barcode && ' · '}
                         {posSettings.showBarcode && p.barcode}
                       </div>
                     )}
-                    {posSettings.showPrice && (
+                    {showPrice && (
                       <div style={{
                         fontSize: priceFontSize,
                         fontWeight: 700,
                         color: activeColor,
-                        marginTop: 3,
                         flexShrink: 0,
                         textAlign: 'center',
                       }}>
