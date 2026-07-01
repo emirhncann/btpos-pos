@@ -134,16 +134,17 @@ function calcPluFonts(
 ): { nameFontSize: number; priceFontSize: number; estimatedLines: number } {
   void rows
 
-  const charsPerLine = Math.max(6, Math.floor(52 / cols))
+  const charsPerLine = Math.max(5, Math.floor(48 / cols))
   const estimatedLines = Math.ceil(name.length / charsPerLine)
 
   let scale = 1
-  if (estimatedLines > 4) scale = 0.70
-  else if (estimatedLines > 3) scale = 0.80
-  else if (estimatedLines > 2) scale = 0.90
+  if (estimatedLines > 4) scale = 0.60
+  else if (estimatedLines > 3) scale = 0.72
+  else if (estimatedLines > 2) scale = 0.85
+  else if (estimatedLines > 1) scale = 0.93
 
-  const nameFontSize  = Math.max(Math.round(baseName  * scale), 9)
-  const priceFontSize = Math.max(Math.round(basePrice * scale), 9)
+  const nameFontSize  = Math.max(Math.round(baseName  * scale), 8)
+  const priceFontSize = Math.max(Math.round(basePrice * scale), 8)
 
   return { nameFontSize, priceFontSize, estimatedLines }
 }
@@ -4002,8 +4003,8 @@ export default function POSScreen({
                       color:        '#374151',
                       textAlign:    'center',
                       lineHeight:   1.25,
-                      wordBreak:    'break-all',
-                      overflowWrap: 'anywhere',
+                      wordBreak:    'break-word',
+                      overflowWrap: 'break-word',
                       overflow:     'hidden',
                       width:        '100%',
                       minWidth:     0,
