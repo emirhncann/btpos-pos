@@ -131,7 +131,7 @@ function calcPluFonts(
   basePrice: number,
   cols: number,
   rows: number,
-): { nameFontSize: number; priceFontSize: number } {
+): { nameFontSize: number; priceFontSize: number; estimatedLines: number } {
   void rows
   const len = name.length
 
@@ -146,6 +146,7 @@ function calcPluFonts(
   return {
     nameFontSize:  Math.max(Math.round(baseName  * scale), 9),
     priceFontSize: Math.max(Math.round(basePrice * scale), 9),
+    estimatedLines,
   }
 }
 
@@ -3966,7 +3967,7 @@ export default function POSScreen({
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
-                const { nameFontSize, priceFontSize } = calcPluFonts(
+                const { nameFontSize, priceFontSize, estimatedLines } = calcPluFonts(
                   p.name, fontSizeName, fontSizePrice, pluCols, pluRows,
                 )
                 return (
@@ -3997,20 +3998,19 @@ export default function POSScreen({
                       color: '#374151',
                       textAlign: 'center',
                       lineHeight: 1.25,
-                      wordBreak: 'break-word',
-                      overflowWrap: 'break-word',
+                      wordBreak: 'break-all',
+                      overflowWrap: 'anywhere',
                       overflow: 'hidden',
                       flex: 1,
                       width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
+                      maxHeight: '3.75em',
+                      display: 'block',
                     }}>
                       {p.name}
                     </div>
-                    {(posSettings.showCode || posSettings.showBarcode) && p.name.length < 30 && (
+                    {(posSettings.showCode || posSettings.showBarcode) && estimatedLines <= 2 && (
                       <div style={{
-                        fontSize: Math.max(7, fontSizeCode - 1),
+                        fontSize: 8,
                         color: '#9ca3af',
                         fontFamily: 'monospace',
                         textAlign: 'center',
