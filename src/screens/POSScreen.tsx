@@ -126,28 +126,26 @@ function formatTrMobileSmsDisplay(digits: string): string {
 }
 
 function calcPluFonts(
-  name: string,
-  baseName: number,
+  name:      string,
+  baseName:  number,
   basePrice: number,
-  cols: number,
-  rows: number,
+  cols:      number,
+  rows:      number,
 ): { nameFontSize: number; priceFontSize: number; estimatedLines: number } {
   void rows
-  const len = name.length
 
-  const charsPerLine = Math.floor(55 / cols)
-  const estimatedLines = Math.ceil(len / Math.max(charsPerLine, 1))
+  const charsPerLine = Math.max(6, Math.floor(52 / cols))
+  const estimatedLines = Math.ceil(name.length / charsPerLine)
 
   let scale = 1
-  if (estimatedLines > 3) scale = 0.75
-  else if (estimatedLines > 2) scale = 0.85
-  else if (estimatedLines > 1) scale = 0.95
+  if (estimatedLines > 4) scale = 0.70
+  else if (estimatedLines > 3) scale = 0.80
+  else if (estimatedLines > 2) scale = 0.90
 
-  return {
-    nameFontSize:  Math.max(Math.round(baseName  * scale), 9),
-    priceFontSize: Math.max(Math.round(basePrice * scale), 9),
-    estimatedLines,
-  }
+  const nameFontSize  = Math.max(Math.round(baseName  * scale), 9)
+  const priceFontSize = Math.max(Math.round(basePrice * scale), 9)
+
+  return { nameFontSize, priceFontSize, estimatedLines }
 }
 
 function isValidNotifyEmail(s: string): boolean {
@@ -3972,26 +3970,26 @@ export default function POSScreen({
                 )
                 const showPrice = posSettings.showPrice
                 const showCode  = posSettings.showCode || posSettings.showBarcode
-                const onlyName  = !showPrice && !showCode
                 return (
-                  <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
+                  <div
+                    key={`${p.id}-${i}`}
+                    onClick={() => handlePluClick(p)}
                     style={{
-                      borderRadius: 8,
-                      padding: '4px 4px 6px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: onlyName ? 'center' : 'space-between',
-                      gap: 0,
-                      border: '2px solid transparent',
-                      background: activeSoft,
-                      transition: 'all 0.15s',
-                      overflow: 'hidden',
-                      minHeight: 0,
-                      minWidth: 0,
-                      width: '100%',
-                      boxSizing: 'border-box',
+                      borderRadius:   8,
+                      padding:        '6px 4px',
+                      cursor:         'pointer',
+                      display:        'flex',
+                      flexDirection:  'column',
+                      alignItems:     'center',
+                      justifyContent: showPrice ? 'space-between' : 'center',
+                      border:         '2px solid transparent',
+                      background:     activeSoft,
+                      transition:     'all 0.15s',
+                      overflow:       'hidden',
+                      minHeight:      0,
+                      minWidth:       0,
+                      width:          '100%',
+                      boxSizing:      'border-box',
                     }}
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}
@@ -3999,45 +3997,45 @@ export default function POSScreen({
                     onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
                   >
                     <div style={{
-                      fontSize: nameFontSize,
-                      fontWeight: 600,
-                      color: '#374151',
-                      textAlign: 'center',
-                      lineHeight: 1.25,
-                      wordBreak: 'break-all',
+                      fontSize:     nameFontSize,
+                      fontWeight:   600,
+                      color:        '#374151',
+                      textAlign:    'center',
+                      lineHeight:   1.25,
+                      wordBreak:    'break-all',
                       overflowWrap: 'anywhere',
-                      overflow: 'hidden',
-                      width: '100%',
-                      minWidth: 0,
-                      flex: onlyName ? 'unset' : 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
+                      overflow:     'hidden',
+                      width:        '100%',
+                      minWidth:     0,
+                      display:      'block',
                     }}>
                       {p.name}
                     </div>
+
                     {showCode && estimatedLines <= 2 && (
                       <div style={{
-                        fontSize: 8,
-                        color: '#9ca3af',
-                        textAlign: 'center',
-                        overflow: 'hidden',
+                        fontSize:     8,
+                        color:        '#9ca3af',
+                        textAlign:    'center',
+                        overflow:     'hidden',
                         textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        width: '100%',
-                        flexShrink: 0,
+                        whiteSpace:   'nowrap',
+                        width:        '100%',
+                        marginTop:    2,
                       }}>
                         {posSettings.showCode && p.code}
                         {posSettings.showBarcode && p.barcode}
                       </div>
                     )}
+
                     {showPrice && (
                       <div style={{
-                        fontSize: priceFontSize,
+                        fontSize:   priceFontSize,
                         fontWeight: 700,
-                        color: activeColor,
+                        color:      activeColor,
+                        textAlign:  'center',
+                        marginTop:  4,
                         flexShrink: 0,
-                        textAlign: 'center',
                       }}>
                         {fmt(p.price)}
                       </div>
