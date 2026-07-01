@@ -29,38 +29,52 @@ export function PluButton({
     const nameEl    = nameRef.current
     if (!container || !nameEl) return
 
-    const measure = () => {
+    const calculate = () => {
+      const containerH = container.clientHeight
+      const containerW = container.clientWidth
+      if (containerH < 10 || containerW < 10) return
+
+      const padV = 10
       let lo = 7
       let hi = baseFontSize
       let best = 7
 
       const fits = (fs: number): boolean => {
-        nameEl.style.fontSize = fs + 'px'
-        const priceH = showPrice ? Math.round(fs * 1.3 + 4) : 0
-        const codeH  = (showCode || showBarcode) ? 12 : 0
-        const padV   = 10
-        const availH = container.clientHeight - priceH - codeH - padV
-        const nameH  = nameEl.scrollHeight
+        const priceH = showPrice ? Math.ceil(fs * 1.35) + 4 : 0
+        const codeH  = (showCode || showBarcode) ? 13 : 0
+        const gap    = priceH > 0 || codeH > 0 ? 4 : 0
+        const availH = containerH - priceH - codeH - gap - padV
+        if (availH < fs * 1.25) return false
+
+        nameEl.style.cssText = `
+          font-size: ${fs}px;
+          line-height: 1.25;
+          word-break: break-word;
+          overflow-wrap: break-word;
+          width: ${containerW - 8}px;
+          display: block;
+          position: absolute;
+          visibility: hidden;
+        `
+        nameEl.textContent = name
+        const nameH = nameEl.scrollHeight
+        nameEl.style.cssText = ''
+        nameEl.textContent = ''
         return nameH <= availH
       }
 
       while (lo <= hi) {
         const mid = Math.floor((lo + hi) / 2)
-        if (fits(mid)) {
-          best = mid
-          lo   = mid + 1
-        } else {
-          hi   = mid - 1
-        }
+        if (fits(mid)) { best = mid; lo = mid + 1 }
+        else           { hi = mid - 1 }
       }
 
-      nameEl.style.fontSize = ''
       setFontSize(best)
     }
 
-    measure()
+    calculate()
 
-    const ro = new ResizeObserver(measure)
+    const ro = new ResizeObserver(calculate)
     ro.observe(container)
     return () => ro.disconnect()
   }, [name, baseFontSize, showPrice, showCode, showBarcode])
@@ -79,6 +93,7 @@ export function PluButton({
         flexDirection:  'column',
         alignItems:     'center',
         justifyContent: 'center',
+        gap:            2,
         border:         '2px solid transparent',
         background:     activeSoft,
         transition:     'border-color 0.15s',
@@ -88,30 +103,40 @@ export function PluButton({
         width:          '100%',
         height:         '100%',
         boxSizing:      'border-box',
-        gap:            2,
+        position:       'relative',
       }}
-      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = activeColor }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'transparent' }}
+      onMouseEnter={e => {
+        const el = e.currentTarget as HTMLDivElement
+        el.style.borderColor = activeColor
+        el.style.transform   = 'scale(1.02)'
+      }}
+      onMouseLeave={e => {
+        const el = e.currentTarget as HTMLDivElement
+        el.style.borderColor = 'transparent'
+        el.style.transform   = 'scale(1)'
+      }}
+      onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
+      onMouseUp={e   => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
     >
-      <div
-        ref={nameRef}
-        style={{
-          fontSize:     fontSize,
-          fontWeight:   600,
-          color:        '#374151',
-          textAlign:    'center',
-          lineHeight:   1.25,
-          wordBreak:    'break-word',
-          overflowWrap: 'break-word',
-          overflow:     'hidden',
-          width:        '100%',
-          display:      'block',
-        }}
-      >
+      <div ref={nameRef} style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none' }} />
+
+      <div style={{
+        fontSize:     fontSize,
+        fontWeight:   600,
+        color:        '#374151',
+        textAlign:    'center',
+        lineHeight:   1.25,
+        wordBreak:    'break-word',
+        overflowWrap: 'break-word',
+        overflow:     'hidden',
+        width:        '100%',
+        display:      'block',
+        flexShrink:   0,
+      }}>
         {name}
       </div>
 
-      {(showCode || showBarcode) && (
+      {(showCode || showBarcode) && fontSize >= 10 && (
         <div style={{
           fontSize:     9,
           color:        '#9ca3af',

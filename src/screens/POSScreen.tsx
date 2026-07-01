@@ -3951,14 +3951,14 @@ export default function POSScreen({
                 )
                 return (
                   <PluButton
-                    key={`${p.id}-${i}`}
+                    key={`${p.id}-${p.code}-${i}`}
                     name={p.name}
                     price={p.price}
-                    code={p.code}
-                    barcode={p.barcode}
-                    showPrice={posSettings.showPrice}
-                    showCode={posSettings.showCode}
-                    showBarcode={posSettings.showBarcode}
+                    code={p.code ?? ''}
+                    barcode={p.barcode ?? ''}
+                    showPrice={posSettings.showPrice ?? true}
+                    showCode={posSettings.showCode ?? true}
+                    showBarcode={posSettings.showBarcode ?? false}
                     activeColor={activeColor}
                     activeSoft={activeSoft}
                     baseFontSize={fontSizeName}
