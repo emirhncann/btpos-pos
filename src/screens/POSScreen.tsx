@@ -3971,9 +3971,7 @@ export default function POSScreen({
                   p.name, fontSizeName, fontSizePrice, pluCols, pluRows,
                 )
                 const showPrice = posSettings.showPrice
-                const showCode  = Boolean(
-                  (posSettings.showCode || posSettings.showBarcode) && estimatedLines <= 2,
-                )
+                const showCode  = posSettings.showCode || posSettings.showBarcode
                 const onlyName  = !showPrice && !showCode
                 return (
                   <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
@@ -4012,19 +4010,16 @@ export default function POSScreen({
                       width: '100%',
                       minWidth: 0,
                       flex: onlyName ? 'unset' : 1,
-                      maxHeight: onlyName ? undefined : '3.75em',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      boxSizing: 'border-box',
                     }}>
                       {p.name}
                     </div>
-                    {showCode && (
+                    {showCode && estimatedLines <= 2 && (
                       <div style={{
                         fontSize: 8,
                         color: '#9ca3af',
-                        fontFamily: 'monospace',
                         textAlign: 'center',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -4033,7 +4028,6 @@ export default function POSScreen({
                         flexShrink: 0,
                       }}>
                         {posSettings.showCode && p.code}
-                        {posSettings.showCode && posSettings.showBarcode && p.barcode && ' · '}
                         {posSettings.showBarcode && p.barcode}
                       </div>
                     )}
