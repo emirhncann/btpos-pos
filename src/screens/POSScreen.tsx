@@ -770,29 +770,31 @@ export default function POSScreen({
 
       if (cancelMode) {
         setCart(prev => {
-          const exIdx = prev.findIndex(c => (c.productId ?? c.id) === byBarcode.id)
-          if (exIdx === -1) {
+          const ex = prev.find(c => (c.productId ?? c.id) === byBarcode.id)
+          if (!ex) {
             showCancelWarning('Bu ürün sepette yok.')
             return prev
           }
-          const ex = prev[exIdx]
           if (ex.quantity < qty) {
             showCancelWarning(`Sepette ${ex.quantity} adet var, ${qty} adet düşülemez.`)
             return prev
           }
+
           if (ex.quantity === qty) {
-            const next = prev.filter((_, i) => i !== exIdx)
-            if (next.length === 0) setCancelMode(false)
-            return next
+            return prev.filter(c => (c.productId ?? c.id) !== byBarcode.id)
           }
-          const newQty = ex.quantity - qty
+
+          const newQty   = ex.quantity - qty
           const newTotal = parseFloat((newQty * ex.price).toFixed(2))
           const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
-          return prev.map((c, i) => i === exIdx
+          return prev.map(c => (c.productId ?? c.id) === byBarcode.id
             ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
             : c
           )
         })
+
+        setCancelMode(false)
+        setNumBuf('')
         return
       }
       addToCartWithQty(byBarcode, qty)
@@ -3942,16 +3944,71 @@ export default function POSScreen({
                 if (!p) return <div key={`e${i}`} style={{ borderRadius: 8, background: '#fafafa', border: '1px dashed #f0f0f0' }} />
                 return (
                   <div key={`${p.id}-${i}`} onClick={() => handlePluClick(p)}
-                    style={{ borderRadius: 8, padding: '6px 4px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, border: '2px solid transparent', background: activeSoft, transition: 'all 0.15s', overflow: 'hidden' }}
+                    style={{
+                      borderRadius: 8,
+                      padding: '4px 4px 6px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 0,
+                      border: '2px solid transparent',
+                      background: activeSoft,
+                      transition: 'all 0.15s',
+                      overflow: 'hidden',
+                      minHeight: 0,
+                    }}
                     onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.transform = 'scale(1.02)' }}
                     onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'transparent'; el.style.transform = 'scale(1)' }}
                     onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
                     onMouseUp={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
                   >
-                    <div style={{ fontSize: fontSizeName, fontWeight: 600, color: '#374151', textAlign: 'center', lineHeight: 1.2 }}>{p.name}</div>
-                    {posSettings.showCode && <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace' }}>{p.code}</div>}
-                    {posSettings.showBarcode && p.barcode && <div style={{ fontSize: fontSizeCode, color: '#b0b0b0', fontFamily: 'monospace' }}>{p.barcode}</div>}
-                    {posSettings.showPrice && <div style={{ fontSize: fontSizePrice, fontWeight: 700, color: activeColor }}>{fmt(p.price)}</div>}
+                    <div style={{
+                      fontSize: fontSizeName,
+                      fontWeight: 600,
+                      color: '#374151',
+                      textAlign: 'center',
+                      lineHeight: 1.2,
+                      overflow: 'hidden',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      wordBreak: 'break-word',
+                      flex: 1,
+                      width: '100%',
+                    }}>
+                      {p.name}
+                    </div>
+                    {(posSettings.showCode || posSettings.showBarcode) && (
+                      <div style={{
+                        fontSize: Math.max(7, fontSizeCode - 1),
+                        color: '#9ca3af',
+                        fontFamily: 'monospace',
+                        textAlign: 'center',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        width: '100%',
+                        marginTop: 2,
+                      }}>
+                        {posSettings.showCode && p.code}
+                        {posSettings.showCode && posSettings.showBarcode && p.barcode && ' · '}
+                        {posSettings.showBarcode && p.barcode}
+                      </div>
+                    )}
+                    {posSettings.showPrice && (
+                      <div style={{
+                        fontSize: fontSizePrice,
+                        fontWeight: 700,
+                        color: activeColor,
+                        marginTop: 3,
+                        flexShrink: 0,
+                        textAlign: 'center',
+                      }}>
+                        {fmt(p.price)}
+                      </div>
+                    )}
                   </div>
                 )
               })}
