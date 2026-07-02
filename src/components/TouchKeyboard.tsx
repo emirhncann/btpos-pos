@@ -94,6 +94,8 @@ export function TouchKeyboard({
           }}>
             {searchResults.map((c, i) => (
               <div key={c.id ?? i}
+                role="button"
+                tabIndex={0}
                 onMouseDown={e => {
                   e.preventDefault()
                   onSelectResult?.(c)

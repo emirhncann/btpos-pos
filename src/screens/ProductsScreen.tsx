@@ -151,6 +151,8 @@ export default function ProductsScreen({ companyId, cashier, onStartSale, onLogo
               {filtered.map(product => (
                 <div
                   key={product.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onStartSale([product])}
                   className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-blue-500/50 hover:bg-gray-800 cursor-pointer transition-all"
                 >

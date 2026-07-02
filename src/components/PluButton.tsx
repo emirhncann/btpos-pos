@@ -92,6 +92,8 @@ export function PluButton({
   return (
     <div
       ref={containerRef}
+      role="button"
+      tabIndex={0}
       onClick={onClick}
       style={{
         borderRadius:   8,

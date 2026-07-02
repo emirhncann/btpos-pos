@@ -24,7 +24,6 @@ import QuickReturnModal, {
 } from '../components/QuickReturnModal'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
-import clickPopMp3 from '../assets/click_pop.mp3'
 
 function mapRawReturnableSale(data: {
   Id:           unknown
@@ -406,21 +405,6 @@ export default function POSScreen({
   const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
-  const clickSoundRef = useRef<HTMLAudioElement | null>(null)
-
-  const playClick = useCallback(() => {
-    const audio = clickSoundRef.current
-    if (!audio) return
-    audio.currentTime = 0
-    void audio.play().catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    const audio = new Audio(clickPopMp3)
-    audio.preload = 'auto'
-    audio.load()
-    clickSoundRef.current = audio
-  }, [])
 
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
@@ -822,7 +806,6 @@ export default function POSScreen({
   }
 
   function handlePluClick(product: ProductRow) {
-    playClick()
     const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
     setNumBuf('')
     addToCartWithQty(product, qty)
@@ -830,7 +813,6 @@ export default function POSScreen({
   }
 
   function updateQty(id: string, delta: number) {
-    playClick()
     const minQty = posSettings.minQtyPerLine ?? 1
     setCart(prev => prev.map(c => {
       if (c.id !== id) return c
@@ -875,7 +857,6 @@ export default function POSScreen({
   }
 
   function cancelOneFromCart(id: string) {
-    playClick()
     const qty = cancelQtyFromNumBuf()
 
     setCart(prev => {
@@ -943,7 +924,6 @@ export default function POSScreen({
   }, [cart, selectedCustomer, companyId, cashier.id])
 
   function handleNumKey(k: string) {
-    playClick()
     if (paymentMode && activeMethod !== null) {
       if (k === 'C')  { setPendingAmount(''); return }
       if (k === '⌫') { setPendingAmount(p => p.slice(0, -1)); return }
@@ -2672,6 +2652,8 @@ export default function POSScreen({
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {customers.map(c => (
                   <div key={c.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => { selectCustomer(c); setCustomerQ('') }}
                     style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                     onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF'}
@@ -2937,6 +2919,8 @@ export default function POSScreen({
               return (
                 <div
                   key={item.id}
+                  role={cancelMode ? 'button' : undefined}
+                  tabIndex={cancelMode ? 0 : undefined}
                   onClick={() => {
                     if (cancelMode) cancelOneFromCart(item.id)
                   }}
@@ -3518,7 +3502,7 @@ export default function POSScreen({
                       )
                       .slice(0, 20)
                       .map((p, i, arr) => (
-                        <div key={p.id} role="presentation" onClick={() => setFiyatGorItem(p)}
+                        <div key={p.id} role="button" tabIndex={0} onClick={() => setFiyatGorItem(p)}
                           style={{ padding: '12px 16px', cursor: 'pointer',
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             borderBottom: i < arr.length - 1 ? '0.5px solid #F3F4F6' : 'none' }}
@@ -3651,7 +3635,8 @@ export default function POSScreen({
                         maxHeight: 180, overflowY: 'auto' }}>
                         {cariPaymentResults.map(c => (
                           <div key={c.id}
-                            role="presentation"
+                            role="button"
+                            tabIndex={0}
                             onClick={() => {
                               setCariPaymentCust(c)
                               setCariPaymentQ('')
@@ -3891,7 +3876,7 @@ export default function POSScreen({
               {filtered.length === 0 ? (
                 <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '24px 0', fontSize: 12 }}>Ürün bulunamadı</div>
               ) : filtered.map(p => (
-                <div key={`search-${p.id}-${p.code}`} onClick={() => handlePluClick(p)}
+                <div key={`search-${p.id}-${p.code}`} role="button" tabIndex={0} onClick={() => handlePluClick(p)}
                   style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', marginBottom: 3, borderRadius: 7, background: 'white', border: '1px solid #F0F0F0', cursor: 'pointer' }}
                   onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.background = activeSoft }}
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = '#F0F0F0'; el.style.background = 'white' }}

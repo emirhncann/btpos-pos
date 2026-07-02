@@ -12,6 +12,7 @@ import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezC
 import { api } from './lib/api'
 import { sendPendingInvoices } from './lib/invoiceSend'
 import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
+import { useGlobalClickSound } from './hooks/useGlobalClickSound'
 
 type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -96,6 +97,8 @@ export default function App() {
     isOnline:  Boolean(companyId) && isOnline,
     onToast:   () => {},
   })
+
+  useGlobalClickSound()
 
   const showMerkezToast = useCallback((msg: string) => {
     setMerkezToast(msg)
