@@ -685,6 +685,12 @@ export default function POSScreen({
     }
   }, [menuOpen])
 
+  /* ── İlk açılışta window'a focus — Electron geçişi sonrası barkod hemen çalışsın ── */
+  useEffect(() => {
+    const t = setTimeout(() => window.focus(), 100)
+    return () => clearTimeout(t)
+  }, [])
+
   /* ── Global barkod okuyucu ── */
   useEffect(() => {
     let buf = ''
