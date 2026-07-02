@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 
+const PLU_NAME_MAX_LEN = 50
+
+export function truncatePluName(name: string, max = PLU_NAME_MAX_LEN): string {
+  if (name.length <= max) return name
+  return name.slice(0, max) + '...'
+}
+
 interface PluButtonProps {
   name:         string
   price:        number
@@ -20,6 +27,7 @@ export function PluButton({
   activeColor, activeSoft, baseFontSize,
   onClick,
 }: PluButtonProps) {
+  const displayName = truncatePluName(name)
   const containerRef = useRef<HTMLDivElement>(null)
   const nameRef      = useRef<HTMLDivElement>(null)
   const [fontSize, setFontSize] = useState(baseFontSize)
@@ -56,7 +64,7 @@ export function PluButton({
           position: absolute;
           visibility: hidden;
         `
-        nameEl.textContent = name
+        nameEl.textContent = displayName
         const nameH = nameEl.scrollHeight
         nameEl.style.cssText = ''
         nameEl.textContent = ''
@@ -77,7 +85,7 @@ export function PluButton({
     const ro = new ResizeObserver(calculate)
     ro.observe(container)
     return () => ro.disconnect()
-  }, [name, baseFontSize, showPrice, showCode, showBarcode])
+  }, [displayName, baseFontSize, showPrice, showCode, showBarcode])
 
   const priceFontSize = Math.max(Math.round(fontSize * 0.95), 8)
 
@@ -133,7 +141,7 @@ export function PluButton({
         display:      'block',
         flexShrink:   0,
       }}>
-        {name}
+        {displayName}
       </div>
 
       {(showCode || showBarcode) && fontSize >= 10 && (

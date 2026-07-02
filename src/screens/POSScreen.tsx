@@ -6,7 +6,7 @@ import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
 import type { PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
-import { PluButton } from '../components/PluButton'
+import { PluButton, truncatePluName } from '../components/PluButton'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -3877,7 +3877,7 @@ export default function POSScreen({
                   onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = '#F0F0F0'; el.style.background = 'white' }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: fontSizeName, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                    <div style={{ fontSize: fontSizeName, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{truncatePluName(p.name)}</div>
                     {(posSettings.showCode || posSettings.showBarcode) && (
                       <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>
                         {posSettings.showCode && p.code}
