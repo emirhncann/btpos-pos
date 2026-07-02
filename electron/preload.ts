@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electron', {
   window: {
     isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
     toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
+    focusWindow: () => ipcRenderer.invoke('window:focus'),
     toggleDevTools: () => ipcRenderer.invoke('window:toggleDevTools'),
   },
   printer: {

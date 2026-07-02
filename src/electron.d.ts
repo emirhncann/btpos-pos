@@ -65,6 +65,7 @@ declare global {
       window: {
         isFullscreen:     () => Promise<boolean>
         toggleFullscreen: () => Promise<void>
+        focusWindow:      () => Promise<void>
         toggleDevTools:   () => Promise<void>
       }
       printer: {

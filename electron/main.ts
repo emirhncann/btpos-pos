@@ -605,6 +605,11 @@ app.whenReady().then(async () => {
     if (!mainWindow) return
     mainWindow.setFullScreen(!mainWindow.isFullScreen())
   })
+  ipcMain.handle('window:focus', () => {
+    if (!mainWindow) return
+    mainWindow.focus()
+    mainWindow.webContents.focus()
+  })
   ipcMain.handle('window:toggleDevTools', () => {
     toggleDevTools()
   })
