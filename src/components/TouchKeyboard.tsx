@@ -2,6 +2,16 @@ import { useState, useCallback, type CSSProperties } from 'react'
 
 export type KeyboardType = 'qwerty' | 'numeric'
 
+const TURKISH_UPPER: Record<string, string> = {
+  'i': 'İ', 'ı': 'I', 'ğ': 'Ğ', 'ü': 'Ü',
+  'ş': 'Ş', 'ö': 'Ö', 'ç': 'Ç',
+}
+
+function displayKey(k: string, shifted: boolean): string {
+  if (!shifted) return k
+  return TURKISH_UPPER[k] ?? k.toUpperCase()
+}
+
 interface TouchKeyboardProps {
   title?:          string
   value:           string
@@ -26,7 +36,11 @@ export function TouchKeyboard({
     if (key === 'SPACE') { onChange(value + ' ');        return }
     if (key === 'ABC')   { setTab('abc');                return }
     if (key === '123')   { setTab('123');                return }
-    const ch = shift ? key.toUpperCase() : key
+
+    const ch = shift
+      ? (TURKISH_UPPER[key] ?? key.toUpperCase())
+      : key
+
     onChange(value + ch)
     if (shift) setShift(false)
   }, [value, shift, onChange])
@@ -41,9 +55,9 @@ export function TouchKeyboard({
   })
 
   const rows_abc = [
-    ['q','w','e','r','t','y','u','i','o','p'],
-    ['a','s','d','f','g','h','j','k','l'],
-    ['z','x','c','v','b','n','m'],
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'ı', 'o', 'p', 'ğ', 'ü'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', 'ş', 'i'],
+    ['z', 'x', 'c', 'v', 'b', 'n', 'm', 'ö', 'ç'],
   ]
 
   const rows_123_1 = ['1','2','3','4','5','6','7','8','9','0']
@@ -134,8 +148,8 @@ export function TouchKeyboard({
                 padding: ri === 1 ? '0 4%' : ri === 2 ? '0 8%' : '0' }}>
                 {row.map(k => (
                   <button key={k} type="button" onMouseDown={e => { e.preventDefault(); press(k) }}
-                    style={{ ...keyStyle(), flex: 1, maxWidth: 52 }}>
-                    {shift ? k.toUpperCase() : k}
+                    style={{ ...keyStyle(), flex: 1, maxWidth: 44 }}>
+                    {displayKey(k, shift)}
                   </button>
                 ))}
               </div>

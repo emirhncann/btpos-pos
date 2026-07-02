@@ -814,7 +814,8 @@ export default function POSScreen({
     const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
     setNumBuf('')
     addToCartWithQty(product, qty)
-    searchRef.current?.focus()
+    setSearchQ('')
+    searchRef.current?.blur()
   }
 
   function updateQty(id: string, delta: number) {
