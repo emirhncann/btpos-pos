@@ -313,7 +313,12 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow) return
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.focus()
+  })
 
   // F12 / Ctrl+Shift+I — before-input-event kiosk’ta globalShortcut’tan güvenilir
   mainWindow.webContents.on('before-input-event', (event, input) => {
