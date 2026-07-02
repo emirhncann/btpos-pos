@@ -750,13 +750,13 @@ export default function POSScreen({
           }
 
           if (ex.quantity === qty) {
-            return prev.filter(c => (c.productId ?? c.id) !== byBarcode.id)
+            return prev.filter(c => c.id !== ex.id)
           }
 
           const newQty   = ex.quantity - qty
           const newTotal = parseFloat((newQty * ex.price).toFixed(2))
           const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
-          return prev.map(c => (c.productId ?? c.id) === byBarcode.id
+          return prev.map(c => c.id === ex.id
             ? { ...c, quantity: newQty, lineTotal: newTotal, netTotal }
             : c
           )
