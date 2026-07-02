@@ -5,6 +5,7 @@ let audio: HTMLAudioElement | null = null
 export function initClickSound(): void {
   if (audio) return
   audio = new Audio(clickPopMp3)
+  audio.volume = 0.35
   audio.preload = 'auto'
   audio.load()
 }
