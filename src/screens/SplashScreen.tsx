@@ -5,6 +5,7 @@ import introWav from '../assets/intro.wav'
 export default function SplashScreen() {
   useEffect(() => {
     const audio = new Audio(introWav)
+    audio.volume = 0.20
     void audio.play().catch(() => {})
   }, [])
 
