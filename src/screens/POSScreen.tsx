@@ -24,6 +24,7 @@ import QuickReturnModal, {
 } from '../components/QuickReturnModal'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
+import clickPopMp3 from '../assets/click_pop.mp3'
 
 function mapRawReturnableSale(data: {
   Id:           unknown
@@ -405,6 +406,21 @@ export default function POSScreen({
   const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
+  const clickSoundRef = useRef<HTMLAudioElement | null>(null)
+
+  const playClick = useCallback(() => {
+    const audio = clickSoundRef.current
+    if (!audio) return
+    audio.currentTime = 0
+    void audio.play().catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const audio = new Audio(clickPopMp3)
+    audio.preload = 'auto'
+    audio.load()
+    clickSoundRef.current = audio
+  }, [])
 
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
@@ -806,6 +822,7 @@ export default function POSScreen({
   }
 
   function handlePluClick(product: ProductRow) {
+    playClick()
     const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
     setNumBuf('')
     addToCartWithQty(product, qty)
@@ -813,6 +830,7 @@ export default function POSScreen({
   }
 
   function updateQty(id: string, delta: number) {
+    playClick()
     const minQty = posSettings.minQtyPerLine ?? 1
     setCart(prev => prev.map(c => {
       if (c.id !== id) return c
@@ -857,6 +875,7 @@ export default function POSScreen({
   }
 
   function cancelOneFromCart(id: string) {
+    playClick()
     const qty = cancelQtyFromNumBuf()
 
     setCart(prev => {
@@ -924,6 +943,7 @@ export default function POSScreen({
   }, [cart, selectedCustomer, companyId, cashier.id])
 
   function handleNumKey(k: string) {
+    playClick()
     if (paymentMode && activeMethod !== null) {
       if (k === 'C')  { setPendingAmount(''); return }
       if (k === '⌫') { setPendingAmount(p => p.slice(0, -1)); return }
