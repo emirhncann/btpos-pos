@@ -125,7 +125,7 @@ export default function CustomerDisplayScreen() {
                   background: idx % 2 === 0 ? '#ffffff' : '#fafbfc',
                 }}
               >
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#0f172a' }}>{item.name}</span>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#0f172a', fontWeight: 700 }}>{item.name}</span>
                 <span style={{ textAlign: 'center', color: '#2563eb', fontWeight: 600 }}>{item.qty}</span>
                 <span style={{ textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fmt(item.lineTotal)}</span>
               </div>
