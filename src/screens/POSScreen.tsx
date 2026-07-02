@@ -687,69 +687,32 @@ export default function POSScreen({
 
   /* ── Global barkod okuyucu ── */
   useEffect(() => {
-    let barcodeBuffer = ''
-    let barcodeTimer: ReturnType<typeof setTimeout> | null = null
+    let buf = ''
+    let timer: ReturnType<typeof setTimeout> | null = null
 
-    function handleKeyDown(e: KeyboardEvent) {
-      if (smsPhonePanelOpen || mailModalOpen || showHeld || showCustomer) return
-      if (quickReturnModal) return
-
-      if (menuOpen === 'fiyatgor') {
-        const tag = (e.target as HTMLElement)?.tagName
-        const inputFocused = tag === 'INPUT' || tag === 'TEXTAREA'
-        if (!touchEnabled && inputFocused) return
-
-        if (e.key === 'Enter') {
-          if (barcodeBuffer.length >= 3) applyFiyatGorScan(barcodeBuffer)
-          barcodeBuffer = ''
-          if (barcodeTimer) clearTimeout(barcodeTimer)
-          e.preventDefault()
-          return
-        }
-        if (e.key.length === 1) {
-          barcodeBuffer += e.key
-          setFiyatGorQ(prev => prev + e.key)
-          if (barcodeTimer) clearTimeout(barcodeTimer)
-          barcodeTimer = setTimeout(() => { barcodeBuffer = '' }, 100)
-          e.preventDefault()
-          return
-        }
-        return
-      }
-
+    const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
+      if (paymentMode || quickReturnModal || cariPaymentModal) return
+
       if (e.key === 'Enter') {
-        if (barcodeBuffer.length >= 3) {
-          setSearchQ(barcodeBuffer)
-        }
-        barcodeBuffer = ''
-        if (barcodeTimer) clearTimeout(barcodeTimer)
+        if (buf.length >= 3) setSearchQ(buf)
+        buf = ''
+        if (timer) clearTimeout(timer)
         return
       }
 
       if (e.key.length === 1) {
-        barcodeBuffer += e.key
-        if (barcodeTimer) clearTimeout(barcodeTimer)
-        barcodeTimer = setTimeout(() => {
-          barcodeBuffer = ''
-        }, 100)
+        buf += e.key
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => { buf = '' }, 150)
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    smsPhonePanelOpen,
-    mailModalOpen,
-    showHeld,
-    showCustomer,
-    quickReturnModal,
-    menuOpen,
-    applyFiyatGorScan,
-    touchEnabled,
-  ])
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [paymentMode, quickReturnModal, cariPaymentModal])
 
   /* ── Barkod okuyucu ── */
   useEffect(() => {
