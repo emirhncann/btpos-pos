@@ -66,6 +66,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     holdDocument: (doc) => electron.ipcRenderer.invoke("db:holdDocument", doc),
     getHeldDocuments: (companyId) => electron.ipcRenderer.invoke("db:getHeldDocuments", companyId),
     deleteHeldDocument: (id) => electron.ipcRenderer.invoke("db:deleteHeldDocument", id),
+    updateHeldDocumentLabel: (id, label) => electron.ipcRenderer.invoke("db:updateHeldDocumentLabel", id, label),
     savePluGroups: (groups) => electron.ipcRenderer.invoke("db:savePluGroups", groups),
     getPluGroups: (companyId, wpId, cashierId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId, cashierId),
     savePosSettings: (settings, cashierId) => electron.ipcRenderer.invoke("db:savePosSettings", settings, cashierId),

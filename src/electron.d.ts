@@ -121,6 +121,7 @@ declare global {
         holdDocument:       (doc: unknown) => Promise<string>
         getHeldDocuments:   (companyId: string) => Promise<HeldDocRow[]>
         deleteHeldDocument: (id: string) => Promise<void>
+        updateHeldDocumentLabel(id: string, label: string): Promise<{ success: boolean }>
         savePluGroups:      (groups: unknown[]) => Promise<void>
         getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) => Promise<PluGroupCacheRow[]>
         savePosSettings:    (settings: PosSettingsRow, cashierId?: string) => Promise<SyncResult>
@@ -500,12 +501,17 @@ declare global {
   }
 
   interface HeldDocRow {
-    id:          string
-    companyId:   string
-    label?:      string
-    items:       CartItem[]
-    totalAmount: number
-    createdAt:   string
+    id:            string
+    companyId:     string
+    receiptNo?:    string
+    label?:        string
+    items:         CartItem[]
+    customer?:     CustomerRow | null
+    customerName?: string
+    cashierName?:  string
+    totalAmount:   number
+    discountRate?: number
+    createdAt:     string
   }
 
   interface CustomerRow {

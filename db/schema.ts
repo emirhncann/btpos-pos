@@ -91,12 +91,16 @@ export const cashiers = sqliteTable('cashiers', {
 })
 
 export const heldDocuments = sqliteTable('held_documents', {
-  id:          text('id').primaryKey(),
-  companyId:   text('company_id').notNull(),
-  label:       text('label'),
-  items:       text('items').notNull(),
-  totalAmount: real('total_amount').default(0),
-  createdAt:   text('created_at').notNull(),
+  id:           text('id').primaryKey(),
+  companyId:    text('company_id').notNull(),
+  receiptNo:    text('receipt_no'),
+  label:        text('label'),
+  items:        text('items').notNull(),
+  totalAmount:  real('total_amount').default(0),
+  customerName: text('customer_name'),
+  cashierName:  text('cashier_name'),
+  customer:     text('customer'),
+  createdAt:    text('created_at').notNull(),
 })
 
 // PLU grupları (Supabase / API cache)

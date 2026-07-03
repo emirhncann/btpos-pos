@@ -139,12 +139,16 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
     );
 
     CREATE TABLE IF NOT EXISTS held_documents (
-      id           TEXT PRIMARY KEY,
-      company_id   TEXT NOT NULL,
-      label        TEXT,
-      items        TEXT NOT NULL,
-      total_amount REAL DEFAULT 0,
-      created_at   TEXT NOT NULL
+      id            TEXT PRIMARY KEY,
+      company_id    TEXT NOT NULL,
+      receipt_no    TEXT,
+      label         TEXT,
+      items         TEXT NOT NULL,
+      total_amount  REAL DEFAULT 0,
+      customer_name TEXT,
+      cashier_name  TEXT,
+      customer      TEXT,
+      created_at    TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS plu_groups_cache (
@@ -205,6 +209,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
 
   migrateCashiersCompanyId(sqlite)
   migratePosDiscountAndSettings(sqlite)
+  migrateHeldDocuments(sqlite)
 
   sqlite.exec(`
     INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, duplicate_item_action, min_qty_per_line, allow_line_discount, allow_doc_discount, max_line_discount_pct, max_doc_discount_pct, plu_cols, plu_rows, font_size_name, font_size_price, font_size_code, source)
@@ -593,6 +598,13 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       created_at    TEXT NOT NULL
     )
   `)
+}
+
+function migrateHeldDocuments(sqlite: Database.Database) {
+  addColumnIfMissing(sqlite, 'held_documents', 'receipt_no', 'receipt_no TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'customer_name', 'customer_name TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'cashier_name', 'cashier_name TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'customer', 'customer TEXT')
 }
 
 export function getDB() {

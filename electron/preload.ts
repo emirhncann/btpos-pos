@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('electron', {
     holdDocument:       (doc: unknown)                       => ipcRenderer.invoke('db:holdDocument', doc),
     getHeldDocuments:   (companyId: string)                  => ipcRenderer.invoke('db:getHeldDocuments', companyId),
     deleteHeldDocument: (id: string)                          => ipcRenderer.invoke('db:deleteHeldDocument', id),
+    updateHeldDocumentLabel: (id: string, label: string)     => ipcRenderer.invoke('db:updateHeldDocumentLabel', id, label),
     savePluGroups:      (groups: unknown[])                  => ipcRenderer.invoke('db:savePluGroups', groups),
     getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) =>
       ipcRenderer.invoke('db:getPluGroups', companyId, wpId, cashierId),

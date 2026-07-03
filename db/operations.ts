@@ -582,12 +582,16 @@ export interface HeldCartLine {
 }
 
 export interface HeldDoc {
-  id:          string
-  companyId:   string
-  label?:      string
-  items:       HeldCartLine[]
-  totalAmount: number
-  createdAt:   string
+  id:           string
+  companyId:    string
+  receiptNo?:   string
+  label?:       string
+  items:        HeldCartLine[]
+  totalAmount:  number
+  customerName?: string
+  cashierName?:  string
+  customer?:     unknown
+  createdAt:    string
 }
 
 export function holdDocument(doc: Omit<HeldDoc, 'id' | 'createdAt'>): string {
@@ -596,11 +600,15 @@ export function holdDocument(doc: Omit<HeldDoc, 'id' | 'createdAt'>): string {
   const now = new Date().toISOString()
   db.insert(heldDocuments).values({
     id,
-    companyId:   doc.companyId,
-    label:       doc.label ?? null,
-    items:       JSON.stringify(doc.items),
-    totalAmount: doc.totalAmount,
-    createdAt:   now,
+    companyId:    doc.companyId,
+    receiptNo:    doc.receiptNo ?? null,
+    label:        doc.label ?? null,
+    items:        JSON.stringify(doc.items),
+    totalAmount:  doc.totalAmount,
+    customerName: doc.customerName ?? null,
+    cashierName:  doc.cashierName ?? null,
+    customer:     doc.customer != null ? JSON.stringify(doc.customer) : null,
+    createdAt:    now,
   }).run()
   return id
 }
@@ -612,18 +620,30 @@ export function getHeldDocuments(companyId: string): HeldDoc[] {
     .orderBy(asc(heldDocuments.createdAt))
     .all()
   return rows.map(r => ({
-    id:          r.id,
-    companyId:   r.companyId,
-    label:       r.label ?? undefined,
-    items:       JSON.parse(r.items) as HeldCartLine[],
-    totalAmount: r.totalAmount ?? 0,
-    createdAt:   r.createdAt,
+    id:           r.id,
+    companyId:    r.companyId,
+    receiptNo:    r.receiptNo ?? undefined,
+    label:        r.label ?? undefined,
+    items:        JSON.parse(r.items) as HeldCartLine[],
+    totalAmount:  r.totalAmount ?? 0,
+    customerName: r.customerName ?? undefined,
+    cashierName:  r.cashierName ?? undefined,
+    customer:     r.customer ? JSON.parse(r.customer) as unknown : undefined,
+    createdAt:    r.createdAt,
   }))
 }
 
 export function deleteHeldDocument(id: string): void {
   const db = getDB()
   db.delete(heldDocuments).where(eq(heldDocuments.id, id)).run()
+}
+
+export function updateHeldDocumentLabel(id: string, label: string): void {
+  const db = getDB()
+  db.update(heldDocuments)
+    .set({ label: label || null })
+    .where(eq(heldDocuments.id, id))
+    .run()
 }
 
 export interface PluGroupCacheRow {

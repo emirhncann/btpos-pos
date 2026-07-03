@@ -724,6 +724,12 @@ app.whenReady().then(async () => {
     return deleteHeldDocument(id)
   })
 
+  ipcMain.handle('db:updateHeldDocumentLabel', async (_e, id: string, label: string) => {
+    const { updateHeldDocumentLabel } = await import('../db/operations')
+    updateHeldDocumentLabel(id, label)
+    return { success: true as const }
+  })
+
   ipcMain.handle('db:savePluGroups', async (_e, groups: unknown) => {
     const { savePluGroups } = await import('../db/operations')
     savePluGroups(groups as import('../db/operations').PluGroupCacheRow[])

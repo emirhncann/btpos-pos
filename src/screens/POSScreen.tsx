@@ -375,14 +375,14 @@ export default function POSScreen({
   } | null>(null)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
+  const [heldPreview, setHeldPreview]     = useState<HeldDocRow | null>(null)
+  const [heldEdit, setHeldEdit]           = useState<{ id: string; label: string } | null>(null)
   const [showCustomer, setShowCustomer]   = useState(false)
   const [customers, setCustomers]         = useState<CustomerRow[]>([])
   const [customerQ, setCustomerQ]         = useState('')
   const [addCustomerModal, setAddCustomerModal] = useState(false)
   const [newCustPrefill, setNewCustPrefill] = useState('')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
-  const [sendSms, setSendSms] = useState(false)
-  const [sendEmail, setSendEmail] = useState(false)
   const [smsPhone, setSmsPhone] = useState('')
   const [mailAddr, setMailAddr] = useState('')
   const [mailModalOpen, setMailModalOpen] = useState(false)
@@ -427,8 +427,6 @@ export default function POSScreen({
   const applyCustomerSelection = useCallback((c: CustomerRow | null) => {
     setSelectedCustomer(c)
     if (!c) {
-      setSendSms(false)
-      setSendEmail(false)
       setSmsPhone('')
       setMailAddr('')
       setMailModalOpen(false)
@@ -446,28 +444,27 @@ export default function POSScreen({
       setCariPaymentSearching(false)
       return
     }
-    if (c.phone?.trim()) {
+
+    if (c.phone) {
       const normalized = normalizeTrMobileForSms(c.phone)
       if (normalized.length === SMS_MOBILE_LEN) {
         setSmsPhone(normalized)
         setSmsPhoneDraft(normalized)
-        setSendSms(true)
       } else {
         setSmsPhone('')
         setSmsPhoneDraft('')
-        setSendSms(false)
       }
     } else {
       setSmsPhone('')
-      setSendSms(false)
+      setSmsPhoneDraft('')
     }
-    if (c.email?.trim()) {
-      setMailAddr(c.email.trim())
-      setSendEmail(true)
+
+    if (c.email && isValidNotifyEmail(c.email)) {
+      setMailAddr(c.email)
     } else {
       setMailAddr('')
-      setSendEmail(false)
     }
+
     setMenuOpen(null)
   }, [])
 
@@ -696,10 +693,26 @@ export default function POSScreen({
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const onKey = (e: KeyboardEvent) => {
+      if (paymentMode || quickReturnModal || cariPaymentModal) return
+
+      // Fiyat Gör açıksa — barkodu oraya yönlendir (input odakta olsa bile)
+      if (menuOpen === 'fiyatgor') {
+        if (e.key === 'Enter') {
+          if (buf.length >= 3) applyFiyatGorScan(buf)
+          buf = ''
+          if (timer) clearTimeout(timer)
+          return
+        }
+        if (e.key.length === 1) {
+          buf += e.key
+          if (timer) clearTimeout(timer)
+          timer = setTimeout(() => { buf = '' }, 150)
+        }
+        return
+      }
+
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-
-      if (paymentMode || quickReturnModal || cariPaymentModal) return
 
       if (e.key === 'Enter') {
         if (buf.length >= 3) setSearchQ(buf)
@@ -717,7 +730,7 @@ export default function POSScreen({
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [paymentMode, quickReturnModal, cariPaymentModal])
+  }, [paymentMode, quickReturnModal, cariPaymentModal, menuOpen, applyFiyatGorScan])
 
   /* ── Barkod okuyucu ── */
   useEffect(() => {
@@ -1004,8 +1017,14 @@ export default function POSScreen({
       : `Bekletilen ${new Date().toLocaleTimeString('tr-TR')}`
     const lineSub = cart.reduce((s, c) => s + c.netTotal, 0)
     await window.electron.db.holdDocument({
-      companyId, label, items: cart,
+      companyId,
+      label,
+      items: cart,
       totalAmount: lineSub,
+      receiptNo: nextReceiptNo(posSettings.terminalNumber),
+      customerName: selectedCustomer?.name,
+      cashierName: cashier.fullName,
+      customer: selectedCustomer ?? null,
     })
     clearCart()
     loadHeld()
@@ -1013,9 +1032,21 @@ export default function POSScreen({
 
   async function retrieveDoc(doc: HeldDocRow) {
     setCart(doc.items.map(normalizeHeldCartItem))
+    if (doc.customer) {
+      applyCustomerSelection(doc.customer)
+    } else {
+      applyCustomerSelection(null)
+    }
     await window.electron.db.deleteHeldDocument(doc.id)
     loadHeld()
     setShowHeld(false)
+  }
+
+  async function saveHeldLabel() {
+    if (!heldEdit) return
+    await window.electron.db.updateHeldDocumentLabel(heldEdit.id, heldEdit.label)
+    setHeldEdit(null)
+    void loadHeld()
   }
 
   async function loadCustomers() {
@@ -1273,19 +1304,10 @@ export default function POSScreen({
           }
         })
 
-        const smsNorm =
-          normalizeTrMobileForSms(smsPhone)
-          || normalizeTrMobileForSms(selectedCustomer?.phone ?? '')
-        if (sendSms && smsNorm.length !== SMS_MOBILE_LEN) {
-          const msg = smsNorm.length === 0
-            ? 'SMS için 5 ile başlayan 10 haneli cep numarası girin veya cari seçin.'
-            : 'Cep numarası 5 ile başlamalı ve 10 hane olmalı (ör. 555 555 55 55).'
-          showError('SMS Bildirimi', msg)
-          return
-        }
+        const smsNorm = normalizeTrMobileForSms(smsPhone)
 
-        if (sendEmail && !isValidNotifyEmail(mailAddr)) {
-          showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya Mail bildirimini kapatın.')
+        if (mailAddr.trim() && !isValidNotifyEmail(mailAddr)) {
+          showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya adresi temizleyin.')
           return
         }
 
@@ -1300,9 +1322,9 @@ export default function POSScreen({
           salePriceEffect,
           selectedCustomer,
           {
-            sendSms: sendSms && smsNorm.length === SMS_MOBILE_LEN,
+            sendSms: smsNorm.length === SMS_MOBILE_LEN,
             smsPhone: smsNorm || '',
-            sendEmail: sendEmail && isValidNotifyEmail(mailAddr),
+            sendEmail: isValidNotifyEmail(mailAddr),
             mailAddr: mailAddr.trim(),
           },
         )
@@ -2233,132 +2255,101 @@ export default function POSScreen({
         }}>
           <div style={{
             background: 'white', borderRadius: 16, padding: '20px 16px 24px',
-            width: '75vw', maxWidth: 380,
+            width: 'min(360px, 94vw)',
+            display: 'flex', flexDirection: 'column', gap: 10,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>SMS Bildirimi</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>SMS Bildirimi</div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  5 ile başlayan 10 hane
+                </div>
+              </div>
               <button type="button" onClick={() => setSmsPhonePanelOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
                   color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <div
-              role="switch"
-              aria-checked={sendSms}
-              tabIndex={0}
-              onClick={() => {
-                setSendSms(v => {
-                  const next = !v
-                  if (next) setSmsPhoneDraft(smsPhone)
-                  return next
-                })
-              }}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setSendSms(v => {
-                    const next = !v
-                    if (next) setSmsPhoneDraft(smsPhone)
-                    return next
-                  })
-                }
-              }}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', borderRadius: 10, background: '#F9FAFB',
-                border: '1px solid #E5E7EB', marginBottom: 14, cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>SMS Gönder</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>5 ile başlayan 10 hane</div>
-              </div>
-              <div
-                aria-hidden
-                style={{
-                  width: 44, height: 24, borderRadius: 12, flexShrink: 0,
-                  background: sendSms ? '#1565C0' : '#D1D5DB',
-                  position: 'relative', transition: 'background 0.2s',
-                  pointerEvents: 'none',
-                }}>
-                <div style={{
-                  position: 'absolute', top: 3,
-                  left: sendSms ? 23 : 3,
-                  width: 18, height: 18, borderRadius: 9,
-                  background: 'white', transition: 'left 0.2s',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                }} />
-              </div>
+            <div style={{
+              textAlign: 'center', padding: '10px 0',
+              fontSize: 26, fontWeight: 700, color: '#1565C0',
+              letterSpacing: 0.5, minHeight: 48, wordBreak: 'break-all',
+            }}>
+              {formatTrMobileSmsDisplay(smsPhoneDraft) || '—'}
             </div>
 
-            {sendSms && (
-              <>
-                <div style={{
-                  textAlign: 'center', padding: '10px 0 14px',
-                  fontSize: 26, fontWeight: 700, color: '#1565C0',
-                  letterSpacing: 0.5, minHeight: 52,
-                }}>
-                  {formatTrMobileSmsDisplay(smsPhoneDraft)}
-                </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
+                const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
+                const disabledFirst = firstEmpty && k !== '5'
+                return (
+                  <button key={k} type="button" disabled={disabledFirst}
+                    onClick={() => {
+                      if (!disabledFirst) setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, k))
+                    }}
+                    style={{ padding: '14px 0', borderRadius: 10,
+                      border: '1px solid #E5E7EB', background: '#F9FAFB',
+                      fontSize: 18, fontWeight: 600, color: '#111827',
+                      cursor: disabledFirst ? 'default' : 'pointer',
+                      opacity: disabledFirst ? 0.38 : 1 }}>
+                    {k}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <button type="button" onClick={() => setSmsPhoneDraft('')}
+                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
+                  background: '#F5F5F5', fontSize: 15, fontWeight: 600,
+                  color: '#374151', cursor: 'pointer' }}>
+                C
+              </button>
+              <button type="button"
+                disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
+                onClick={() => setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, '0'))}
+                style={{ padding: '14px 0', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#F9FAFB',
+                  fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer',
+                  opacity: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 0.38 : 1 }}>
+                0
+              </button>
+              <button type="button"
+                onClick={() => setSmsPhoneDraft(p => p.replace(/\D/g, '').slice(0, -1))}
+                style={{ padding: '14px 0', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#FEF2F2',
+                  fontSize: 18, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}>
+                ⌫
+              </button>
+            </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-                  {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
-                    const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
-                    const disabledFirst = firstEmpty && k !== '5'
-                    return (
-                      <button key={k} type="button" disabled={disabledFirst}
-                        onClick={() => {
-                          if (!disabledFirst) setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, k))
-                        }}
-                        style={{ padding: '14px 0', borderRadius: 10,
-                          border: '1px solid #E5E7EB', background: '#F9FAFB',
-                          fontSize: 18, fontWeight: 600, color: '#111827',
-                          cursor: disabledFirst ? 'default' : 'pointer',
-                          opacity: disabledFirst ? 0.38 : 1 }}>
-                        {k}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
-                  <button type="button" onClick={() => setSmsPhoneDraft('')}
-                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
-                    C
-                  </button>
-                  <button type="button"
-                    disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
-                    onClick={() => setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, '0'))}
-                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: '#F9FAFB', fontSize: 18, fontWeight: 600, color: '#111827',
-                      cursor: 'pointer' }}>
-                    0
-                  </button>
-                  <button type="button"
-                    onClick={() => setSmsPhoneDraft(p => p.replace(/\D/g, '').slice(0, -1))}
-                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: '#FEF2F2', fontSize: 18, fontWeight: 600,
-                      color: '#EF4444', cursor: 'pointer' }}>
-                    ⌫
-                  </button>
-                </div>
-              </>
-            )}
-
-            <button type="button"
-              onClick={() => {
-                const norm = normalizeTrMobileForSms(smsPhoneDraft)
-                if (sendSms && norm.length !== SMS_MOBILE_LEN) {
-                  showError('SMS Bildirimi', '5 ile başlayan 10 haneli numarayı tamamlayın.')
-                  return
-                }
-                setSmsPhone(sendSms ? norm : '')
-                setSmsPhonePanelOpen(false)
-              }}
-              style={{ width: '100%', marginTop: 14, padding: '12px', borderRadius: 10,
-                border: 'none', background: '#1565C0', color: 'white',
-                fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-              Tamam
-            </button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 4 }}>
+              <button type="button"
+                onClick={() => {
+                  setSmsPhone('')
+                  setSmsPhoneDraft('')
+                  setSmsPhonePanelOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10,
+                  border: '1px solid #E0E0E0', background: '#F5F5F5',
+                  fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                Gönderme
+              </button>
+              <button type="button"
+                onClick={() => {
+                  const digits = normalizeTrMobileForSms(smsPhoneDraft)
+                  if (digits.length !== SMS_MOBILE_LEN) {
+                    showError('SMS', '5 ile başlayan 10 haneli numara girin.')
+                    return
+                  }
+                  setSmsPhone(digits)
+                  setSmsPhonePanelOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10, border: 'none',
+                  background: '#1565C0', fontSize: 15, fontWeight: 700,
+                  color: 'white', cursor: 'pointer' }}>
+                Tamam
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2371,92 +2362,69 @@ export default function POSScreen({
         }}>
           <div style={{
             background: 'white', borderRadius: 16, padding: '20px 16px 24px',
-            width: '75vw', maxWidth: 380,
+            width: 'min(360px, 94vw)',
+            display: 'flex', flexDirection: 'column', gap: 10,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Mail Bildirimi</div>
+              alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Mail Bildirimi</div>
+                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  ornek@mail.com
+                </div>
+              </div>
               <button type="button" onClick={() => setMailModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
                   color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <div
-              role="switch"
-              aria-checked={sendEmail}
-              tabIndex={0}
-              onClick={() => setSendEmail(v => !v)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setSendEmail(v => !v)
-                }
+            <input
+              type="email"
+              value={mailAddr}
+              onChange={e => setMailAddr(e.target.value)}
+              placeholder="ornek@mail.com"
+              autoFocus={!touchEnabled}
+              readOnly={touchEnabled}
+              onFocus={() => {
+                if (!touchEnabled) return
+                openKeyboard({
+                  title: 'E-posta',
+                  initial: mailAddr,
+                  type: 'qwerty',
+                  onConfirm: setMailAddr,
+                })
               }}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 14px', borderRadius: 10, background: '#F9FAFB',
-                border: '1px solid #E5E7EB', marginBottom: 14, cursor: 'pointer',
-                WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Mail Gönder</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>ornek@mail.com</div>
-              </div>
-              <div
-                aria-hidden
-                style={{
-                  width: 44, height: 24, borderRadius: 12, flexShrink: 0,
-                  background: sendEmail ? '#1565C0' : '#D1D5DB',
-                  position: 'relative', transition: 'background 0.2s',
-                  pointerEvents: 'none',
-                }}>
-                <div style={{
-                  position: 'absolute', top: 3,
-                  left: sendEmail ? 23 : 3,
-                  width: 18, height: 18, borderRadius: 9,
-                  background: 'white', transition: 'left 0.2s',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                }} />
-              </div>
+              style={{ width: '100%', padding: '12px 14px', borderRadius: 10,
+                border: `1.5px solid ${mailAddr && isValidNotifyEmail(mailAddr) ? '#1565C0' : '#E5E7EB'}`,
+                fontSize: 14, outline: 'none', boxSizing: 'border-box' as const,
+                cursor: touchEnabled ? 'default' : 'text' }}
+            />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 4 }}>
+              <button type="button"
+                onClick={() => {
+                  setMailAddr('')
+                  setMailModalOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10,
+                  border: '1px solid #E0E0E0', background: '#F5F5F5',
+                  fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                Gönderme
+              </button>
+              <button type="button"
+                onClick={() => {
+                  if (mailAddr.trim() && !isValidNotifyEmail(mailAddr)) {
+                    showError('Mail', 'Geçerli bir e-posta adresi girin.')
+                    return
+                  }
+                  setMailModalOpen(false)
+                }}
+                style={{ padding: '14px', borderRadius: 10, border: 'none',
+                  background: '#1565C0', fontSize: 15, fontWeight: 700,
+                  color: 'white', cursor: 'pointer' }}>
+                Tamam
+              </button>
             </div>
-
-            {sendEmail && (
-              <div style={{ marginBottom: 14 }}>
-                <input
-                  type="email"
-                  value={mailAddr}
-                  onChange={e => setMailAddr(e.target.value)}
-                  placeholder="ornek@mail.com"
-                  autoFocus={!touchEnabled}
-                  readOnly={touchEnabled}
-                  onFocus={() => {
-                    if (!touchEnabled) return
-                    openKeyboard({
-                      title: 'E-posta',
-                      initial: mailAddr,
-                      type: 'qwerty',
-                      onConfirm: setMailAddr,
-                    })
-                  }}
-                  style={{ width: '100%', padding: '12px 14px', borderRadius: 10,
-                    border: `1.5px solid ${isValidNotifyEmail(mailAddr) ? '#1565C0' : '#E5E7EB'}`,
-                    fontSize: 14, outline: 'none', boxSizing: 'border-box' as const,
-                    cursor: touchEnabled ? 'default' : 'text' }}
-                />
-              </div>
-            )}
-
-            <button type="button"
-              onClick={() => {
-                if (sendEmail && !isValidNotifyEmail(mailAddr)) {
-                  showError('E-posta bildirimi', 'Geçerli bir e-posta adresi girin.')
-                  return
-                }
-                setMailModalOpen(false)
-              }}
-              style={{ width: '100%', padding: '12px', borderRadius: 10,
-                border: 'none', background: '#1565C0', color: 'white',
-                fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-              Tamam
-            </button>
           </div>
         </div>
       )}
@@ -2585,36 +2553,222 @@ export default function POSScreen({
 
       {/* Bekletilen belgeler */}
       {showHeld && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 14, padding: 24, width: 440, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontWeight: 600, fontSize: 15 }}>Bekletilen Belgeler</span>
-              <button onClick={() => setShowHeld(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998,
+          background: 'rgba(0,0,0,0.45)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowHeld(false)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'white', borderRadius: 14, padding: 24,
+              width: 'min(480px, 94vw)', maxHeight: '82vh',
+              display: 'flex', flexDirection: 'column' }}>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>
+                Bekletilen Belgeler
+                {heldDocs.length > 0 && (
+                  <span style={{ marginLeft: 8, fontSize: 12, color: '#6B7280',
+                    fontWeight: 400 }}>({heldDocs.length})</span>
+                )}
+              </span>
+              <button type="button" onClick={() => setShowHeld(false)}
+                style={{ background: 'none', border: 'none',
+                  cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
             </div>
+
             {heldDocs.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '32px 0', fontSize: 13 }}>Bekletilen belge yok</div>
+              <div style={{ textAlign: 'center', color: '#BDBDBD',
+                padding: '32px 0', fontSize: 13 }}>
+                Bekletilen belge yok
+              </div>
             ) : (
-              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ overflowY: 'auto', flex: 1,
+                display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {heldDocs.map(doc => (
-                  <div key={doc.id} style={{ border: '1px solid #E0E0E0', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{doc.label ?? 'Belge'}</div>
-                      <div style={{ fontSize: 11, color: '#9E9E9E', marginTop: 2 }}>
-                        {doc.items.length} kalem · {fmt(doc.totalAmount)} · {new Date(doc.createdAt).toLocaleTimeString('tr-TR')}
+                  <div key={doc.id} style={{ border: '1px solid #E5E7EB',
+                    borderRadius: 10, padding: '12px 14px' }}>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: 4 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700,
+                        color: '#111827', fontFamily: 'monospace' }}>
+                        {doc.receiptNo ?? doc.id.slice(0, 8).toUpperCase()}
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1565C0' }}>
+                        {fmt(doc.totalAmount ?? 0)}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => retrieveDoc(doc)} style={{ background: '#E3F2FD', border: '1px solid #90CAF9', borderRadius: 7, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#1565C0' }}>
-                        Getir
+
+                    <div style={{ fontSize: 12, color: '#374151', marginBottom: 4 }}>
+                      {doc.label ?? '—'}
+                    </div>
+
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 10 }}>
+                      {doc.items.length} kalem
+                      {doc.customerName && ` · ${doc.customerName}`}
+                      {doc.cashierName  && ` · ${doc.cashierName}`}
+                      {' · '}{new Date(doc.createdAt).toLocaleString('tr-TR')}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button type="button"
+                        onClick={() => setHeldPreview(doc)}
+                        style={{ flex: 1, padding: '7px', borderRadius: 7,
+                          border: '1px solid #E5E7EB', background: '#F9FAFB',
+                          fontSize: 12, fontWeight: 600, color: '#374151',
+                          cursor: 'pointer' }}>
+                        🔍 İncele
                       </button>
-                      <button onClick={async () => { await window.electron.db.deleteHeldDocument(doc.id); loadHeld() }} style={{ background: '#FFEBEE', border: '1px solid #FFCDD2', borderRadius: 7, padding: '6px 10px', cursor: 'pointer', fontSize: 12, color: '#C62828' }}>
-                        Sil
+                      <button type="button"
+                        onClick={() => setHeldEdit({ id: doc.id, label: doc.label ?? '' })}
+                        style={{ flex: 1, padding: '7px', borderRadius: 7,
+                          border: '1px solid #E5E7EB', background: '#F9FAFB',
+                          fontSize: 12, fontWeight: 600, color: '#374151',
+                          cursor: 'pointer' }}>
+                        ✏️ Düzenle
+                      </button>
+                      <button type="button"
+                        onClick={() => void retrieveDoc(doc)}
+                        style={{ flex: 1, padding: '7px', borderRadius: 7,
+                          border: '1px solid #BFDBFE', background: '#EFF6FF',
+                          fontSize: 12, fontWeight: 600, color: '#1565C0',
+                          cursor: 'pointer' }}>
+                        📂 Getir
+                      </button>
+                      <button type="button"
+                        onClick={async () => {
+                          await window.electron.db.deleteHeldDocument(doc.id)
+                          void loadHeld()
+                        }}
+                        style={{ padding: '7px 10px', borderRadius: 7,
+                          border: '1px solid #FECACA', background: '#FEF2F2',
+                          fontSize: 12, color: '#DC2626', cursor: 'pointer' }}>
+                        🗑
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {heldPreview && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setHeldPreview(null)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'white', borderRadius: 14, padding: 20,
+              width: 'min(420px, 94vw)', maxHeight: '80vh',
+              display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>
+                  {heldPreview.receiptNo ?? heldPreview.id.slice(0, 8).toUpperCase()}
+                </div>
+                <div style={{ fontSize: 12, color: '#6B7280' }}>
+                  {heldPreview.label ?? '—'}
+                </div>
+              </div>
+              <button type="button" onClick={() => setHeldPreview(null)}
+                style={{ background: 'none', border: 'none',
+                  cursor: 'pointer', fontSize: 18, color: '#9CA3AF' }}>✕</button>
+            </div>
+
+            {heldPreview.customerName && (
+              <div style={{ padding: '8px 12px', borderRadius: 8,
+                background: '#F0F9FF', fontSize: 12, color: '#0369A1' }}>
+                👤 {heldPreview.customerName}
+              </div>
+            )}
+
+            <div style={{ overflowY: 'auto', flex: 1,
+              display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {heldPreview.items.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', padding: '8px 10px', borderRadius: 8,
+                  background: i % 2 === 0 ? '#F9FAFB' : 'white',
+                  border: '1px solid #F3F4F6' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                      {item.quantity} {item.unit ?? 'Adet'} × {fmt(item.price)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#111827',
+                    flexShrink: 0, marginLeft: 8 }}>
+                    {fmt(item.netTotal ?? item.lineTotal ?? item.price * item.quantity)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+              padding: '10px 12px', borderRadius: 8,
+              background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Toplam</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#1565C0' }}>
+                {fmt(heldPreview.totalAmount ?? 0)}
+              </span>
+            </div>
+
+            <button type="button"
+              onClick={() => {
+                void retrieveDoc(heldPreview)
+                setHeldPreview(null)
+              }}
+              style={{ padding: '12px', borderRadius: 10, border: 'none',
+                background: '#1565C0', color: 'white', fontWeight: 700,
+                fontSize: 14, cursor: 'pointer' }}>
+              📂 Belgeyi Getir
+            </button>
+          </div>
+        </div>
+      )}
+
+      {heldEdit && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setHeldEdit(null)}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: 'white', borderRadius: 14, padding: 24,
+              width: 'min(360px, 94vw)', display: 'flex',
+              flexDirection: 'column', gap: 14 }}>
+
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Belge İsmini Düzenle</div>
+
+            <input
+              autoFocus
+              value={heldEdit.label}
+              onChange={e => setHeldEdit(prev => prev ? { ...prev, label: e.target.value } : prev)}
+              placeholder="Belge ismi (örn: Masa 3, Ali Bey)"
+              style={{ padding: '12px 14px', borderRadius: 10,
+                border: '1.5px solid #E5E7EB', fontSize: 14,
+                outline: 'none', width: '100%', boxSizing: 'border-box' }}
+              onKeyDown={e => { if (e.key === 'Enter') void saveHeldLabel() }}
+            />
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setHeldEdit(null)}
+                style={{ flex: 1, padding: '11px', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#F9FAFB',
+                  fontSize: 14, cursor: 'pointer', color: '#6B7280' }}>
+                Vazgeç
+              </button>
+              <button type="button" onClick={() => void saveHeldLabel()}
+                style={{ flex: 1, padding: '11px', borderRadius: 10,
+                  border: 'none', background: '#1565C0', color: 'white',
+                  fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
+                Kaydet
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3170,19 +3324,19 @@ export default function POSScreen({
             <button type="button"
               onClick={() => {
                 if (!pavoSettings) return
-                setSmsPhoneDraft(smsPhone)
+                setSmsPhoneDraft(smsPhone || '')
                 setSmsPhonePanelOpen(true)
               }}
               style={{ borderRadius: 8, border: '1.5px solid',
-                borderColor: sendSms ? '#2E7D32' : '#E5E7EB',
-                background: sendSms ? '#E8F5E9' : '#FAFAFA',
+                borderColor: smsPhone ? '#1565C0' : '#E5E7EB',
+                background: smsPhone ? '#EFF6FF' : '#FAFAFA',
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 gap: 4, padding: '6% 4%', overflow: 'hidden',
                 cursor: pavoSettings ? 'pointer' : 'default',
                 opacity: pavoSettings ? 1 : 0.55 }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
               <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                color: sendSms ? '#2E7D32' : '#9CA3AF',
+                color: smsPhone ? '#1565C0' : '#9CA3AF',
                 whiteSpace: 'nowrap', overflow: 'hidden',
                 textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
                 {smsPhone ? formatTrMobileSmsDisplay(smsPhone) : 'SMS'}
@@ -3193,14 +3347,14 @@ export default function POSScreen({
             <button type="button"
               onClick={() => setMailModalOpen(true)}
               style={{ borderRadius: 8, border: '1.5px solid',
-                borderColor: sendEmail ? '#1565C0' : '#E5E7EB',
-                background: sendEmail ? '#EFF6FF' : '#FAFAFA',
+                borderColor: mailAddr ? '#1565C0' : '#E5E7EB',
+                background: mailAddr ? '#EFF6FF' : '#FAFAFA',
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 gap: 4, padding: '6% 4%', overflow: 'hidden',
                 cursor: 'pointer' }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
               <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                color: sendEmail ? '#1565C0' : '#9CA3AF',
+                color: mailAddr ? '#1565C0' : '#9CA3AF',
                 whiteSpace: 'nowrap', overflow: 'hidden',
                 textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
                 {mailAddr || 'Mail'}
