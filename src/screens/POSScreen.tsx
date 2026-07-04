@@ -3511,7 +3511,7 @@ export default function POSScreen({
                   color:      numBuf ? '#2e7d32' : '#9ca3af',
                   lineHeight: 1,
                 }}>
-                  {numBuf || 'ADET'}
+                  {numBuf || 'Adet'}
                 </span>
                 {numBuf && (
                   <span style={{ fontSize: 'clamp(8px, 0.6vw, 9px)', color: '#6b7280', marginTop: 1 }}>
@@ -4528,7 +4528,7 @@ export default function POSScreen({
               flexShrink:    0,
               minWidth:      44,
               boxSizing:     'border-box',
-              background:    '#f3f4f6',
+              background:    'white',
               display:       'flex',
               flexDirection: 'column',
               overflowY:     'auto',
@@ -4545,7 +4545,7 @@ export default function POSScreen({
                     style={{
                       height:        68,
                       border:        'none',
-                      background:    isActive ? g.color : '#f3f4f6',
+                      background:    isActive ? g.color : '#f8f9fa',
                       cursor:        'pointer',
                       position:      'relative',
                       display:       'flex',
@@ -4555,35 +4555,32 @@ export default function POSScreen({
                       gap:           3,
                       color:         isActive ? 'white' : '#6b7280',
                       fontSize:      10,
-                      fontWeight:    700,
+                      fontWeight:    600,
                       textTransform: 'uppercase' as const,
                       letterSpacing: '0.2px',
                       flexShrink:    0,
                       width:         '100%',
-                      paddingRight:  0,
+                      paddingRight:  5,
                       borderRadius:  '8px 0 0 8px',
-                      transition:    'all 0.15s',
-                      boxShadow:     isActive ? 'inset 3px 0 0 rgba(255,255,255,0.4)' : 'none',
                     }}
                   >
                     <div style={{
-                      width:        isActive ? 12 : 8,
-                      height:       isActive ? 12 : 8,
-                      borderRadius: '50%',
-                      background:   isActive ? 'rgba(255,255,255,0.9)' : g.color,
-                      opacity:      isActive ? 1 : 0.5,
-                      transition:   'all 0.15s',
-                      flexShrink:   0,
+                      position: 'absolute', right: 0, top: 0, bottom: 0,
+                      width: isActive ? 7 : 4, background: g.color, transition: 'width 0.15s',
                     }} />
-                    <span style={{
-                      lineHeight: 1.2,
-                      textAlign:  'center',
-                      padding:    '0 3px',
-                      wordBreak:  'break-all',
-                      fontSize:   isActive ? 10 : 9,
-                    }}>
-                      {g.name}
-                    </span>
+                    {isActive && (
+                      <div style={{
+                        position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)',
+                        borderTop: '6px solid transparent', borderBottom: '6px solid transparent',
+                        borderLeft: `6px solid ${g.color}`, zIndex: 3,
+                      }} />
+                    )}
+                    <div style={{
+                      width: isActive ? 10 : 8, height: isActive ? 10 : 8,
+                      borderRadius: '50%', background: isActive ? 'white' : g.color,
+                      opacity: isActive ? 1 : 0.4, transition: 'all 0.15s',
+                    }} />
+                    <span>{g.name}</span>
                   </button>
                 )
               })}
