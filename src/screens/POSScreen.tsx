@@ -3485,82 +3485,107 @@ export default function POSScreen({
           </div>
 
           <div style={{
-            minHeight:      0,
-            height:         '100%',
             display:        'flex',
             flexDirection:  'column',
             gap:            5,
-            padding:        '0 4px 0',
+            flex:           1,
+            minHeight:      0,
+            height:         '100%',
+            padding:        '4px',
             boxSizing:      'border-box',
             overflow:       'hidden',
           }}>
 
-            <div style={{
-              flexShrink:          0,
-              height:              'clamp(34px, 8%, 48px)',
-              display:             'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap:                 5,
-            }}>
-
-              <div style={{
-                display:        'flex',
-                flexDirection:  'column',
-                alignItems:     'center',
-                justifyContent: 'center',
-                borderRadius:   9,
-                border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#d1d5db'}`,
-                background:     numBuf ? '#e8f5e9' : '#f9fafb',
-                userSelect:     'none' as const,
-                minWidth:       0,
-                overflow:       'hidden',
-              }}>
-                <span style={{
-                  fontSize:   'clamp(13px, 2.2vh, 22px)',
-                  fontWeight: 700,
-                  color:      numBuf ? '#2e7d32' : '#9ca3af',
-                  lineHeight: 1,
-                }}>
-                  {numBuf || 'Adet'}
-                </span>
-                {numBuf && (
-                  <span style={{ fontSize: 'clamp(8px, 0.6vw, 9px)', color: '#6b7280', marginTop: 1 }}>
-                    {numBuf.includes(',') ? 'miktar' : 'adet'}
-                  </span>
-                )}
-              </div>
-
+            {/* Satır 1: TEMİZLE + ⌫ */}
+            <div style={{ display: 'flex', gap: 5, flexShrink: 0, height: 44 }}>
               <button
                 type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
+                onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
                 style={{
+                  flex:           1,
                   borderRadius:   9,
-                  border:         '1.5px solid #fde68a',
-                  background:     '#fffbeb',
-                  color:          '#d97706',
-                  fontSize:       'clamp(11px, 1.8vh, 14px)',
+                  border:         '1.5px solid #fecdd3',
+                  background:     '#fff5f5',
+                  color:          '#dc2626',
+                  fontSize:       13,
                   fontWeight:     700,
                   cursor:         'pointer',
                   display:        'flex',
                   alignItems:     'center',
                   justifyContent: 'center',
                   userSelect:     'none' as const,
-                  minWidth:       0,
                 }}
-              >
-                Sil
-              </button>
+              >TEMİZLE</button>
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
+                style={{
+                  flex:           1,
+                  borderRadius:   9,
+                  border:         '1.5px solid #fde68a',
+                  background:     '#fffbeb',
+                  color:          '#d97706',
+                  fontSize:       20,
+                  fontWeight:     700,
+                  cursor:         'pointer',
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  gap:            6,
+                }}
+              >⌫</button>
             </div>
 
+            {/* Satır 2: numBuf göstergesi */}
             <div style={{
-              flex:                1,
-              minHeight:           0,
+              flexShrink:     0,
+              height:         40,
+              borderRadius:   9,
+              border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#e5e7eb'}`,
+              background:     numBuf ? '#e8f5e9' : '#f9fafb',
+              display:        'flex',
+              alignItems:     'center',
+              justifyContent: 'center',
+              padding:        '0 8px',
+              overflow:       'hidden',
+              userSelect:     'none' as const,
+            }}>
+              <span style={{
+                fontSize: numBuf.length === 0
+                  ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                  : numBuf.length <= 7
+                    ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                    : numBuf.length <= 14
+                      ? 'clamp(12px, 1.1vw + 2px, 18px)'
+                      : numBuf.length <= 17
+                        ? 'clamp(10px, 0.95vw + 1px, 15px)'
+                        : 'clamp(8px, 0.8vw, 12px)',
+                fontWeight:    700,
+                color:         numBuf ? '#2e7d32' : '#9ca3af',
+                letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
+                whiteSpace:    'nowrap',
+                overflow:      'hidden',
+                textOverflow:  'ellipsis',
+                maxWidth:      '100%',
+                lineHeight:    1,
+                textAlign:     'center',
+              }}>
+                {numBuf || '—'}
+              </span>
+            </div>
+
+            {/* Numpad grid */}
+            <div style={{
               display:             'grid',
               gridTemplateColumns: 'repeat(3, 1fr)',
               gridTemplateRows:    'repeat(4, minmax(0, 1fr))',
               gap:                 5,
+              flex:                1,
+              minHeight:           0,
             }}>
-              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3', ',', '0'].map(k => (
                 <button
                   key={k}
                   type="button"
@@ -3568,7 +3593,6 @@ export default function POSScreen({
                   style={{
                     width:          '100%',
                     height:         '100%',
-                    minHeight:      0,
                     boxSizing:      'border-box',
                     border:         '1.5px solid #d1d5db',
                     borderRadius:   9,
@@ -3580,54 +3604,10 @@ export default function POSScreen({
                     userSelect:     'none' as const,
                     background:     'white',
                     color:          '#1f2937',
-                    fontSize:       'clamp(20px, 5vh, 40px)',
+                    fontSize:       'clamp(14px, 1.4vw + 4px, 26px)',
                   }}
                 >{k}</button>
               ))}
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey(',') }}
-                style={{
-                  width:          '100%',
-                  height:         '100%',
-                  minHeight:      0,
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #d1d5db',
-                  borderRadius:   9,
-                  cursor:         'pointer',
-                  fontWeight:     700,
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                  background:     'white',
-                  color:          '#1f2937',
-                  fontSize:       'clamp(20px, 5vh, 40px)',
-                }}
-              >,</button>
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey('0') }}
-                style={{
-                  width:          '100%',
-                  height:         '100%',
-                  minHeight:      0,
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #d1d5db',
-                  borderRadius:   9,
-                  cursor:         'pointer',
-                  fontWeight:     700,
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                  background:     'white',
-                  color:          '#1f2937',
-                  fontSize:       'clamp(20px, 5vh, 40px)',
-                }}
-              >0</button>
 
               <button
                 type="button"
@@ -3640,9 +3620,8 @@ export default function POSScreen({
                 style={{
                   width:          '100%',
                   height:         '100%',
-                  minHeight:      0,
                   boxSizing:      'border-box',
-                  border:         '1.5px solid #BFDBFE',
+                  border:         `1.5px solid ${numBuf ? '#BFDBFE' : '#e5e7eb'}`,
                   borderRadius:   9,
                   cursor:         numBuf ? 'pointer' : 'default',
                   fontWeight:     700,
@@ -3652,32 +3631,10 @@ export default function POSScreen({
                   userSelect:     'none' as const,
                   background:     numBuf ? '#EFF6FF' : '#f9fafb',
                   color:          numBuf ? '#1565C0' : '#9ca3af',
-                  fontSize:       'clamp(12px, 2.2vh, 16px)',
+                  fontSize:       'clamp(10px, 0.9vw + 3px, 14px)',
                 }}
-              >Enter</button>
+              >enter</button>
             </div>
-
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
-              style={{
-                flexShrink:     0,
-                width:          '100%',
-                height:         'clamp(44px, 10%, 56px)',
-                boxSizing:      'border-box',
-                border:         '1.5px solid #fecdd3',
-                borderRadius:   9,
-                cursor:         'pointer',
-                fontWeight:     600,
-                fontSize:       'clamp(12px, 2.2vh, 16px)',
-                background:     '#fff5f5',
-                color:          '#dc2626',
-                display:        'flex',
-                alignItems:     'center',
-                justifyContent: 'center',
-                userSelect:     'none' as const,
-              }}
-            >Temizle</button>
 
           </div>
 
@@ -4340,7 +4297,81 @@ export default function POSScreen({
             </div>
           )}
 
-          {/* Ödeme */}
+            </div>
+
+            {/* ④ GRUPLAR — sağda, arama altından başlar */}
+            <div style={{
+              width:         'clamp(68px, 11%, 104px)',
+              flexShrink:    0,
+              minWidth:      68,
+              boxSizing:     'border-box',
+              background:    'white',
+              display:       'flex',
+              flexDirection: 'column',
+              overflowX:     'hidden',
+              overflowY:     'auto',
+              padding:       '4px 0',
+              gap:           3,
+            }}>
+              {pluGroups.map(g => {
+                const isActive = activeGroup === g.id
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
+                    style={{
+                      height:        68,
+                      border:        'none',
+                      background:    isActive ? g.color : '#f8f9fa',
+                      cursor:        'pointer',
+                      position:      'relative',
+                      display:       'flex',
+                      flexDirection: 'column',
+                      alignItems:    'center',
+                      justifyContent:'center',
+                      gap:           3,
+                      color:         isActive ? 'white' : '#6b7280',
+                      fontSize:      10,
+                      fontWeight:    600,
+                      textTransform: 'uppercase' as const,
+                      letterSpacing: '0.2px',
+                      flexShrink:    0,
+                      width:         '100%',
+                      paddingRight:  5,
+                      borderRadius:  '8px 0 0 8px',
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', right: 0, top: 0, bottom: 0,
+                      width: isActive ? 7 : 4, background: g.color, transition: 'width 0.15s',
+                    }} />
+                    {isActive && (
+                      <div style={{
+                        position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)',
+                        borderTop: '6px solid transparent', borderBottom: '6px solid transparent',
+                        borderLeft: `6px solid ${g.color}`, zIndex: 3,
+                      }} />
+                    )}
+                    <div style={{
+                      width: isActive ? 10 : 8, height: isActive ? 10 : 8,
+                      borderRadius: '50%', background: isActive ? 'white' : g.color,
+                      opacity: isActive ? 1 : 0.4, transition: 'all 0.15s',
+                    }} />
+                    <span>{g.name}</span>
+                  </button>
+                )
+              })}
+              {pluGroups.length === 0 && (
+                <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                  PLU grubu yok
+                </div>
+              )}
+            </div>
+
+          </div>
+
+          {/* Ödeme — wrapper altında, tam genişlik */}
           <div style={{ padding: '5px 8px 8px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
             {!paymentMode ? (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -4528,79 +4559,6 @@ export default function POSScreen({
                 </div>
               </div>
             )}
-          </div>
-
-            </div>
-
-            {/* ④ GRUPLAR — sağda, arama altından başlar */}
-            <div style={{
-              width:         'clamp(56px, 9%, 88px)',
-              flexShrink:    0,
-              minWidth:      56,
-              boxSizing:     'border-box',
-              background:    'white',
-              display:       'flex',
-              flexDirection: 'column',
-              overflowY:     'auto',
-              padding:       '4px 0',
-              gap:           3,
-            }}>
-              {pluGroups.map(g => {
-                const isActive = activeGroup === g.id
-                return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
-                    style={{
-                      height:        68,
-                      border:        'none',
-                      background:    isActive ? g.color : '#f8f9fa',
-                      cursor:        'pointer',
-                      position:      'relative',
-                      display:       'flex',
-                      flexDirection: 'column',
-                      alignItems:    'center',
-                      justifyContent:'center',
-                      gap:           3,
-                      color:         isActive ? 'white' : '#6b7280',
-                      fontSize:      10,
-                      fontWeight:    600,
-                      textTransform: 'uppercase' as const,
-                      letterSpacing: '0.2px',
-                      flexShrink:    0,
-                      width:         '100%',
-                      paddingRight:  5,
-                      borderRadius:  '8px 0 0 8px',
-                    }}
-                  >
-                    <div style={{
-                      position: 'absolute', right: 0, top: 0, bottom: 0,
-                      width: isActive ? 7 : 4, background: g.color, transition: 'width 0.15s',
-                    }} />
-                    {isActive && (
-                      <div style={{
-                        position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)',
-                        borderTop: '6px solid transparent', borderBottom: '6px solid transparent',
-                        borderLeft: `6px solid ${g.color}`, zIndex: 3,
-                      }} />
-                    )}
-                    <div style={{
-                      width: isActive ? 10 : 8, height: isActive ? 10 : 8,
-                      borderRadius: '50%', background: isActive ? 'white' : g.color,
-                      opacity: isActive ? 1 : 0.4, transition: 'all 0.15s',
-                    }} />
-                    <span>{g.name}</span>
-                  </button>
-                )
-              })}
-              {pluGroups.length === 0 && (
-                <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
-                  PLU grubu yok
-                </div>
-              )}
-            </div>
-
           </div>
         </div>
       </div>
