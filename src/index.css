@@ -26,3 +26,12 @@ body {
 .group-tab-active { background: #1565C0 !important; color: white !important; }
 .group-tab { background: white; border: 1px solid #E0E0E0; color: #424242; cursor: pointer; }
 .group-tab:hover { background: #E3F2FD; border-color: #90CAF9; color: #1565C0; }
+
+/* PLU grup bar — kaydırma çubuğu gizli, kaydırma açık */
+.plu-groups-bar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.plu-groups-bar::-webkit-scrollbar {
+  display: none;
+}

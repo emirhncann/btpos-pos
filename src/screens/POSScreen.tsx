@@ -3560,8 +3560,8 @@ export default function POSScreen({
                     : numBuf.length <= 14
                       ? 'clamp(12px, 1.1vw + 2px, 18px)'
                       : numBuf.length <= 17
-                        ? 'clamp(10px, 0.95vw + 1px, 15px)'
-                        : 'clamp(8px, 0.8vw, 12px)',
+                        ? 'clamp(10px, 0.95vw + 1px, 16px)'
+                        : 'clamp(8px, 0.8vw, 14px)',
                 fontWeight:    700,
                 color:         numBuf ? '#2e7d32' : '#9ca3af',
                 letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
@@ -4300,7 +4300,9 @@ export default function POSScreen({
             </div>
 
             {/* ④ GRUPLAR — sağda, arama altından başlar */}
-            <div style={{
+            <div
+              className="plu-groups-bar"
+              style={{
               width:         'clamp(68px, 11%, 104px)',
               flexShrink:    0,
               minWidth:      68,
