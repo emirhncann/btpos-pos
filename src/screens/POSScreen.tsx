@@ -4524,9 +4524,9 @@ export default function POSScreen({
 
             {/* ④ GRUPLAR — sağda, arama altından başlar */}
             <div style={{
-              width:         'clamp(44px, 7%, 72px)',
+              width:         'clamp(56px, 9%, 88px)',
               flexShrink:    0,
-              minWidth:      44,
+              minWidth:      56,
               boxSizing:     'border-box',
               background:    'white',
               display:       'flex',
