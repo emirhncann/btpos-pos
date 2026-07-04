@@ -3348,17 +3348,25 @@ export default function POSScreen({
           minHeight: 0,
           boxSizing: 'border-box',
           background: '#f8f9fa',
-          display: 'grid',
-          gridTemplateRows: 'minmax(0, 42fr) minmax(0, 58fr)',
+          display: 'flex',
+          flexDirection: 'column',
           padding: '6px 6px 0',
-          gap: 5,
+          gap: 0,
           borderRight: '1px solid #e0e0e0',
           overflow: 'hidden',
           position: 'relative',
         }}>
 
+          <div style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'grid',
+            gridTemplateRows: 'minmax(0, 38fr) minmax(0, 62fr)',
+            gap: 5,
+          }}>
+
           {/* Üst butonlar — kalan alanı doldurur */}
-          <div style={{ gridRow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 5, overflow: 'hidden' }}>
+          <div style={{ minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', gap: 5, overflow: 'hidden' }}>
 
           <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
 
@@ -3461,6 +3469,205 @@ export default function POSScreen({
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Fiyat Gör</span>
             </button>
+
+          </div>
+
+          </div>
+
+          <div style={{
+            minHeight:      0,
+            height:         '100%',
+            display:        'flex',
+            flexDirection:  'column',
+            gap:            5,
+            padding:        '0 4px 0',
+            boxSizing:      'border-box',
+            overflow:       'hidden',
+          }}>
+
+            <div style={{
+              flexShrink:          0,
+              height:              'clamp(34px, 8%, 48px)',
+              display:             'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap:                 5,
+            }}>
+
+              <div style={{
+                display:        'flex',
+                flexDirection:  'column',
+                alignItems:     'center',
+                justifyContent: 'center',
+                borderRadius:   9,
+                border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#d1d5db'}`,
+                background:     numBuf ? '#e8f5e9' : '#f9fafb',
+                userSelect:     'none' as const,
+                minWidth:       0,
+                overflow:       'hidden',
+              }}>
+                <span style={{
+                  fontSize:   'clamp(13px, 2.2vh, 22px)',
+                  fontWeight: 700,
+                  color:      numBuf ? '#2e7d32' : '#9ca3af',
+                  lineHeight: 1,
+                }}>
+                  {numBuf || 'ADET'}
+                </span>
+                {numBuf && (
+                  <span style={{ fontSize: 'clamp(8px, 0.6vw, 9px)', color: '#6b7280', marginTop: 1 }}>
+                    {numBuf.includes(',') ? 'miktar' : 'adet'}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
+                style={{
+                  borderRadius:   9,
+                  border:         '1.5px solid #fde68a',
+                  background:     '#fffbeb',
+                  color:          '#d97706',
+                  fontSize:       'clamp(11px, 1.8vh, 14px)',
+                  fontWeight:     700,
+                  cursor:         'pointer',
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  minWidth:       0,
+                }}
+              >
+                Sil
+              </button>
+            </div>
+
+            <div style={{
+              flex:                1,
+              minHeight:           0,
+              display:             'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateRows:    'repeat(4, minmax(0, 1fr))',
+              gap:                 5,
+            }}>
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
+                  style={{
+                    width:          '100%',
+                    height:         '100%',
+                    minHeight:      0,
+                    boxSizing:      'border-box',
+                    border:         '1.5px solid #d1d5db',
+                    borderRadius:   9,
+                    cursor:         'pointer',
+                    fontWeight:     700,
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    userSelect:     'none' as const,
+                    background:     'white',
+                    color:          '#1f2937',
+                    fontSize:       'clamp(20px, 5vh, 40px)',
+                  }}
+                >{k}</button>
+              ))}
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey(',') }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  minHeight:      0,
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #d1d5db',
+                  borderRadius:   9,
+                  cursor:         'pointer',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     'white',
+                  color:          '#1f2937',
+                  fontSize:       'clamp(20px, 5vh, 40px)',
+                }}
+              >,</button>
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('0') }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  minHeight:      0,
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #d1d5db',
+                  borderRadius:   9,
+                  cursor:         'pointer',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     'white',
+                  color:          '#1f2937',
+                  fontSize:       'clamp(20px, 5vh, 40px)',
+                }}
+              >0</button>
+
+              <button
+                type="button"
+                onMouseDown={e => {
+                  e.preventDefault()
+                  if (!numBuf) return
+                  setSearchQ(numBuf)
+                  setNumBuf('')
+                }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  minHeight:      0,
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #BFDBFE',
+                  borderRadius:   9,
+                  cursor:         numBuf ? 'pointer' : 'default',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     numBuf ? '#EFF6FF' : '#f9fafb',
+                  color:          numBuf ? '#1565C0' : '#9ca3af',
+                  fontSize:       'clamp(12px, 2.2vh, 16px)',
+                }}
+              >Enter</button>
+            </div>
+
+            <button
+              type="button"
+              onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
+              style={{
+                flexShrink:     0,
+                width:          '100%',
+                height:         'clamp(44px, 10%, 56px)',
+                boxSizing:      'border-box',
+                border:         '1.5px solid #fecdd3',
+                borderRadius:   9,
+                cursor:         'pointer',
+                fontWeight:     600,
+                fontSize:       'clamp(12px, 2.2vh, 16px)',
+                background:     '#fff5f5',
+                color:          '#dc2626',
+                display:        'flex',
+                alignItems:     'center',
+                justifyContent: 'center',
+                userSelect:     'none' as const,
+              }}
+            >Temizle</button>
 
           </div>
 
@@ -3949,235 +4156,26 @@ export default function POSScreen({
             </div>
           )}
 
-          <div style={{
-            gridRow:        2,
-            minHeight:      0,
-            height:         '100%',
-            display:        'flex',
-            flexDirection:  'column',
-            gap:            5,
-            padding:        '0 4px',
-            boxSizing:      'border-box',
-            overflow:       'hidden',
-          }}>
-
-            {/* Üst satır: ADET + SİL */}
-            <div style={{
-              flexShrink:          0,
-              height:              'clamp(36px, 10%, 52px)',
-              display:             'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap:                 5,
-            }}>
-
-              <div style={{
-                display:        'flex',
-                flexDirection:  'column',
-                alignItems:     'center',
-                justifyContent: 'center',
-                borderRadius:   9,
-                border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#d1d5db'}`,
-                background:     numBuf ? '#e8f5e9' : '#f9fafb',
-                userSelect:     'none' as const,
-                minWidth:       0,
-                overflow:       'hidden',
-              }}>
-                <span style={{
-                  fontSize:   'clamp(13px, 2.2vh, 22px)',
-                  fontWeight: 700,
-                  color:      numBuf ? '#2e7d32' : '#9ca3af',
-                  lineHeight: 1,
-                }}>
-                  {numBuf || 'adet'}
-                </span>
-                {numBuf && (
-                  <span style={{ fontSize: 'clamp(8px, 0.6vw, 9px)', color: '#6b7280', marginTop: 1 }}>
-                    {numBuf.includes(',') ? 'miktar' : 'adet'}
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
-                style={{
-                  borderRadius:   9,
-                  border:         '1.5px solid #fde68a',
-                  background:     '#fffbeb',
-                  color:          '#d97706',
-                  fontSize:       'clamp(11px, 1.8vh, 14px)',
-                  fontWeight:     700,
-                  cursor:         'pointer',
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  gap:            4,
-                  userSelect:     'none' as const,
-                  minWidth:       0,
-                }}
-              >
-                Sil
-              </button>
-            </div>
-
-            {/* Numpad grid — alanın tamamını doldurur */}
-            <div style={{
-              flex:                1,
-              minHeight:           0,
-              height:              '100%',
-              display:             'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gridTemplateRows:    'repeat(4, minmax(0, 1fr)) minmax(0, 1fr) minmax(0, 1fr)',
-              gap:                 5,
-            }}>
-              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
-                <button
-                  key={k}
-                  type="button"
-                  onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
-                  style={{
-                    width:          '100%',
-                    height:         '100%',
-                    boxSizing:      'border-box',
-                    border:         '1.5px solid #d1d5db',
-                    borderRadius:   9,
-                    cursor:         'pointer',
-                    fontWeight:     700,
-                    display:        'flex',
-                    alignItems:     'center',
-                    justifyContent: 'center',
-                    userSelect:     'none' as const,
-                    background:     'white',
-                    color:          '#1f2937',
-                    fontSize:       'clamp(18px, 4.2vh, 36px)',
-                  }}
-                >{k}</button>
-              ))}
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey(',') }}
-                style={{
-                  width:          '100%',
-                  height:         '100%',
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #d1d5db',
-                  borderRadius:   9,
-                  cursor:         'pointer',
-                  fontWeight:     700,
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                  background:     'white',
-                  color:          '#1f2937',
-                  fontSize:       'clamp(18px, 4.2vh, 36px)',
-                }}
-              >,</button>
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey('0') }}
-                style={{
-                  width:          '100%',
-                  height:         '100%',
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #d1d5db',
-                  borderRadius:   9,
-                  cursor:         'pointer',
-                  fontWeight:     700,
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                  background:     'white',
-                  color:          '#1f2937',
-                  fontSize:       'clamp(18px, 4.2vh, 36px)',
-                }}
-              >0</button>
-
-              <button
-                type="button"
-                onMouseDown={e => {
-                  e.preventDefault()
-                  if (!numBuf) return
-                  setSearchQ(numBuf)
-                  setNumBuf('')
-                }}
-                style={{
-                  width:          '100%',
-                  height:         '100%',
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #BFDBFE',
-                  borderRadius:   9,
-                  cursor:         numBuf ? 'pointer' : 'default',
-                  fontWeight:     700,
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                  background:     numBuf ? '#EFF6FF' : '#f9fafb',
-                  color:          numBuf ? '#1565C0' : '#9ca3af',
-                  fontSize:       'clamp(12px, 2vh, 16px)',
-                }}
-              >enter</button>
-
-              <button
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
-                style={{
-                  gridColumn:     'span 3',
-                  width:          '100%',
-                  height:         '100%',
-                  boxSizing:      'border-box',
-                  border:         '1.5px solid #fecdd3',
-                  borderRadius:   9,
-                  cursor:         'pointer',
-                  fontWeight:     600,
-                  fontSize:       'clamp(12px, 2vh, 15px)',
-                  background:     '#fff5f5',
-                  color:          '#dc2626',
-                  display:        'flex',
-                  alignItems:     'center',
-                  justifyContent: 'center',
-                  userSelect:     'none' as const,
-                }}
-              >Temizle</button>
-            </div>
-
-          </div>
-
         </div>
 
-        {/* ③ PLU — %29 */}
-        <div style={{ flex: 1, flexShrink: 1, minWidth: 180, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* ③+④ PLU + GRUPLAR wrapper */}
+        <div style={{
+          flex:          1,
+          minWidth:      180,
+          boxSizing:     'border-box',
+          display:       'flex',
+          flexDirection: 'column',
+          overflow:      'hidden',
+          background:    'white',
+        }}>
 
-          {/* PLU başlık */}
-          <div style={{ padding: '7px 10px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 6, height: 36, flexShrink: 0, background: '#f8f9fa' }}>
-            <div style={{ width: 3, height: 14, borderRadius: 2, background: activeColor, flexShrink: 0 }} />
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#111', whiteSpace: 'nowrap', flex: 1 }}>
-              {pluGroups.find(g => g.id === activeGroup)?.name ?? '—'}
-            </span>
-            <span style={{ fontSize: 9, color: '#9ca3af' }}>{filtered.length} ürün</span>
-            <button
-              type="button"
-              onClick={() => {
-                if (!openKeyboard({
-                  title:    'Ürün ara',
-                  initial:  searchQ,
-                  type:     'qwerty',
-                  onConfirm: (v) => setSearchQ(v),
-                })) {
-                  void window.electron.app.openKeyboard().catch(() => {})
-                }
-              }}
-              style={{ width: 24, height: 24, background: '#efefef', border: '1px solid #e5e7eb', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0 }}
-              title="Klavye Aç"
-            >⌨</button>
-          </div>
-
-          {/* Arama */}
-          <div style={{ padding: '8px', flexShrink: 0, borderBottom: '1px solid #f5f5f5' }}>
+          {/* Arama — tam genişlik, en üstte */}
+          <div style={{
+            padding:      '6px 8px',
+            flexShrink:   0,
+            borderBottom: '1px solid #f0f0f0',
+            background:   'white',
+          }}>
             <input
               ref={searchRef}
               value={searchQ}
@@ -4185,16 +4183,69 @@ export default function POSScreen({
               onKeyDown={e => { if (e.key === 'Escape') setSearchQ('') }}
               placeholder="Barkod veya ürün ara..."
               style={{
-                width: '100%',
-                border: '1px solid #E0E0E0',
+                width:        '100%',
+                border:       '1px solid #E0E0E0',
                 borderRadius: 9,
-                padding: '10px 14px',
-                fontSize: 15,
-                outline: 'none',
-                background: 'white',
+                padding:      '9px 14px',
+                fontSize:     14,
+                outline:      'none',
+                background:   'white',
+                boxSizing:    'border-box',
               }}
             />
           </div>
+
+          {/* PLU grid + Grup bar — yatay */}
+          <div style={{
+            flex:      1,
+            display:   'flex',
+            minHeight: 0,
+            overflow:  'hidden',
+          }}>
+
+            {/* PLU panel */}
+            <div style={{
+              flex:          1,
+              flexShrink:    1,
+              minWidth:      0,
+              boxSizing:     'border-box',
+              display:       'flex',
+              flexDirection: 'column',
+              overflow:      'hidden',
+            }}>
+
+              {/* Grup adı + ürün sayısı — küçük başlık */}
+              <div style={{
+                padding:      '4px 10px',
+                borderBottom: '1px solid #f3f4f6',
+                display:      'flex',
+                alignItems:   'center',
+                gap:          6,
+                height:       28,
+                flexShrink:   0,
+                background:   '#fafafa',
+              }}>
+                <div style={{ width: 3, height: 12, borderRadius: 2, background: activeColor, flexShrink: 0 }} />
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#111', whiteSpace: 'nowrap', flex: 1 }}>
+                  {pluGroups.find(g => g.id === activeGroup)?.name ?? '—'}
+                </span>
+                <span style={{ fontSize: 9, color: '#9ca3af' }}>{filtered.length} ürün</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!openKeyboard({
+                      title:    'Ürün ara',
+                      initial:  searchQ,
+                      type:     'qwerty',
+                      onConfirm: (v) => setSearchQ(v),
+                    })) {
+                      void window.electron.app.openKeyboard().catch(() => {})
+                    }
+                  }}
+                  style={{ width: 22, height: 22, background: '#efefef', border: '1px solid #e5e7eb', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}
+                  title="Klavye Aç"
+                >⌨</button>
+              </div>
 
           {/* PLU grid — sütun/satır sayısı posSettings'ten */}
           {searchQ ? (
@@ -4468,49 +4519,82 @@ export default function POSScreen({
               </div>
             )}
           </div>
-        </div>
 
-        {/* ④ GRUPLAR — %7 */}
-        <div style={{ width: 'clamp(44px, 7%, 72px)', flexShrink: 0, minWidth: 44, boxSizing: 'border-box', background: 'white', display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '4px 0', gap: 3 }}>
-          {pluGroups.map(g => (
-            <button
-              key={g.id}
-              onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
-              style={{
-                height: 68,
-                border: 'none',
-                background: activeGroup === g.id ? 'white' : '#f8f9fa',
-                cursor: 'pointer',
-                position: 'relative',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 3,
-                color: activeGroup === g.id ? '#111' : '#6b7280',
-                fontSize: 10,
-                fontWeight: 600,
-                textTransform: 'uppercase' as const,
-                letterSpacing: '0.2px',
-                flexShrink: 0,
-                width: '100%',
-                paddingRight: 5,
-                borderRadius: '8px 0 0 8px',
-              }}
-            >
-              {/* Renk şeridi sağda */}
-              <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: activeGroup === g.id ? 7 : 4, background: g.color, transition: 'width 0.15s' }} />
-              {/* Ok solda */}
-              {activeGroup === g.id && (
-                <div style={{ position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)', borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '6px solid white', zIndex: 3 }} />
+            </div>
+
+            {/* ④ GRUPLAR — sağda, arama altından başlar */}
+            <div style={{
+              width:         'clamp(44px, 7%, 72px)',
+              flexShrink:    0,
+              minWidth:      44,
+              boxSizing:     'border-box',
+              background:    '#f3f4f6',
+              display:       'flex',
+              flexDirection: 'column',
+              overflowY:     'auto',
+              padding:       '4px 0',
+              gap:           3,
+            }}>
+              {pluGroups.map(g => {
+                const isActive = activeGroup === g.id
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
+                    style={{
+                      height:        68,
+                      border:        'none',
+                      background:    isActive ? g.color : '#f3f4f6',
+                      cursor:        'pointer',
+                      position:      'relative',
+                      display:       'flex',
+                      flexDirection: 'column',
+                      alignItems:    'center',
+                      justifyContent:'center',
+                      gap:           3,
+                      color:         isActive ? 'white' : '#6b7280',
+                      fontSize:      10,
+                      fontWeight:    700,
+                      textTransform: 'uppercase' as const,
+                      letterSpacing: '0.2px',
+                      flexShrink:    0,
+                      width:         '100%',
+                      paddingRight:  0,
+                      borderRadius:  '8px 0 0 8px',
+                      transition:    'all 0.15s',
+                      boxShadow:     isActive ? 'inset 3px 0 0 rgba(255,255,255,0.4)' : 'none',
+                    }}
+                  >
+                    <div style={{
+                      width:        isActive ? 12 : 8,
+                      height:       isActive ? 12 : 8,
+                      borderRadius: '50%',
+                      background:   isActive ? 'rgba(255,255,255,0.9)' : g.color,
+                      opacity:      isActive ? 1 : 0.5,
+                      transition:   'all 0.15s',
+                      flexShrink:   0,
+                    }} />
+                    <span style={{
+                      lineHeight: 1.2,
+                      textAlign:  'center',
+                      padding:    '0 3px',
+                      wordBreak:  'break-all',
+                      fontSize:   isActive ? 10 : 9,
+                    }}>
+                      {g.name}
+                    </span>
+                  </button>
+                )
+              })}
+              {pluGroups.length === 0 && (
+                <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                  PLU grubu yok
+                </div>
               )}
-              <div style={{ width: activeGroup === g.id ? 10 : 8, height: activeGroup === g.id ? 10 : 8, borderRadius: '50%', background: g.color, opacity: activeGroup === g.id ? 1 : 0.4, transition: 'all 0.15s' }} />
-              <span>{g.name}</span>
-            </button>
-          ))}
-          {pluGroups.length === 0 && (
-            <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>PLU grubu yok</div>
-          )}
+            </div>
+
+          </div>
         </div>
       </div>
 
