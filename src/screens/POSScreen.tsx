@@ -2737,9 +2737,19 @@ export default function POSScreen({
             <div style={{ fontSize: 15, fontWeight: 700 }}>Belge İsmini Düzenle</div>
 
             <input
-              autoFocus
+              autoFocus={!touchEnabled}
+              readOnly={touchEnabled}
               value={heldEdit.label}
               onChange={e => setHeldEdit(prev => prev ? { ...prev, label: e.target.value } : prev)}
+              onClick={() => {
+                if (!touchEnabled) return
+                openKeyboard({
+                  title:    'Belge İsmi',
+                  initial:  heldEdit?.label ?? '',
+                  type:     'qwerty',
+                  onConfirm: (v) => setHeldEdit(prev => prev ? { ...prev, label: v } : prev),
+                })
+              }}
               placeholder="Belge ismi (örn: Masa 3, Ali Bey)"
               style={{ padding: '12px 14px', borderRadius: 10,
                 border: '1.5px solid #E5E7EB', fontSize: 14,
