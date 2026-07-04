@@ -403,11 +403,15 @@ export default function POSScreen({
   const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
-  const [slidingItem, setSlidingItem] = useState<string | null>(null)
-  const [slideX, setSlideX] = useState(0)
-  const slideStartX = useRef(0)
-  const slideXRef = useRef(0)
-  const SLIDE_THRESHOLD = 80
+  const [swipeState, setSwipeState] = useState<{
+    id:       string
+    startX:   number
+    currentX: number
+    locked:   boolean
+  } | null>(null)
+  const SLIDE_THRESHOLD = 60
+  const SLIDE_THRESHOLD_MOUSE = 25
+  const SLIDE_OPEN_X    = 72
 
   const license   = useLicenseCheck(companyId)
   const conn      = useConnectionStatus(30)
@@ -647,10 +651,36 @@ export default function POSScreen({
   useEffect(() => { setPage(0) }, [activeGroup, searchQ, pluCols, pluRows])
 
   function resetSlide() {
-    setSlidingItem(null)
-    setSlideX(0)
-    slideXRef.current = 0
+    setSwipeState(null)
   }
+
+  const beginMouseSwipe = useCallback((itemId: string, clientX: number) => {
+    setSwipeState({ id: itemId, startX: clientX, currentX: 0, locked: false })
+
+    const onMove = (e: MouseEvent) => {
+      setSwipeState(s => {
+        if (!s || s.id !== itemId) return s
+        const dx = s.startX - e.clientX
+        const cx = Math.max(0, Math.min(dx, SLIDE_OPEN_X))
+        return { ...s, currentX: cx, locked: cx >= SLIDE_THRESHOLD_MOUSE }
+      })
+    }
+
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      setSwipeState(s => {
+        if (!s || s.id !== itemId) return null
+        if (s.locked || s.currentX >= SLIDE_THRESHOLD_MOUSE) {
+          return { ...s, currentX: SLIDE_OPEN_X, locked: true }
+        }
+        return null
+      })
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [])
 
   useEffect(() => {
     if (!lineDiscountTarget) {
@@ -719,7 +749,13 @@ export default function POSScreen({
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Enter') {
-        if (buf.length >= 3) setSearchQ(buf)
+        if (buf.length >= 2) {
+          setSearchQ(buf)
+          setNumBuf('')
+        } else if (numBuf.length >= 2) {
+          setSearchQ(numBuf)
+          setNumBuf('')
+        }
         buf = ''
         if (timer) clearTimeout(timer)
         return
@@ -734,7 +770,7 @@ export default function POSScreen({
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [paymentMode, quickReturnModal, cariPaymentModal, menuOpen, applyFiyatGorScan])
+  }, [paymentMode, quickReturnModal, cariPaymentModal, menuOpen, applyFiyatGorScan, numBuf])
 
   /* ── Barkod okuyucu ── */
   useEffect(() => {
@@ -2952,7 +2988,7 @@ export default function POSScreen({
           </div>
 
           <div ref={cartListRef}
-            onClick={() => { if (slidingItem) resetSlide() }}
+            onClick={() => { if (swipeState) setSwipeState(null) }}
             style={{
             flex: 1,
             overflowY: 'auto',
@@ -3033,8 +3069,6 @@ export default function POSScreen({
                     overflow:     'hidden',
                     borderRadius: 11,
                     marginBottom: 5,
-                    border:       '1px solid #e8eaef',
-                    borderLeft:   returnMode ? '3px solid #DC2626' : 'none',
                     boxShadow:    '0 1px 2px rgba(15, 23, 42, 0.035)',
                   }}
                 >
@@ -3044,16 +3078,16 @@ export default function POSScreen({
                       right:          0,
                       top:            0,
                       bottom:         0,
-                      width:          80,
+                      width:          SLIDE_OPEN_X,
                       background:     '#DC2626',
                       display:        'flex',
                       alignItems:     'center',
                       justifyContent: 'center',
-                      borderRadius:   '0 11px 11px 0',
                       cursor:         'pointer',
                     }}
                     onClick={() => {
                       cancelOneFromCart(item.id)
+                      setSwipeState(null)
                     }}
                   >
                     <div style={{ color: 'white', fontSize: 11, fontWeight: 700,
@@ -3064,36 +3098,35 @@ export default function POSScreen({
 
                   <div
                     onTouchStart={e => {
-                      slideStartX.current = e.touches[0].clientX
-                      setSlidingItem(item.id)
+                      setSwipeState({
+                        id:       item.id,
+                        startX:   e.touches[0].clientX,
+                        currentX: 0,
+                        locked:   false,
+                      })
                     }}
                     onTouchMove={e => {
-                      if (slidingItem !== item.id) return
-                      const dx = slideStartX.current - e.touches[0].clientX
-                      const next = dx > 0 ? Math.min(dx, 90) : 0
-                      slideXRef.current = next
-                      setSlideX(next)
+                      setSwipeState(s => {
+                        if (!s || s.id !== item.id) return s
+                        const dx = s.startX - e.touches[0].clientX
+                        const cx = Math.max(0, Math.min(dx, SLIDE_OPEN_X))
+                        return { ...s, currentX: cx, locked: cx >= SLIDE_THRESHOLD }
+                      })
                     }}
                     onTouchEnd={() => {
-                      if (slideXRef.current < SLIDE_THRESHOLD) resetSlide()
+                      setSwipeState(s => {
+                        if (!s || s.id !== item.id) return s
+                        if (!s.locked) return null
+                        return { ...s, currentX: SLIDE_OPEN_X }
+                      })
                     }}
                     onMouseDown={e => {
-                      slideStartX.current = e.clientX
-                      setSlidingItem(item.id)
+                      if ((e.target as HTMLElement).closest('button')) return
+                      e.preventDefault()
+                      beginMouseSwipe(item.id, e.clientX)
                     }}
-                    onMouseMove={e => {
-                      if (slidingItem !== item.id) return
-                      if (!(e.buttons & 1)) { resetSlide(); return }
-                      const dx = slideStartX.current - e.clientX
-                      const next = dx > 0 ? Math.min(dx, 90) : 0
-                      slideXRef.current = next
-                      setSlideX(next)
-                    }}
-                    onMouseUp={() => {
-                      if (slideXRef.current < SLIDE_THRESHOLD) resetSlide()
-                    }}
-                    onClick={() => {
-                      if (slideXRef.current > 5) resetSlide()
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLDivElement).style.background = rowBg
                     }}
                     style={{
                       display:             'grid',
@@ -3102,17 +3135,22 @@ export default function POSScreen({
                       alignItems:          'start',
                       background:          rowBg,
                       borderRadius:        11,
+                      border:              '1px solid #e8eaef',
+                      borderLeft:          returnMode ? '3px solid #DC2626' : '1px solid #e8eaef',
                       cursor:              'default',
-                      transform:           slidingItem === item.id ? `translateX(-${slideX}px)` : 'translateX(0)',
-                      transition:          slidingItem === item.id ? 'none' : 'transform 0.2s ease',
+                      transform:           swipeState?.id === item.id
+                        ? `translateX(-${swipeState.currentX}px)`
+                        : 'translateX(0)',
+                      transition:          swipeState?.id === item.id && !swipeState.locked
+                        ? 'none'
+                        : 'transform 0.2s ease',
                       position:            'relative',
                       zIndex:              1,
+                      userSelect:          'none',
+                      touchAction:         'pan-y',
                     }}
                     onMouseEnter={e => {
                       (e.currentTarget as HTMLDivElement).style.background = '#f2f4f7'
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLDivElement).style.background = rowBg
                     }}
                   >
                   <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
@@ -3306,18 +3344,23 @@ export default function POSScreen({
           width: 'clamp(160px, 22%, 260px)',
           flexShrink: 0,
           minWidth: 160,
+          height: '100%',
+          minHeight: 0,
           boxSizing: 'border-box',
           background: '#f8f9fa',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: 6,
+          display: 'grid',
+          gridTemplateRows: 'minmax(0, 42fr) minmax(0, 58fr)',
+          padding: '6px 6px 0',
           gap: 5,
           borderRight: '1px solid #e0e0e0',
-          overflow: 'visible',
+          overflow: 'hidden',
           position: 'relative',
         }}>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
+          {/* Üst butonlar — kalan alanı doldurur */}
+          <div style={{ gridRow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 5, overflow: 'hidden' }}>
+
+          <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
 
             {/* SMS */}
             <button type="button"
@@ -3330,7 +3373,8 @@ export default function POSScreen({
                 borderColor: smsPhone ? '#1565C0' : '#E5E7EB',
                 background: smsPhone ? '#EFF6FF' : '#FAFAFA',
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 4, padding: '6% 4%', overflow: 'hidden',
+                justifyContent: 'center',
+                gap: 4, padding: '4%', overflow: 'hidden', height: '100%',
                 cursor: pavoSettings ? 'pointer' : 'default',
                 opacity: pavoSettings ? 1 : 0.55 }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
@@ -3349,7 +3393,8 @@ export default function POSScreen({
                 borderColor: mailAddr ? '#1565C0' : '#E5E7EB',
                 background: mailAddr ? '#EFF6FF' : '#FAFAFA',
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
-                gap: 4, padding: '6% 4%', overflow: 'hidden',
+                justifyContent: 'center',
+                gap: 4, padding: '4%', overflow: 'hidden', height: '100%',
                 cursor: 'pointer' }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
               <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
@@ -3363,16 +3408,16 @@ export default function POSScreen({
           </div>
 
           {/* ── SATIR 2+3: 4 buton 2×2 + popup menüler (v2) ── */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5, flexShrink: 0 }}>
+          <div style={{ flex: 2, minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 5 }}>
 
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
-              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
+              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'islemler' ? '#1565C0' : '#BBDEFB'}`,
                 background: menuOpen === 'islemler' ? '#E3F2FD' : '#F3F8FE',
                 color: '#1565C0', fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>☰</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Menü</span>
             </button>
@@ -3380,11 +3425,11 @@ export default function POSScreen({
             {/* 2 — Belge: mor tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
-              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
+              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'belge' ? '#7C3AED' : '#DDD6FE'}`,
                 background: menuOpen === 'belge' ? '#EDE9FE' : '#F5F3FF',
                 color: '#7C3AED', fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>📄</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Belge</span>
             </button>
@@ -3392,11 +3437,11 @@ export default function POSScreen({
             {/* 3 — Müşteri: yeşil tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
-              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
+              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'musteri' || selectedCustomer ? '#2E7D32' : '#C8E6C9'}`,
                 background: menuOpen === 'musteri' ? '#E8F5E9' : selectedCustomer ? '#F1F8F1' : '#F4FBF4',
                 color: '#2E7D32', fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>👤</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)',
                 whiteSpace: 'nowrap', overflow: 'hidden',
@@ -3408,14 +3453,16 @@ export default function POSScreen({
             {/* 4 — Fiyat Gör: amber tonu */}
             <button type="button"
               onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
-              style={{ padding: 'clamp(4px, 6%, 12px) 2%', minHeight: 44, maxHeight: 80, borderRadius: 8,
+              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
                 border: `1.5px solid ${menuOpen === 'fiyatgor' ? '#D97706' : '#FDE68A'}`,
                 background: menuOpen === 'fiyatgor' ? '#FEF3C7' : '#FFFBEB',
                 color: '#D97706', fontWeight: 600, cursor: 'pointer',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4%' }}>
+                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Fiyat Gör</span>
             </button>
+
+          </div>
 
           </div>
 
@@ -3902,76 +3949,202 @@ export default function POSScreen({
             </div>
           )}
 
-          {/* ── Adet göstergesi — ince ── */}
           <div style={{
-            borderRadius: 7, padding: 'clamp(3px, 3%, 8px) 4%', textAlign: 'center',
-            border: `1px solid ${numBuf ? '#a5d6a7' : '#fde68a'}`,
-            background: numBuf ? '#e8f5e9' : '#fff8e1', flexShrink: 0,
-            overflow: 'hidden', minHeight: 32,
+            gridRow:        2,
+            minHeight:      0,
+            height:         '100%',
+            display:        'flex',
+            flexDirection:  'column',
+            gap:            5,
+            padding:        '0 4px',
+            boxSizing:      'border-box',
+            overflow:       'hidden',
           }}>
-            <span style={{
-              fontSize: 'clamp(13px, 1.1vw + 6px, 20px)',
-              fontWeight: 700, color: numBuf ? '#2e7d32' : '#d97706',
-              display: 'block', lineHeight: 1,
-            }}>{numBuf || '—'}</span>
-            <span style={{ fontSize: 'clamp(8px, 0.6vw, 10px)', color: '#6b7280', display: 'block', marginTop: 2 }}>
-              {numBuf.includes(',') ? 'miktar' : 'adet'}
-            </span>
-          </div>
 
-          {/* ── Numpad ── */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gridTemplateRows: 'repeat(5, 1fr)',
-            gap: 5,
-            flex: 1,
-            minHeight: 0,
-          }}>
-            {[
-              '7', '8', '9',
-              '4', '5', '6',
-              '1', '2', '3',
-              ',', '0', '⌫',
-            ].map(k => (
-              <button
-                key={k}
-                type="button"
-                onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
-                style={{
-                  width: '100%', minWidth: 0,
-                  height: '100%',
-                  boxSizing: 'border-box',
-                  border: '1.5px solid',
-                  borderRadius: 9,
-                  cursor: 'pointer',
+            {/* Üst satır: ADET + SİL */}
+            <div style={{
+              flexShrink:          0,
+              height:              'clamp(36px, 10%, 52px)',
+              display:             'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap:                 5,
+            }}>
+
+              <div style={{
+                display:        'flex',
+                flexDirection:  'column',
+                alignItems:     'center',
+                justifyContent: 'center',
+                borderRadius:   9,
+                border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#d1d5db'}`,
+                background:     numBuf ? '#e8f5e9' : '#f9fafb',
+                userSelect:     'none' as const,
+                minWidth:       0,
+                overflow:       'hidden',
+              }}>
+                <span style={{
+                  fontSize:   'clamp(13px, 2.2vh, 22px)',
                   fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  userSelect: 'none' as const,
-                  background: k === '⌫' ? '#fffbeb' : 'white',
-                  color: k === '⌫' ? '#d97706' : '#1f2937',
-                  borderColor: k === '⌫' ? '#fde68a' : '#d1d5db',
-                  fontSize: 'clamp(14px, 1.4vw + 4px, 26px)',
-                }}
-              >{k}</button>
-            ))}
+                  color:      numBuf ? '#2e7d32' : '#9ca3af',
+                  lineHeight: 1,
+                }}>
+                  {numBuf || 'adet'}
+                </span>
+                {numBuf && (
+                  <span style={{ fontSize: 'clamp(8px, 0.6vw, 9px)', color: '#6b7280', marginTop: 1 }}>
+                    {numBuf.includes(',') ? 'miktar' : 'adet'}
+                  </span>
+                )}
+              </div>
 
-            <button
-              type="button"
-              onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
-              style={{
-                gridColumn: 'span 3',
-                width: '100%',
-                height: '100%',
-                boxSizing: 'border-box',
-                border: '1.5px solid #fecdd3',
-                borderRadius: 9, cursor: 'pointer',
-                fontWeight: 700, fontSize: 'clamp(12px, 1.1vw + 4px, 18px)',
-                background: '#fff5f5', color: '#dc2626',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                userSelect: 'none' as const,
-              }}
-            >Temizle</button>
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
+                style={{
+                  borderRadius:   9,
+                  border:         '1.5px solid #fde68a',
+                  background:     '#fffbeb',
+                  color:          '#d97706',
+                  fontSize:       'clamp(11px, 1.8vh, 14px)',
+                  fontWeight:     700,
+                  cursor:         'pointer',
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  gap:            4,
+                  userSelect:     'none' as const,
+                  minWidth:       0,
+                }}
+              >
+                Sil
+              </button>
+            </div>
+
+            {/* Numpad grid — alanın tamamını doldurur */}
+            <div style={{
+              flex:                1,
+              minHeight:           0,
+              height:              '100%',
+              display:             'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gridTemplateRows:    'repeat(4, minmax(0, 1fr)) minmax(0, 1fr) minmax(0, 1fr)',
+              gap:                 5,
+            }}>
+              {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => (
+                <button
+                  key={k}
+                  type="button"
+                  onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
+                  style={{
+                    width:          '100%',
+                    height:         '100%',
+                    boxSizing:      'border-box',
+                    border:         '1.5px solid #d1d5db',
+                    borderRadius:   9,
+                    cursor:         'pointer',
+                    fontWeight:     700,
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    userSelect:     'none' as const,
+                    background:     'white',
+                    color:          '#1f2937',
+                    fontSize:       'clamp(18px, 4.2vh, 36px)',
+                  }}
+                >{k}</button>
+              ))}
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey(',') }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #d1d5db',
+                  borderRadius:   9,
+                  cursor:         'pointer',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     'white',
+                  color:          '#1f2937',
+                  fontSize:       'clamp(18px, 4.2vh, 36px)',
+                }}
+              >,</button>
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('0') }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #d1d5db',
+                  borderRadius:   9,
+                  cursor:         'pointer',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     'white',
+                  color:          '#1f2937',
+                  fontSize:       'clamp(18px, 4.2vh, 36px)',
+                }}
+              >0</button>
+
+              <button
+                type="button"
+                onMouseDown={e => {
+                  e.preventDefault()
+                  if (!numBuf) return
+                  setSearchQ(numBuf)
+                  setNumBuf('')
+                }}
+                style={{
+                  width:          '100%',
+                  height:         '100%',
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #BFDBFE',
+                  borderRadius:   9,
+                  cursor:         numBuf ? 'pointer' : 'default',
+                  fontWeight:     700,
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                  background:     numBuf ? '#EFF6FF' : '#f9fafb',
+                  color:          numBuf ? '#1565C0' : '#9ca3af',
+                  fontSize:       'clamp(12px, 2vh, 16px)',
+                }}
+              >enter</button>
+
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
+                style={{
+                  gridColumn:     'span 3',
+                  width:          '100%',
+                  height:         '100%',
+                  boxSizing:      'border-box',
+                  border:         '1.5px solid #fecdd3',
+                  borderRadius:   9,
+                  cursor:         'pointer',
+                  fontWeight:     600,
+                  fontSize:       'clamp(12px, 2vh, 15px)',
+                  background:     '#fff5f5',
+                  color:          '#dc2626',
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  userSelect:     'none' as const,
+                }}
+              >Temizle</button>
+            </div>
+
           </div>
 
         </div>
