@@ -981,7 +981,7 @@ export default function POSScreen({
       if (dec.length >= 2) return
     }
 
-    if (numBuf.replace(',', '').length < 6) {
+    if (numBuf.replace(',', '').length < 20) {
       setNumBuf(p => p + k)
     }
   }
