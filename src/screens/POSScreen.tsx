@@ -3732,7 +3732,7 @@ export default function POSScreen({
                   padding: 16,
                   overflowY: 'auto',
                   display: 'grid',
-                  gridTemplateColumns: menuOpen === 'islemler' ? '1fr' : 'repeat(2, 1fr)',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
                   gap: 10,
                 }}>
 
@@ -3744,7 +3744,7 @@ export default function POSScreen({
                   { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
                   { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                 ].map((item, i) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler}
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler} layout="stack"
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label.startsWith('Cari tah')) {
