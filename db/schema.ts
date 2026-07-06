@@ -25,7 +25,8 @@ export const products = sqliteTable('products', {
 
 export const sales = sqliteTable('sales', {
   id:             text('id').primaryKey(),
-  receiptNo:      text('receipt_no').notNull(),
+  receiptNo:      integer('receipt_no'),
+  orderNo:        text('order_no'),
   totalAmount:    real('total_amount').notNull(),
   discountRate:   real('discount_rate').default(0),
   discountAmount: real('discount_amount').default(0),
@@ -94,6 +95,7 @@ export const heldDocuments = sqliteTable('held_documents', {
   id:           text('id').primaryKey(),
   companyId:    text('company_id').notNull(),
   receiptNo:    text('receipt_no'),
+  orderNo:      text('order_no'),
   label:        text('label'),
   items:        text('items').notNull(),
   totalAmount:  real('total_amount').default(0),

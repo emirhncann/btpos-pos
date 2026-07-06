@@ -44,7 +44,8 @@ export interface SalePaymentRow {
 }
 
 export interface SaleRow {
-  receiptNo: string
+  receiptNo?: string
+  orderNo?: string | null
   totalAmount: number
   discountRate?: number
   discountAmount?: number
@@ -112,7 +113,12 @@ export function findByBarcode(barcode: string): ProductRow | null {
   return result as ProductRow | null
 }
 
-export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult): string {
+export interface SaveSaleResult {
+  saleId:    string
+  receiptNo: string
+}
+
+export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult): SaveSaleResult {
   const db = getDB()
   const sqlite = getSqlite()
   const saleId = randomUUID()
@@ -129,32 +135,49 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     raw:        device.raw,
   }) : null
 
-  db.insert(sales).values({
-    id: saleId,
-    receiptNo: sale.receiptNo,
-    totalAmount: sale.totalAmount,
-    discountRate: sale.discountRate ?? 0,
-    discountAmount: sale.discountAmount ?? 0,
-    netAmount: sale.netAmount,
-    paymentType: sale.paymentType,
-    cashAmount: sale.cashAmount,
-    cardAmount: sale.cardAmount,
-    createdAt: now,
-    synced: false,
-    customerId:   sale.customerId   ?? null,
-    customerName: sale.customerName ?? null,
-    customerCode: sale.customerCode ?? null,
-    cashierId: sale.cashierId ?? null,
-    cashierName: sale.cashierName ?? null,
-    invoiceSent:  0,
-    invoiceId:    null,
-    invoiceError: null,
-    invoiceAt:    null,
-    cardAcquirerId: sale.cardAcquirerId ?? null,
-    paymentProvider: device?.provider ?? null,
+  sqlite.prepare(`
+    INSERT INTO sales (
+      id, receipt_no, order_no,
+      total_amount, discount_rate, discount_amount, net_amount,
+      payment_type, cash_amount, card_amount,
+      created_at, synced,
+      customer_id, customer_name, customer_code,
+      cashier_id, cashier_name,
+      invoice_sent, invoice_id, invoice_error, invoice_at,
+      card_acquirer_id, payment_provider, payment_device_data, is_return
+    ) VALUES (
+      ?,
+      (SELECT COALESCE(MAX(receipt_no), 0) + 1 FROM sales),
+      ?,
+      ?, ?, ?, ?,
+      ?, ?, ?,
+      ?, 0,
+      ?, ?, ?,
+      ?, ?,
+      0, NULL, NULL, NULL,
+      ?, ?, ?, ?
+    )
+  `).run(
+    saleId,
+    sale.orderNo ?? null,
+    sale.totalAmount,
+    sale.discountRate ?? 0,
+    sale.discountAmount ?? 0,
+    sale.netAmount,
+    sale.paymentType,
+    sale.cashAmount,
+    sale.cardAmount,
+    now,
+    sale.customerId ?? null,
+    sale.customerName ?? null,
+    sale.customerCode ?? null,
+    sale.cashierId ?? null,
+    sale.cashierName ?? null,
+    sale.cardAcquirerId ?? null,
+    device?.provider ?? null,
     paymentDeviceData,
-    isReturn: sale.isReturn ? 1 : 0,
-  }).run()
+    sale.isReturn ? 1 : 0,
+  )
 
   for (const item of items) {
     const productRow = item.productCode
@@ -178,7 +201,11 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     }).run()
   }
 
-  return saleId
+  const inserted = sqlite.prepare(
+    'SELECT receipt_no FROM sales WHERE id = ?',
+  ).get(saleId) as { receipt_no: number }
+
+  return { saleId, receiptNo: String(inserted.receipt_no) }
 }
 
 /** Bekleyen veya hatalı (yeniden denenecek) fatura kayıtları */
@@ -453,14 +480,14 @@ export function getRecentSales(opts: GetRecentSalesOpts = {}): RecentSaleRow[] {
   `).all(...params, limit) as Record<string, unknown>[]
 
   return rows.map(row => {
-    const { pavoSaleNumber, orderNo } = parsePavoFromPaymentData(
+    const { pavoSaleNumber, orderNo: pavoOrderNo } = parsePavoFromPaymentData(
       row.payment_device_data as string | null | undefined,
     )
     return {
       id:             String(row.id),
       receiptNo:      String(row.receipt_no),
       pavoSaleNumber,
-      orderNo,
+      orderNo:        row.order_no != null ? String(row.order_no) : pavoOrderNo,
       netAmount:      Number(row.net_amount),
       createdAt:      String(row.created_at),
       customerName:   row.customer_name != null ? String(row.customer_name) : null,
@@ -585,6 +612,7 @@ export interface HeldDoc {
   id:           string
   companyId:    string
   receiptNo?:   string
+  orderNo?:     string
   label?:       string
   items:        HeldCartLine[]
   totalAmount:  number
@@ -602,6 +630,7 @@ export function holdDocument(doc: Omit<HeldDoc, 'id' | 'createdAt'>): string {
     id,
     companyId:    doc.companyId,
     receiptNo:    doc.receiptNo ?? null,
+    orderNo:      doc.orderNo ?? null,
     label:        doc.label ?? null,
     items:        JSON.stringify(doc.items),
     totalAmount:  doc.totalAmount,
@@ -623,6 +652,7 @@ export function getHeldDocuments(companyId: string): HeldDoc[] {
     id:           r.id,
     companyId:    r.companyId,
     receiptNo:    r.receiptNo ?? undefined,
+    orderNo:      r.orderNo ?? undefined,
     label:        r.label ?? undefined,
     items:        JSON.parse(r.items) as HeldCartLine[],
     totalAmount:  r.totalAmount ?? 0,
@@ -1961,6 +1991,7 @@ export function deleteOperation(id: string): void {
 export interface SalesReportRow {
   id:           string
   receiptNo:    string
+  orderNo:      string | null
   type:         'sale' | 'return' | 'payment'
   netAmount:    number
   cashAmount:   number
@@ -1987,7 +2018,7 @@ export function getSalesReport(opts: {
 
   const rows = db.prepare(`
     SELECT
-      s.id, s.receipt_no, s.net_amount, s.cash_amount, s.card_amount,
+      s.id, s.receipt_no, s.order_no, s.net_amount, s.cash_amount, s.card_amount,
       s.customer_name, s.cashier_name, s.created_at,
       s.invoice_sent, s.invoice_id, s.invoice_error, s.is_return
     FROM sales s
@@ -2010,6 +2041,7 @@ export function getSalesReport(opts: {
     return {
       id:           String(s.id),
       receiptNo:    String(s.receipt_no),
+      orderNo:      s.order_no != null ? String(s.order_no) : null,
       type:         s.is_return ? 'return' as const : 'sale' as const,
       netAmount:    Number(s.net_amount),
       cashAmount:   Number(s.cash_amount ?? 0),

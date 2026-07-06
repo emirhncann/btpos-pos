@@ -4,6 +4,7 @@ import { join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as schema from './schema'
+import { migrateSalesReceiptNo } from './migrations'
 
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
@@ -47,7 +48,8 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
 
     CREATE TABLE IF NOT EXISTS sales (
       id TEXT PRIMARY KEY,
-      receipt_no TEXT NOT NULL,
+      receipt_no INTEGER,
+      order_no TEXT,
       total_amount REAL NOT NULL,
       discount_rate REAL DEFAULT 0,
       discount_amount REAL DEFAULT 0,
@@ -60,13 +62,16 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       customer_id TEXT,
       customer_name TEXT,
       customer_code TEXT,
+      cashier_id TEXT,
+      cashier_name TEXT,
       invoice_sent INTEGER NOT NULL DEFAULT 0,
       invoice_id TEXT,
       invoice_error TEXT,
       invoice_at TEXT,
       card_acquirer_id TEXT,
       payment_provider TEXT,
-      payment_device_data TEXT
+      payment_device_data TEXT,
+      is_return INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -142,6 +147,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       id            TEXT PRIMARY KEY,
       company_id    TEXT NOT NULL,
       receipt_no    TEXT,
+      order_no      TEXT,
       label         TEXT,
       items         TEXT NOT NULL,
       total_amount  REAL DEFAULT 0,
@@ -415,6 +421,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
 
   const salesCols = (sqlite.prepare('PRAGMA table_info(sales)').all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('order_no')) sqlite.exec('ALTER TABLE sales ADD COLUMN order_no TEXT')
   if (!salesCols.includes('card_acquirer_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT')
   if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
@@ -429,6 +436,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   } catch {
     /* yok say */
   }
+
+  migrateSalesReceiptNo(sqlite)
 
   // Sprint 24 — pos_settings_cache kolon sırası düzeltmesi
   // cashier_id migration ile sona eklenmişti, fiziksel sıra yanlıştı.
@@ -602,6 +611,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
 
 function migrateHeldDocuments(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'held_documents', 'receipt_no', 'receipt_no TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'order_no', 'order_no TEXT')
   addColumnIfMissing(sqlite, 'held_documents', 'customer_name', 'customer_name TEXT')
   addColumnIfMissing(sqlite, 'held_documents', 'cashier_name', 'cashier_name TEXT')
   addColumnIfMissing(sqlite, 'held_documents', 'customer', 'customer TEXT')

@@ -9,6 +9,7 @@ interface PaymentRow {
 interface SalesReportRow {
   id:           string
   receiptNo:    string
+  orderNo:      string | null
   type:         'sale' | 'return' | 'payment'
   netAmount:    number
   cashAmount:   number
@@ -237,7 +238,7 @@ export function SalesReportScreen({ companyId }: { companyId: string }) {
                       <span style={{ fontSize: 13, fontWeight: 700,
                         color: sale.isReturn ? '#DC2626' : '#111827',
                         fontFamily: 'monospace' }}>
-                        {sale.receiptNo}
+                        {sale.orderNo || `#${sale.receiptNo}`}
                       </span>
                       {sale.customerName && (
                         <span style={{ fontSize: 11, color: '#6B7280' }}>

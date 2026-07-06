@@ -304,6 +304,7 @@ export async function sendInvoiceForSale(
     cardAcquirerId: string | null
     cardByBank?: Record<string, { amount: number; acquirerName: string }>
   },
+  invoiceNumber?: string,
 ): Promise<void> {
   const endpoint = invoiceType === 'paper'
     ? `/integration/invoice-paper/${companyId}`
@@ -335,6 +336,7 @@ export async function sendInvoiceForSale(
         unit_code:    unitCode,
       }
     })),
+    invoice_number: invoiceNumber,
     invoice_date: new Date().toISOString().replace('T', ' ').slice(0, 19),
     description:  `POS Satışı — ${customer.name}`,
     endpoint,
@@ -371,6 +373,7 @@ export async function enqueueQuickReturnInvoice(
   companyId: string,
   opts: {
     receiptNo:   string
+    orderNo?:    string
     totalReturn: number
     invoiceType: 'e_archive' | 'paper'
     cashAmount?: number
@@ -403,11 +406,12 @@ export async function enqueueQuickReturnInvoice(
 
   const payload = {
     sale_id:         opts.receiptNo,
+    invoice_number:  opts.orderNo ?? opts.receiptNo,
     customer:        customerRowToInvoicePayload(torbaCari),
     customer_erp_id: Number.parseInt(torbaCari.id ?? '0', 10) || 0,
     items:           returnItems,
     invoice_date:    new Date().toISOString().replace('T', ' ').slice(0, 19),
-    description:     `İade — ${opts.receiptNo}`,
+    description:     `İade — ${opts.orderNo ?? opts.receiptNo}`,
     invoice_type:    opts.invoiceType,
     cash_amount:     opts.cashAmount ?? 0,
     card_amount:     opts.cardAmount ?? opts.totalReturn,
@@ -419,7 +423,7 @@ export async function enqueueQuickReturnInvoice(
     type:      'return_invoice',
     status:    'pending_dayend',
     payload,
-    label:     `İade — ${opts.receiptNo}`,
+    label:     `İade — ${opts.orderNo ?? opts.receiptNo}`,
   })
 }
 
@@ -498,11 +502,13 @@ export async function sendReturnInvoice(
     cashAmount: number
     cardAmount: number
   },
+  invoiceNumber?: string,
 ): Promise<void> {
   const items = await window.electron.db.getSaleItems(saleId)
 
   const payload = {
     sale_id:         saleId,
+    invoice_number:  invoiceNumber,
     customer:        customerRowToInvoicePayload(customer),
     customer_erp_id: Number.parseInt(customer.id ?? '0', 10) || 0,
     items: await Promise.all(items.map(async i => {

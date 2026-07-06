@@ -194,24 +194,6 @@ interface PaymentLine {
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
-let receiptCounter = parseInt(localStorage.getItem('btpos_receipt') || '1000')
-
-function nextSaleNumbers(
-  terminalNumber: string | null | undefined,
-): { receiptNo: string; orderNo: string } {
-  receiptCounter++
-  localStorage.setItem('btpos_receipt', String(receiptCounter))
-  const seq = receiptCounter
-  return {
-    receiptNo: `FIS-${String(seq).padStart(5, '0')}`,
-    orderNo:   nextOrderNo(terminalNumber),
-  }
-}
-
-function nextReceiptNo(terminalNumber: string | null | undefined): string {
-  return nextSaleNumbers(terminalNumber).receiptNo
-}
-
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
   let net = lineTotal
   if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
@@ -377,6 +359,10 @@ export default function POSScreen({
   const [showHeld, setShowHeld]           = useState(false)
   const [heldPreview, setHeldPreview]     = useState<HeldDocRow | null>(null)
   const [heldEdit, setHeldEdit]           = useState<{ id: string; label: string } | null>(null)
+  const [currentOrderNo, setCurrentOrderNo] = useState<string | null>(null)
+  const [clock, setClock] = useState(() =>
+    new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  )
   const [showCustomer, setShowCustomer]   = useState(false)
   const [customers, setCustomers]         = useState<CustomerRow[]>([])
   const [customerQ, setCustomerQ]         = useState('')
@@ -548,6 +534,14 @@ export default function POSScreen({
   }, [companyId])
 
   useEffect(() => { loadHeld() }, [loadHeld])
+  useEffect(() => {
+    const t = setInterval(() => {
+      setClock(new Date().toLocaleTimeString('tr-TR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }))
+    }, 1000)
+    return () => clearInterval(t)
+  }, [])
   useEffect(() => { searchRef.current?.focus() }, [])
 
   useEffect(() => {
@@ -807,6 +801,10 @@ export default function POSScreen({
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
     setCart(prev => {
+      if (prev.length === 0) {
+        setCurrentOrderNo(n => n ?? nextOrderNo(posSettings.terminalNumber))
+      }
+
       const dup = posSettings.duplicateItemAction ?? 'increase_qty'
 
       if (dup === 'increase_qty') {
@@ -921,6 +919,7 @@ export default function POSScreen({
 
   function clearCart() {
     setCart([])
+    setCurrentOrderNo(null)
     setPaymentMode(false)
     setPaymentLines([])
     setActiveMethod(null)
@@ -1039,22 +1038,25 @@ export default function POSScreen({
       return
     }
 
+    const orderNo = currentOrderNo
+      ?? nextOrderNo(posSettings.terminalNumber)
+
     const label = selectedCustomer
-      ? `Müşteri: ${selectedCustomer.name}`
-      : `Bekletilen ${new Date().toLocaleTimeString('tr-TR')}`
-    const lineSub = cart.reduce((s, c) => s + c.netTotal, 0)
+      ? selectedCustomer.name
+      : `Belge ${new Date().toLocaleTimeString('tr-TR')}`
+
     await window.electron.db.holdDocument({
       companyId,
       label,
       items: cart,
-      totalAmount: lineSub,
-      receiptNo: nextReceiptNo(posSettings.terminalNumber),
+      totalAmount: grandTotal,
+      orderNo,
       customerName: selectedCustomer?.name,
       cashierName: cashier.fullName,
       customer: selectedCustomer ?? null,
     })
     clearCart()
-    await loadHeld()
+    void loadHeld()
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
@@ -1064,8 +1066,16 @@ export default function POSScreen({
     } else {
       applyCustomerSelection(null)
     }
+    if ((doc.discountRate ?? 0) > 0) {
+      setDocDiscountRate(doc.discountRate!)
+      setDocDiscMode('rate')
+    } else if ((doc.discountAmount ?? 0) > 0) {
+      setDocDiscountAmt(doc.discountAmount!)
+      setDocDiscMode('amt')
+    }
+    setCurrentOrderNo(doc.orderNo ?? null)
     await window.electron.db.deleteHeldDocument(doc.id)
-    loadHeld()
+    void loadHeld()
     setShowHeld(false)
   }
 
@@ -1287,7 +1297,8 @@ export default function POSScreen({
       .reduce((s, l) => s + l.amount, 0)
     let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
     const terminalLabel = posSettings.source?.trim() || 'Kasa'
-    const { receiptNo, orderNo } = nextSaleNumbers(posSettings.terminalNumber)
+    const orderNo = currentOrderNo
+      ?? nextOrderNo(posSettings.terminalNumber)
     const pavoPaymentsFinal = lines.map(l => {
       if (l.method === 'cash') {
         const cashPart = Math.min(l.amount, cashRemaining)
@@ -1415,7 +1426,7 @@ export default function POSScreen({
       const salePaymentType: 'cash' | 'card' | 'mixed' =
         cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
       const saleRow = {
-        receiptNo,
+        orderNo: printOrderNo,
         totalAmount: lineSubtotal,
         discountRate: docDiscountRate,
         discountAmount: docDiscountCalc,
@@ -1430,7 +1441,7 @@ export default function POSScreen({
         customerName: selectedCustomer?.name ?? null,
         customerCode: selectedCustomer?.code ?? null,
       }
-      const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
+      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, cart.map(c => ({
         productId: c.productId,
         productCode: c.code,
         productName: c.name,
@@ -1482,7 +1493,7 @@ export default function POSScreen({
           cardAmount: cardAmt,
           cardAcquirerId,
           cardByBank,
-        })
+        }, printOrderNo)
       }
 
       const terminalId = await window.electron.store.get('terminal_id') as string | null
@@ -1528,7 +1539,7 @@ export default function POSScreen({
         firstCardAcquirerName: firstCardPayment?.acquirerName ?? '',
       }))
 
-      setLastReceipt(receiptNo)
+      setLastReceipt(printOrderNo)
       setPaymentMode(false)
       setPaymentLines([])
       setActiveMethod(null)
@@ -1720,9 +1731,9 @@ export default function POSScreen({
 
       console.log('[iade] pavo items:', sale.Items.length, 'logo items:', logoItems.length)
 
-      const receiptNo = nextReceiptNo(posSettings.terminalNumber)
+      const orderNo = nextOrderNo(posSettings.terminalNumber)
       const saleRow = {
-        receiptNo,
+        orderNo,
         totalAmount:    totalReturn,
         discountRate:   0,
         discountAmount: 0,
@@ -1756,7 +1767,7 @@ export default function POSScreen({
           }
         })
 
-      const saleId = await window.electron.db.saveSale(saleRow, items, undefined)
+      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, items, undefined)
 
       if (companyId) {
         try {
@@ -1768,6 +1779,7 @@ export default function POSScreen({
 
           await enqueueQuickReturnInvoice(companyId, {
             receiptNo,
+            orderNo,
             totalReturn,
             invoiceType: queueInvoiceType,
             cashAmount:  0,
@@ -1809,11 +1821,12 @@ export default function POSScreen({
 
       const invoiceCustomer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
       const terminalLabel = posSettings.source?.trim() || 'Kasa'
-      const { receiptNo, orderNo } = nextSaleNumbers(posSettings.terminalNumber)
+      const orderNo = currentOrderNo
+        ?? nextOrderNo(posSettings.terminalNumber)
       const salePaymentType: 'cash' | 'card' | 'mixed' =
         cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
       const saleRow = {
-        receiptNo,
+        orderNo,
         totalAmount: lineSubtotal,
         discountRate: docDiscountRate,
         discountAmount: docDiscountCalc,
@@ -1830,7 +1843,7 @@ export default function POSScreen({
         isReturn: true,
       }
 
-      const saleId = await window.electron.db.saveSale(saleRow, cart.map(c => ({
+      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, cart.map(c => ({
         productId: c.productId,
         productCode: c.code,
         productName: c.name,
@@ -1861,6 +1874,7 @@ export default function POSScreen({
               cashAmount: cashAmt,
               cardAmount: cardAmt,
             },
+            orderNo,
           )
           console.log('[normal iade] Logo iade faturası kuyruğa eklendi')
         } catch (e) {
@@ -1911,7 +1925,7 @@ export default function POSScreen({
       setPaymentMode(false)
       setActiveMethod(null)
       setPendingAmount('')
-      setLastReceipt(receiptNo)
+      setLastReceipt(orderNo)
       searchRef.current?.focus()
     } catch (e) {
       showError('İade Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
@@ -2140,6 +2154,15 @@ export default function POSScreen({
               )}
             </span>
           )}
+          <div style={{
+            fontSize:      13,
+            fontWeight:    600,
+            color:         '#e5e7eb',
+            fontFamily:    'monospace',
+            letterSpacing: 1,
+          }}>
+            {clock}
+          </div>
           <span style={{
             background: '#1f2937',
             border: '1px solid #374151',
@@ -2636,103 +2659,195 @@ export default function POSScreen({
 
       {/* Bekletilen belgeler */}
       {showHeld && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9998,
-          background: 'rgba(0,0,0,0.45)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setShowHeld(false)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 14, padding: 24,
-              width: 'min(480px, 94vw)', maxHeight: '82vh',
-              display: 'flex', flexDirection: 'column' }}>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>
-                Bekletilen Belgeler
-                {heldDocs.length > 0 && (
-                  <span style={{ marginLeft: 8, fontSize: 12, color: '#6B7280',
-                    fontWeight: 400 }}>({heldDocs.length})</span>
-                )}
-              </span>
-              <button type="button" onClick={() => setShowHeld(false)}
-                style={{ background: 'none', border: 'none',
-                  cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
+        <div
+          style={{
+            position:       'fixed',
+            inset:          0,
+            zIndex:         9998,
+            background:     'rgba(0,0,0,0.4)',
+            display:        'flex',
+            alignItems:     'center',
+            justifyContent: 'center',
+          }}
+          onClick={() => setShowHeld(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background:    'white',
+              borderRadius:  18,
+              width:         'min(560px, 96vw)',
+              maxHeight:     '88vh',
+              display:       'flex',
+              flexDirection: 'column',
+              overflow:      'hidden',
+              boxShadow:     '0 12px 40px rgba(0,0,0,0.15)',
+            }}
+          >
+            <div style={{
+              padding:        '16px 20px',
+              borderBottom:   '1px solid #F3F4F6',
+              display:        'flex',
+              alignItems:     'center',
+              justifyContent: 'space-between',
+              flexShrink:     0,
+            }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+                  Bekletilen Belgeler
+                </div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                  {heldDocs.length} / {MAX_HELD_DOCS}
+                  {heldDocs.length >= MAX_HELD_DOCS && (
+                    <span style={{ color: '#DC2626', fontWeight: 600, marginLeft: 4 }}>
+                      — limit doldu
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHeld(false)}
+                style={{
+                  background: 'none', border: 'none',
+                  cursor: 'pointer', fontSize: 20, color: '#9CA3AF',
+                }}
+              >✕</button>
             </div>
 
-            {heldDocs.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#BDBDBD',
-                padding: '32px 0', fontSize: 13 }}>
-                Bekletilen belge yok
-              </div>
-            ) : (
-              <div style={{ overflowY: 'auto', flex: 1,
-                display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {heldDocs.map(doc => (
-                  <div key={doc.id} style={{ border: '1px solid #E5E7EB',
-                    borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {heldDocs.length === 0 ? (
+                <div style={{
+                  textAlign: 'center', padding: '48px 0',
+                  color: '#9CA3AF', fontSize: 13,
+                }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+                  Bekletilen belge yok
+                </div>
+              ) : heldDocs.map((doc, idx) => (
+                <div
+                  key={doc.id}
+                  style={{
+                    background:   idx % 2 === 0 ? 'white' : '#F9FAFB',
+                    borderBottom: '1px solid #F3F4F6',
+                    padding:      '14px 20px',
+                    display:      'flex',
+                    gap:          14,
+                    alignItems:   'center',
+                  }}
+                >
+                  <div style={{
+                    width:          28,
+                    height:         28,
+                    borderRadius:   7,
+                    background:     idx % 2 === 0 ? '#F3F4F6' : 'white',
+                    color:          '#6B7280',
+                    fontSize:       11,
+                    fontWeight:     700,
+                    display:        'flex',
+                    alignItems:     'center',
+                    justifyContent: 'center',
+                    flexShrink:     0,
+                    border:         '1px solid #E5E7EB',
+                  }}>
+                    {idx + 1}
+                  </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between',
-                      alignItems: 'center', marginBottom: 4 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700,
-                        color: '#111827', fontFamily: 'monospace' }}>
-                        {doc.receiptNo ?? doc.id.slice(0, 8).toUpperCase()}
-                      </div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1565C0' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      display:        'flex',
+                      justifyContent: 'space-between',
+                      alignItems:     'center',
+                      marginBottom:   4,
+                    }}>
+                      <span style={{
+                        fontSize:   13,
+                        fontWeight: 700,
+                        color:      '#111827',
+                        fontFamily: 'monospace',
+                      }}>
+                        {doc.orderNo || (doc.receiptNo ? `#${doc.receiptNo}` : doc.id.slice(0, 8).toUpperCase())}
+                      </span>
+                      <span style={{
+                        fontSize:   14,
+                        fontWeight: 700,
+                        color:      '#111827',
+                      }}>
                         {fmt(doc.totalAmount ?? 0)}
-                      </div>
+                      </span>
                     </div>
 
-                    <div style={{ fontSize: 12, color: '#374151', marginBottom: 4 }}>
-                      {doc.label ?? '—'}
+                    <div style={{
+                      fontSize:     12,
+                      color:        '#374151',
+                      fontWeight:   500,
+                      overflow:     'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace:   'nowrap',
+                      marginBottom: 3,
+                    }}>
+                      {doc.label || '—'}
                     </div>
 
-                    <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
                       {doc.items.length} kalem
                       {doc.customerName && ` · ${doc.customerName}`}
                       {doc.cashierName  && ` · ${doc.cashierName}`}
-                      {' · '}{new Date(doc.createdAt).toLocaleString('tr-TR')}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button type="button"
-                        onClick={() => setHeldPreview(doc)}
-                        style={{ flex: 1, padding: '7px', borderRadius: 7,
-                          border: '1px solid #E5E7EB', background: '#F9FAFB',
-                          fontSize: 12, fontWeight: 600, color: '#374151',
-                          cursor: 'pointer' }}>
-                        🔍 İncele
-                      </button>
-                      <button type="button"
-                        onClick={() => setHeldEdit({ id: doc.id, label: doc.label ?? '' })}
-                        style={{ flex: 1, padding: '7px', borderRadius: 7,
-                          border: '1px solid #E5E7EB', background: '#F9FAFB',
-                          fontSize: 12, fontWeight: 600, color: '#374151',
-                          cursor: 'pointer' }}>
-                        ✏️ Düzenle
-                      </button>
-                      <button type="button"
-                        onClick={() => void retrieveDoc(doc)}
-                        style={{ flex: 1, padding: '7px', borderRadius: 7,
-                          border: '1px solid #BFDBFE', background: '#EFF6FF',
-                          fontSize: 12, fontWeight: 600, color: '#1565C0',
-                          cursor: 'pointer' }}>
-                        📂 Getir
-                      </button>
-                      <button type="button"
-                        onClick={async () => {
-                          await window.electron.db.deleteHeldDocument(doc.id)
-                          void loadHeld()
-                        }}
-                        style={{ padding: '7px 10px', borderRadius: 7,
-                          border: '1px solid #FECACA', background: '#FEF2F2',
-                          fontSize: 12, color: '#DC2626', cursor: 'pointer' }}>
-                        🗑
-                      </button>
+                      {' · '}{new Date(doc.createdAt).toLocaleTimeString('tr-TR', {
+                        hour: '2-digit', minute: '2-digit',
+                      })}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
+
+                  <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => setHeldPreview(doc)}
+                      style={{
+                        padding:      '6px 10px',
+                        borderRadius: 7,
+                        border:       '1px solid #E5E7EB',
+                        background:   idx % 2 === 0 ? '#F9FAFB' : 'white',
+                        fontSize:     11,
+                        fontWeight:   600,
+                        color:        '#374151',
+                        cursor:       'pointer',
+                      }}
+                    >🔍 İncele</button>
+
+                    <button
+                      type="button"
+                      onClick={() => setHeldEdit({ id: doc.id, label: doc.label ?? '' })}
+                      style={{
+                        padding:      '6px 10px',
+                        borderRadius: 7,
+                        border:       '1px solid #E5E7EB',
+                        background:   idx % 2 === 0 ? '#F9FAFB' : 'white',
+                        fontSize:     11,
+                        fontWeight:   600,
+                        color:        '#374151',
+                        cursor:       'pointer',
+                      }}
+                    >✏️ İsim</button>
+
+                    <button
+                      type="button"
+                      onClick={() => void retrieveDoc(doc)}
+                      style={{
+                        padding:      '6px 14px',
+                        borderRadius: 7,
+                        border:       '1px solid #BFDBFE',
+                        background:   '#EFF6FF',
+                        fontSize:     11,
+                        fontWeight:   700,
+                        color:        '#1D4ED8',
+                        cursor:       'pointer',
+                      }}
+                    >📂 Getir</button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -2750,7 +2865,7 @@ export default function POSScreen({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>
-                  {heldPreview.receiptNo ?? heldPreview.id.slice(0, 8).toUpperCase()}
+                  {heldPreview.orderNo || (heldPreview.receiptNo ? `#${heldPreview.receiptNo}` : heldPreview.id.slice(0, 8).toUpperCase())}
                 </div>
                 <div style={{ fontSize: 12, color: '#6B7280' }}>
                   {heldPreview.label ?? '—'}

@@ -111,7 +111,7 @@ declare global {
       db: {
         saveProducts:       (products: unknown[]) => Promise<number>
         getProducts:        () => Promise<ProductRow[]>
-        saveSale:           (sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult) => Promise<string>
+        saveSale:           (sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult) => Promise<SaveSaleResult>
         getSales:           (dateFrom?: string, dateTo?: string) => Promise<SaleRecord[]>
         saveCashiers:       (cashiers: unknown[]) => Promise<number>
         verifyCashier:      (code: string, password: string) => Promise<CashierRow | null>
@@ -310,6 +310,7 @@ declare global {
   interface SalesReportRow {
     id:           string
     receiptNo:    string
+    orderNo:      string | null
     type:         'sale' | 'return' | 'payment'
     netAmount:    number
     cashAmount:   number
@@ -412,8 +413,14 @@ declare global {
     appliedBy?:      string
   }
 
+  interface SaveSaleResult {
+    saleId:    string
+    receiptNo: string
+  }
+
   interface SaleRow {
-    receiptNo:       string
+    receiptNo?:      string
+    orderNo?:        string | null
     totalAmount:     number
     discountRate?:   number
     discountAmount?: number
@@ -432,6 +439,7 @@ declare global {
   interface SaleDbRow {
     id:             string
     receiptNo:      string
+    orderNo?:       string | null
     totalAmount:    number
     discountRate:   number | null
     discountAmount: number | null
@@ -504,6 +512,7 @@ declare global {
     id:            string
     companyId:     string
     receiptNo?:    string
+    orderNo?:      string
     label?:        string
     items:         CartItem[]
     customer?:     CustomerRow | null
@@ -511,6 +520,7 @@ declare global {
     cashierName?:  string
     totalAmount:   number
     discountRate?: number
+    discountAmount?: number
     createdAt:     string
   }
 
