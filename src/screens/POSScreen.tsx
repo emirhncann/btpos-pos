@@ -249,6 +249,8 @@ const MENU_ACCENT: Record<'islemler' | 'belge' | 'musteri', string> = {
   musteri:  '#2E7D32',
 }
 
+const MAX_HELD_DOCS = 10
+
 function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout = 'row', onClick }: {
   icon:     string
   label:    string
@@ -417,6 +419,14 @@ export default function POSScreen({
   const conn      = useConnectionStatus(30)
   const isOnline  = conn === 'online'
   const [queueToasts, setQueueToasts] = useState<(QueueToastPayload & { shownAt: number })[]>([])
+  const [heldToast, setHeldToast] = useState<string | null>(null)
+  const heldToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showToast = useCallback((msg: string, _type: 'error' | 'success' = 'error') => {
+    if (heldToastTimer.current) clearTimeout(heldToastTimer.current)
+    setHeldToast(msg)
+    heldToastTimer.current = setTimeout(() => setHeldToast(null), 4000)
+  }, [])
 
   const handleQueueToast = useCallback((toast: QueueToastPayload) => {
     setQueueToasts(prev => [...prev, { ...toast, shownAt: Date.now() }])
@@ -1022,6 +1032,13 @@ export default function POSScreen({
 
   async function holdDoc() {
     if (!cart.length) return
+
+    if (heldDocs.length >= MAX_HELD_DOCS) {
+      setShowHeld(true)
+      showToast(`Maksimum ${MAX_HELD_DOCS} belge bekletilebilir. Önce bir belgeyi getirin veya silin.`, 'error')
+      return
+    }
+
     const label = selectedCustomer
       ? `Müşteri: ${selectedCustomer.name}`
       : `Bekletilen ${new Date().toLocaleTimeString('tr-TR')}`
@@ -1037,7 +1054,7 @@ export default function POSScreen({
       customer: selectedCustomer ?? null,
     })
     clearCart()
-    loadHeld()
+    await loadHeld()
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
@@ -1931,6 +1948,14 @@ export default function POSScreen({
           70%  { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
           100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
         }
+        @keyframes pulse-yellow {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.7; }
+        }
+        @keyframes pulse-red {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%       { opacity: 0.85; transform: scale(1.03); }
+        }
       `}</style>
 
       {/* Lisans banner */}
@@ -1965,6 +1990,72 @@ export default function POSScreen({
           >
             ← Dashboard
           </button>
+          {heldDocs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHeld(true)}
+              style={{
+                display:        'flex',
+                alignItems:     'center',
+                gap:            6,
+                padding:        '4px 10px',
+                borderRadius:   8,
+                border:         'none',
+                cursor:         'pointer',
+                fontSize:       11,
+                fontWeight:     700,
+                transition:     'all 0.2s',
+                ...(heldDocs.length >= MAX_HELD_DOCS ? {
+                  background: '#C62828',
+                  color:      'white',
+                  animation:  'pulse-red 0.8s infinite',
+                  boxShadow:  '0 0 0 2px rgba(198,40,40,0.3)',
+                } : heldDocs.length <= 3 ? {
+                  background: '#E8F5E9',
+                  color:      '#2E7D32',
+                } : heldDocs.length <= 6 ? {
+                  background: '#FFF8E1',
+                  color:      '#F57F17',
+                  animation:  'pulse-yellow 2s infinite',
+                } : {
+                  background: '#FFEBEE',
+                  color:      '#C62828',
+                  animation:  'pulse-red 1s infinite',
+                }),
+              }}
+            >
+              <span style={{ fontSize: 14 }}>
+                {heldDocs.length >= MAX_HELD_DOCS ? '🚨' : heldDocs.length <= 3 ? '📂' : heldDocs.length <= 6 ? '⚠️' : '🚨'}
+              </span>
+              <span>
+                {heldDocs.length >= MAX_HELD_DOCS
+                  ? `Belge limiti doldu! `
+                  : heldDocs.length <= 3
+                    ? `${heldDocs.length} Bekleyen Belge`
+                    : heldDocs.length <= 6
+                      ? `${heldDocs.length} Bekleyen Belge!`
+                      : `${heldDocs.length} Bekleyen Belge — dolmak üzere!`}
+              </span>
+              <span style={{
+                background: heldDocs.length >= MAX_HELD_DOCS ? 'white'
+                  : heldDocs.length <= 3 ? '#2E7D32'
+                    : heldDocs.length <= 6 ? '#F57F17'
+                      : '#C62828',
+                color: heldDocs.length >= MAX_HELD_DOCS ? '#C62828' : 'white',
+                borderRadius: '50%',
+                width:        18,
+                height:       18,
+                display:      'flex',
+                alignItems:   'center',
+                justifyContent: 'center',
+                fontSize:     10,
+                fontWeight:   800,
+                flexShrink:   0,
+              }}>
+                {heldDocs.length}
+              </span>
+            </button>
+          )}
           {lastReceipt && (
             <span style={{ background: '#E8F5E9', color: '#2E7D32', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 500 }}>
               ✓ {lastReceipt}
@@ -3706,7 +3797,7 @@ export default function POSScreen({
                 {menuOpen === 'islemler' && [
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
                   { icon: '💸', label: 'Cari ödeme', disabled: false },
-                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
+                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 || heldDocs.length >= MAX_HELD_DOCS },
                   { icon: '📂', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
                   { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
                   { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
@@ -4688,6 +4779,17 @@ export default function POSScreen({
       {merkezToast && (
         <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#212121', color: 'white', padding: '10px 20px', borderRadius: 8, fontSize: 13, zIndex: 10001, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
           {merkezToast}
+        </div>
+      )}
+
+      {heldToast && (
+        <div style={{
+          position: 'fixed', bottom: merkezToast ? 72 : 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#C62828', color: 'white', padding: '10px 20px', borderRadius: 8,
+          fontSize: 13, fontWeight: 600, zIndex: 10001, boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+          maxWidth: 'min(480px, 94vw)', textAlign: 'center',
+        }}>
+          {heldToast}
         </div>
       )}
 
