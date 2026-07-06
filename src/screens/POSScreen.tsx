@@ -800,11 +800,12 @@ export default function POSScreen({
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
-    setCart(prev => {
-      if (prev.length === 0) {
-        setCurrentOrderNo(n => n ?? nextOrderNo(posSettings.terminalNumber))
-      }
+    if (cart.length === 0 && !currentOrderNo) {
+      setCurrentOrderNo(nextOrderNo(posSettings.terminalNumber))
+      setLastReceipt(null)
+    }
 
+    setCart(prev => {
       const dup = posSettings.duplicateItemAction ?? 'increase_qty'
 
       if (dup === 'increase_qty') {
@@ -920,6 +921,7 @@ export default function POSScreen({
   function clearCart() {
     setCart([])
     setCurrentOrderNo(null)
+    setLastReceipt(null)
     setPaymentMode(false)
     setPaymentLines([])
     setActiveMethod(null)
@@ -1539,12 +1541,12 @@ export default function POSScreen({
         firstCardAcquirerName: firstCardPayment?.acquirerName ?? '',
       }))
 
-      setLastReceipt(printOrderNo)
       setPaymentMode(false)
       setPaymentLines([])
       setActiveMethod(null)
       setPendingAmount('')
       clearCart()
+      setLastReceipt(printOrderNo)
       searchRef.current?.focus()
     } catch (e) {
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
@@ -2070,7 +2072,12 @@ export default function POSScreen({
               </span>
             </button>
           )}
-          {lastReceipt && (
+          {currentOrderNo && cart.length > 0 && (
+            <span style={{ background: '#EFF6FF', color: '#1565C0', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 600 }}>
+              # {currentOrderNo}
+            </span>
+          )}
+          {lastReceipt && cart.length === 0 && (
             <span style={{ background: '#E8F5E9', color: '#2E7D32', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 500 }}>
               ✓ {lastReceipt}
             </span>
