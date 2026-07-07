@@ -59,13 +59,14 @@ export interface RecentSaleOption {
 }
 
 export interface QuickReturnModalState {
-  step:         'search' | 'recent' | 'review'
-  searchBy:     ReturnSearchBy
-  saleNumber:   string
-  saleData?:    ReturnableSale
-  selected:     Record<number, number>
-  recentSales?: RecentSaleOption[]
-  recentFilters?: RecentSalesFilter
+  step:              'search' | 'recent' | 'review'
+  searchBy:          ReturnSearchBy
+  saleNumber:        string
+  saleData?:         ReturnableSale
+  selected:          Record<number, number>
+  selectedPayments:  Record<number, number>
+  recentSales?:      RecentSaleOption[]
+  recentFilters?:    RecentSalesFilter
 }
 
 interface Props {
@@ -87,6 +88,9 @@ interface Props {
   onClearAll:     () => void
   onToggleItem:   (itemId: number, returnableQty: number, checked: boolean) => void
   onQtyChange:    (itemId: number, delta: -1 | 1, maxQty: number) => void
+  onOpenPaymentNumpad: (paymentId: number, max: number, current: number) => void
+  touchEnabled:    boolean
+  onOpenKeyboard:  (opts: { title: string; initial: string; onConfirm: (v: string) => void }) => void
 }
 
 const overlay: CSSProperties = {
@@ -157,6 +161,9 @@ export default function QuickReturnModal({
   onClearAll,
   onToggleItem,
   onQtyChange,
+  onOpenPaymentNumpad,
+  touchEnabled,
+  onOpenKeyboard,
 }: Props) {
   function recentSearchValue(s: RecentSaleOption, searchBy: ReturnSearchBy) {
     if (searchBy === 'order') {
@@ -401,11 +408,24 @@ export default function QuickReturnModal({
             value={modal.saleNumber}
             onChange={e => onSaleNumberChange(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') onSearch(modal.saleNumber, modal.searchBy) }}
+            onClick={() => {
+              if (!touchEnabled) return
+              onOpenKeyboard({
+                title:     searchLabel,
+                initial:   modal.saleNumber,
+                onConfirm: (v) => {
+                  onSaleNumberChange(v)
+                  onSearch(v, modal.searchBy)
+                },
+              })
+            }}
+            readOnly={touchEnabled}
             placeholder={searchPlaceholder}
-            autoFocus
+            autoFocus={!touchEnabled}
             style={{
               padding: '12px 14px', borderRadius: 10, border: '1.5px solid #E5E7EB',
               fontSize: 15, fontFamily: 'monospace',
+              cursor: touchEnabled ? 'default' : 'text',
             }}
           />
 
@@ -574,34 +594,54 @@ export default function QuickReturnModal({
                 3: '💳 Banka Kartı',
                 4: '🍽️ Yemek Kartı',
               }
-              const label = mediatorLabel[p.Mediator] ?? `Ödeme (${p.Mediator})`
+              const label        = mediatorLabel[p.Mediator] ?? `Ödeme (${p.Mediator})`
               const isReturnable = p.ReturnableAmount > 0
+              const currentAmt   = modal.selectedPayments?.[p.PaymentId] ?? p.ReturnableAmount
 
               return (
                 <div key={i} style={{
                   display:        'flex',
                   justifyContent: 'space-between',
                   alignItems:     'center',
-                  padding:        '9px 12px',
+                  padding:        '10px 12px',
                   borderBottom:   i < sale.Payments.length - 1 ? '1px solid #F3F4F6' : 'none',
                   opacity:        isReturnable ? 1 : 0.45,
+                  gap:            12,
                 }}>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
                       {label}
                     </div>
                     <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
-                      Toplam: {p.Amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                      Maks: {p.ReturnableAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                       {!isReturnable && ' · İade edilemez'}
                     </div>
                   </div>
-                  <div style={{
-                    fontSize:   13,
-                    fontWeight: 700,
-                    color:      isReturnable ? '#059669' : '#9CA3AF',
-                  }}>
-                    İade: {p.ReturnableAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                  </div>
+
+                  {isReturnable ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenPaymentNumpad(p.PaymentId, p.ReturnableAmount, currentAmt)}
+                      style={{
+                        padding:      '6px 12px',
+                        borderRadius: 8,
+                        border:       '1.5px solid #BFDBFE',
+                        background:   '#EFF6FF',
+                        color:        '#1565C0',
+                        fontSize:     14,
+                        fontWeight:   700,
+                        cursor:       'pointer',
+                        minWidth:     80,
+                        textAlign:    'right',
+                      }}
+                    >
+                      {currentAmt.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                    </button>
+                  ) : (
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#9CA3AF' }}>
+                      —
+                    </div>
+                  )}
                 </div>
               )
             })}

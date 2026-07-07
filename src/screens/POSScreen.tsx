@@ -95,6 +95,39 @@ function mapRawReturnableSale(data: {
   }
 }
 
+function recalcPayments(
+  sale:     ReturnableSale,
+  selected: Record<number, number>,
+  current:  Record<number, number>,
+): Record<number, number> {
+  const totalReturn = sale.Items.reduce((sum, item) => {
+    const qty = selected[item.Id] ?? 0
+    return sum + qty * item.UnitPrice
+  }, 0)
+
+  const returnablePmts = sale.Payments
+    .filter(p => p.ReturnableAmount > 0)
+    .sort((a, b) => a.ReturnableAmount - b.ReturnableAmount)
+
+  if (returnablePmts.length === 0) return current
+
+  const result: Record<number, number> = {}
+  let remaining = Math.round(totalReturn * 100) / 100
+
+  for (const p of returnablePmts) {
+    const amount = Math.min(p.ReturnableAmount, remaining)
+    result[p.PaymentId] = Math.round(amount * 100) / 100
+    remaining = Math.round((remaining - amount) * 100) / 100
+  }
+
+  return result
+}
+
+function formatPaymentNumpadValue(amount: number): string {
+  if (amount <= 0) return ''
+  return amount.toFixed(2).replace('.', ',')
+}
+
 const CART_GRID = '84px 1fr 72px 82px'
 
 /** SMS cep: 10 hane, 5 ile başlar; gösterim 555 555 55 55 */
@@ -382,6 +415,11 @@ export default function POSScreen({
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
   const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
+  const [paymentNumpad, setPaymentNumpad] = useState<{
+    paymentId: number
+    max:       number
+    value:     string
+  } | null>(null)
   const [draftModal, setDraftModal] = useState<{
     cart:     CartItem[]
     customer: CustomerRow | null
@@ -1591,12 +1629,15 @@ export default function POSScreen({
         }
       }
 
+      const selectedPayments = recalcPayments(sale, selected, {})
+
       setQuickReturnModal({
-        step:       'review',
+        step:             'review',
         searchBy,
-        saleNumber: query.trim(),
-        saleData:   sale,
+        saleNumber:       query.trim(),
+        saleData:         sale,
         selected,
+        selectedPayments,
       })
     } catch (e) {
       setQuickReturnError('Bağlantı hatası: ' + String(e))
@@ -1642,9 +1683,120 @@ export default function POSScreen({
       searchBy: 'order',
       saleNumber: '',
       selected: {},
+      selectedPayments: {},
       recentFilters: filters,
     })
     void loadRecentSales(filters)
+  }
+
+  function handlePaymentAmountChange(paymentId: number, amount: number) {
+    setQuickReturnModal(m => {
+      if (!m || !m.saleData) return m
+
+      const totalReturn = m.saleData.Items.reduce((sum, item) => {
+        const qty = m.selected[item.Id] ?? 0
+        return sum + qty * item.UnitPrice
+      }, 0)
+
+      const payments = m.saleData.Payments.filter(p => p.ReturnableAmount > 0)
+      const thisPayment = payments.find(p => p.PaymentId === paymentId)
+      const clamped = Math.min(amount, thisPayment?.ReturnableAmount ?? amount)
+
+      const others = payments
+        .filter(p => p.PaymentId !== paymentId)
+        .sort((a, b) => a.ReturnableAmount - b.ReturnableAmount)
+      const remaining = Math.round((totalReturn - clamped) * 100) / 100
+
+      const newPayments: Record<number, number> = { [paymentId]: clamped }
+
+      let leftover = remaining
+      others.forEach((p, i) => {
+        if (i === others.length - 1) {
+          newPayments[p.PaymentId] = Math.max(0, Math.min(
+            p.ReturnableAmount,
+            Math.round(leftover * 100) / 100,
+          ))
+        } else {
+          const share = Math.min(p.ReturnableAmount, Math.round(leftover * 100) / 100)
+          newPayments[p.PaymentId] = Math.max(0, share)
+          leftover = Math.round((leftover - share) * 100) / 100
+        }
+      })
+
+      const allocated = Object.values(newPayments).reduce((s, v) => s + v, 0)
+      if (Math.abs(allocated - totalReturn) > 0.01) {
+        const shortfall = Math.round((totalReturn - allocated) * 100) / 100
+        setQuickReturnError(
+          `Ödeme kapasitesi yetersiz: ${shortfall.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺ dağıtılamadı.`,
+        )
+      } else {
+        setQuickReturnError(null)
+      }
+
+      return { ...m, selectedPayments: newPayments }
+    })
+  }
+
+  function openPaymentNumpad(paymentId: number, max: number, current: number) {
+    setPaymentNumpad({
+      paymentId,
+      max,
+      value: formatPaymentNumpadValue(current),
+    })
+  }
+
+  function handlePaymentNumpadKey(k: string) {
+    setPaymentNumpad(prev => {
+      if (!prev) return prev
+      const v = prev.value
+
+      if (k === '⌫') {
+        return { ...prev, value: v.slice(0, -1) }
+      }
+
+      if (k === ',') {
+        if (v.includes(',')) return prev
+        return { ...prev, value: v === '' ? '0,' : v + ',' }
+      }
+
+      if (v.includes(',')) {
+        const dec = v.split(',')[1] ?? ''
+        if (dec.length >= 2) return prev
+      }
+
+      const next = (v === '' || v === '0') ? k : v + k
+      const num  = parseFloat(next.replace(',', '.')) || 0
+
+      if (num > prev.max) {
+        const single = parseFloat(k) || 0
+        if (single <= prev.max) return { ...prev, value: k }
+        return prev
+      }
+
+      return { ...prev, value: next }
+    })
+  }
+
+  function handleToggleItem(itemId: number, returnableQty: number, checked: boolean) {
+    setQuickReturnModal(m => {
+      if (!m || !m.saleData) return m
+      const next = { ...m.selected }
+      if (checked) next[itemId] = returnableQty
+      else delete next[itemId]
+
+      const selectedPayments = recalcPayments(m.saleData, next, m.selectedPayments ?? {})
+      return { ...m, selected: next, selectedPayments }
+    })
+  }
+
+  function handleQtyChange(itemId: number, delta: -1 | 1, maxQty: number) {
+    setQuickReturnModal(m => {
+      if (!m || !m.saleData) return m
+      const cur  = m.selected[itemId] ?? 0
+      const next = { ...m.selected, [itemId]: Math.min(maxQty, Math.max(1, cur + delta)) }
+      const selectedPayments = recalcPayments(m.saleData, next, m.selectedPayments ?? {})
+      return { ...m, selected: next, selectedPayments }
+    })
   }
 
   async function confirmQuickReturn() {
@@ -1680,13 +1832,11 @@ export default function POSScreen({
 
       const totalReturn = addedSaleItems.reduce((s, i) => s + i.totalPriceAmount, 0)
 
-      let remainingReturn = totalReturn
+      const selectedPayments = quickReturnModal.selectedPayments ?? {}
 
       const paymentInformations = sale.Payments
-        .filter((p: ReturnablePayment) => p.ReturnableAmount > 0)
         .map((p: ReturnablePayment) => {
-          const amount = Math.min(p.ReturnableAmount, remainingReturn)
-          remainingReturn = Math.max(0, remainingReturn - amount)
+          const amount = selectedPayments[p.PaymentId] ?? 0
           return {
             mediator: p.Mediator,
             amount:   Math.round(amount * 100) / 100,
@@ -1694,6 +1844,14 @@ export default function POSScreen({
           }
         })
         .filter(p => p.amount > 0)
+
+      const paymentTotal = paymentInformations.reduce((s, p) => s + p.amount, 0)
+      if (Math.abs(paymentTotal - totalReturn) > 0.01) {
+        setQuickReturnError(
+          `Ödeme toplamı (${paymentTotal.toFixed(2)} ₺) iade tutarıyla (${totalReturn.toFixed(2)} ₺) eşleşmiyor.`,
+        )
+        return
+      }
 
       const res = await window.electron.pavo.partialReturn({
         relatedSaleId:       sale.Id,
@@ -2627,39 +2785,123 @@ export default function POSScreen({
             setQuickReturnError(null)
           }}
           onBack={() => {
-            setQuickReturnModal(m => m ? { ...m, step: 'search', saleData: undefined, selected: {} } : m)
+            setQuickReturnModal(m => m ? {
+              ...m, step: 'search', saleData: undefined, selected: {}, selectedPayments: {},
+            } : m)
             setQuickReturnError(null)
           }}
           onConfirm={() => void confirmQuickReturn()}
+          onOpenPaymentNumpad={openPaymentNumpad}
           onSelectAll={() => {
             if (!quickReturnModal.saleData) return
             const all: Record<number, number> = {}
             for (const item of quickReturnModal.saleData.Items) {
               if (item.ReturnableQuantity > 0) all[item.Id] = item.ReturnableQuantity
             }
-            setQuickReturnModal(m => m ? { ...m, selected: all } : m)
+            setQuickReturnModal(m => m && m.saleData ? {
+              ...m,
+              selected: all,
+              selectedPayments: recalcPayments(m.saleData, all, m.selectedPayments ?? {}),
+            } : m)
           }}
-          onClearAll={() => setQuickReturnModal(m => m ? { ...m, selected: {} } : m)}
-          onToggleItem={(itemId, returnableQty, checked) => {
-            setQuickReturnModal(m => {
-              if (!m) return m
-              const next = { ...m.selected }
-              if (checked) next[itemId] = returnableQty
-              else delete next[itemId]
-              return { ...m, selected: next }
-            })
+          onClearAll={() => {
+            setQuickReturnModal(m => m && m.saleData ? {
+              ...m,
+              selected: {},
+              selectedPayments: recalcPayments(m.saleData, {}, m.selectedPayments ?? {}),
+            } : m)
           }}
-          onQtyChange={(itemId, delta, maxQty) => {
-            setQuickReturnModal(m => {
-              if (!m) return m
-              const cur = m.selected[itemId] ?? 0
-              const next = delta < 0
-                ? Math.max(1, cur - 1)
-                : Math.min(maxQty, cur + 1)
-              return { ...m, selected: { ...m.selected, [itemId]: next } }
-            })
+          onToggleItem={handleToggleItem}
+          onQtyChange={handleQtyChange}
+          touchEnabled={touchEnabled}
+          onOpenKeyboard={({ title, initial, onConfirm }) => {
+            openKeyboard({ title, initial, type: 'qwerty', onConfirm })
           }}
         />
+      )}
+
+      {paymentNumpad && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10002,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16, padding: 20,
+            width: 'min(300px, 92vw)',
+            display: 'flex', flexDirection: 'column', gap: 12,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>İade Tutarı</div>
+            <div style={{ fontSize: 11, color: '#6B7280' }}>
+              Maksimum: {paymentNumpad.max.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+            </div>
+
+            <div style={{
+              background:   '#F9FAFB',
+              border:       '1.5px solid #E5E7EB',
+              borderRadius: 10,
+              padding:      '12px 14px',
+              textAlign:    'right',
+              fontSize:     24,
+              fontWeight:   700,
+              color:        '#111827',
+              letterSpacing: 1,
+              minHeight:    52,
+            }}>
+              {paymentNumpad.value === '' ? (
+                <span style={{ color: '#9CA3AF' }}>0</span>
+              ) : (
+                paymentNumpad.value
+              )} ₺
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+              {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                <button key={k} type="button"
+                  onClick={() => handlePaymentNumpadKey(k)}
+                  style={{
+                    padding:        '13px 0',
+                    borderRadius:   9,
+                    border:         '1.5px solid #E5E7EB',
+                    background:     k === '⌫' ? '#FEF2F2' : 'white',
+                    color:          k === '⌫' ? '#DC2626' : '#111827',
+                    fontSize:       18,
+                    fontWeight:     600,
+                    cursor:         'pointer',
+                  }}>
+                  {k}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button"
+                onClick={() => setPaymentNumpad(null)}
+                style={{
+                  flex: 1, padding: '11px', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#F9FAFB',
+                  fontSize: 14, cursor: 'pointer', color: '#6B7280',
+                }}>
+                Vazgeç
+              </button>
+              <button type="button"
+                onClick={() => {
+                  if (!paymentNumpad) return
+                  const amount = parseFloat(paymentNumpad.value.replace(',', '.')) || 0
+                  const clamped = Math.min(paymentNumpad.max, Math.max(0, amount))
+                  handlePaymentAmountChange(paymentNumpad.paymentId, clamped)
+                  setPaymentNumpad(null)
+                }}
+                style={{
+                  flex: 2, padding: '11px', borderRadius: 10,
+                  border: 'none', background: '#1565C0',
+                  color: 'white', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                }}>
+                Tamam
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <AlertDialog {...dialogProps} />
@@ -3999,7 +4241,9 @@ export default function POSScreen({
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
                     onClick={() => {
                       if (item.label === 'Hızlı İade') {
-                        setQuickReturnModal({ step: 'search', searchBy: 'order', saleNumber: '', selected: {} })
+                        setQuickReturnModal({
+                          step: 'search', searchBy: 'order', saleNumber: '', selected: {}, selectedPayments: {},
+                        })
                         setQuickReturnError(null)
                         setMenuOpen(null)
                         return
