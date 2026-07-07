@@ -20,6 +20,8 @@ export interface ReturnablePayment {
   Amount:             number
   ReturnableAmount:   number
   PaymentId:          number
+  CurrencyCode?:      string
+  ExchangeRate?:      number
 }
 
 export type ReturnSearchBy = 'order' | 'sale'
@@ -545,6 +547,66 @@ export default function QuickReturnModal({
             )
           })}
         </div>
+
+        {sale.Payments.length > 0 && (
+          <div style={{
+            borderRadius: 10,
+            border: '1px solid #E5E7EB',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '8px 12px',
+              background: '#F9FAFB',
+              borderBottom: '1px solid #E5E7EB',
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#6B7280',
+              textTransform: 'uppercase' as const,
+              letterSpacing: 0.5,
+            }}>
+              Ödemeler
+            </div>
+            {sale.Payments.map((p, i) => {
+              const mediatorLabel: Record<number, string> = {
+                0: '💵 Nakit',
+                1: '💵 Nakit',
+                2: '💳 Kredi Kartı',
+                3: '💳 Banka Kartı',
+                4: '🍽️ Yemek Kartı',
+              }
+              const label = mediatorLabel[p.Mediator] ?? `Ödeme (${p.Mediator})`
+              const isReturnable = p.ReturnableAmount > 0
+
+              return (
+                <div key={i} style={{
+                  display:        'flex',
+                  justifyContent: 'space-between',
+                  alignItems:     'center',
+                  padding:        '9px 12px',
+                  borderBottom:   i < sale.Payments.length - 1 ? '1px solid #F3F4F6' : 'none',
+                  opacity:        isReturnable ? 1 : 0.45,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                      Toplam: {p.Amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                      {!isReturnable && ' · İade edilemez'}
+                    </div>
+                  </div>
+                  <div style={{
+                    fontSize:   13,
+                    fontWeight: 700,
+                    color:      isReturnable ? '#059669' : '#9CA3AF',
+                  }}>
+                    İade: {p.ReturnableAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         <div style={{
           display: 'flex', justifyContent: 'space-between',

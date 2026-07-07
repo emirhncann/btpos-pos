@@ -1680,13 +1680,20 @@ export default function POSScreen({
 
       const totalReturn = addedSaleItems.reduce((s, i) => s + i.totalPriceAmount, 0)
 
+      let remainingReturn = totalReturn
+
       const paymentInformations = sale.Payments
         .filter((p: ReturnablePayment) => p.ReturnableAmount > 0)
-        .map((p: ReturnablePayment) => ({
-          mediator: p.Mediator,
-          amount:   Math.min(totalReturn, p.ReturnableAmount),
-          isVoid:   false,
-        }))
+        .map((p: ReturnablePayment) => {
+          const amount = Math.min(p.ReturnableAmount, remainingReturn)
+          remainingReturn = Math.max(0, remainingReturn - amount)
+          return {
+            mediator: p.Mediator,
+            amount:   Math.round(amount * 100) / 100,
+            isVoid:   false,
+          }
+        })
+        .filter(p => p.amount > 0)
 
       const res = await window.electron.pavo.partialReturn({
         relatedSaleId:       sale.Id,
@@ -1733,6 +1740,13 @@ export default function POSScreen({
 
       console.log('[iade] pavo items:', sale.Items.length, 'logo items:', logoItems.length)
 
+      const cashReturn = paymentInformations
+        .filter(p => p.mediator === 0 || p.mediator === 1)
+        .reduce((s, p) => s + p.amount, 0)
+      const cardReturn = paymentInformations
+        .filter(p => p.mediator !== 0 && p.mediator !== 1)
+        .reduce((s, p) => s + p.amount, 0)
+
       const orderNo = nextOrderNo(posSettings.terminalNumber)
       const saleRow = {
         orderNo,
@@ -1740,9 +1754,11 @@ export default function POSScreen({
         discountRate:   0,
         discountAmount: 0,
         netAmount:      totalReturn,
-        paymentType:    'card' as const,
-        cashAmount:     0,
-        cardAmount:     totalReturn,
+        paymentType:    cardReturn > 0 && cashReturn > 0 ? 'mixed' as const
+                      : cardReturn > 0 ? 'card' as const
+                      : 'cash' as const,
+        cashAmount:     cashReturn,
+        cardAmount:     cardReturn,
         cardAcquirerId: null,
         cashierId:      cashier.id,
         cashierName:    cashier.fullName,
@@ -1784,8 +1800,8 @@ export default function POSScreen({
             orderNo,
             totalReturn,
             invoiceType: queueInvoiceType,
-            cashAmount:  0,
-            cardAmount:  totalReturn,
+            cashAmount:  cashReturn,
+            cardAmount:  cardReturn,
             items:       logoItems,
           })
           console.log('[hızlı iade] Logo iade faturası kuyruğa eklendi')
