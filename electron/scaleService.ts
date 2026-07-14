@@ -291,20 +291,32 @@ export function getLastReading(): ScaleReading | null {
   return lastReading
 }
 
-/** Teraziye komut gönder (ör. dara için "T") */
-export function writeScale(data: string): { success: boolean; error?: string } {
-  if (!port?.isOpen) {
-    return { success: false, error: 'Terazi bağlı değil' }
-  }
-  try {
-    port.write(data, err => {
-      if (err) console.error('[scale] Yazma hatası:', err.message)
+/** Teraziye komut gönder (ör. dara için "T") — CAS genelde CR ister */
+export function writeScale(data: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise(resolve => {
+    if (!port?.isOpen) {
+      console.warn('[scale] Yazma iptal: port kapalı')
+      resolve({ success: false, error: 'Terazi bağlı değil' })
+      return
+    }
+    const payload = /[\r\n]$/.test(data) ? data : `${data}\r`
+    console.log('[scale] Yazılıyor:', JSON.stringify(payload))
+    port.write(payload, err => {
+      if (err) {
+        console.error('[scale] Yazma hatası:', err.message)
+        resolve({ success: false, error: err.message })
+        return
+      }
+      port?.drain(drainErr => {
+        if (drainErr) {
+          console.error('[scale] Drain hatası:', drainErr.message)
+          resolve({ success: false, error: drainErr.message })
+          return
+        }
+        resolve({ success: true })
+      })
     })
-    return { success: true }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return { success: false, error: msg }
-  }
+  })
 }
 
 export function addScaleListener(fn: (r: ScaleReading) => void): void {

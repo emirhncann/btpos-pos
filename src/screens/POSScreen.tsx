@@ -1078,12 +1078,21 @@ export default function POSScreen({
     void window.electron.cart.clearDraft().catch(() => {})
   }
 
-  /** Belgede dara kullanıldıysa ödeme sonrası teraziyi sıfırla */
-  function finalizeScaleTareAfterSale() {
-    if (!scaleTareUsedRef.current) return
+  /** Ödeme başarılı bitince teraziyi dara sıfırla (T gönder) */
+  function finalizeScaleTareAfterSale(soldCart: CartItem[]) {
+    const hadWeighed = soldCart.some(c => isWeighedUnit(c.unit))
+    const usedTare = scaleTareUsedRef.current
     scaleTareUsedRef.current = false
-    if (!scaleEnabled) return
-    void window.electron.scale.write('T').catch(() => {})
+
+    // Dara alındıysa veya belgede tartılı ürün varsa satış sonunda dara gönder
+    if (!usedTare && !hadWeighed) return
+
+    console.log('[scale] satış sonu dara gönderiliyor', { usedTare, hadWeighed })
+    void window.electron.scale.write('T').then(r => {
+      console.log('[scale] satış sonu dara sonucu:', r)
+    }).catch(e => {
+      console.warn('[scale] satış sonu dara hatası:', e)
+    })
   }
 
   useEffect(() => {
@@ -1692,7 +1701,7 @@ export default function POSScreen({
       setPaymentLines([])
       setActiveMethod(null)
       setPendingAmount('')
-      finalizeScaleTareAfterSale()
+      finalizeScaleTareAfterSale(cart)
       clearCart()
       setLastReceipt(printOrderNo)
       searchRef.current?.focus()
@@ -2206,7 +2215,7 @@ export default function POSScreen({
       }))
 
       setReturnMode(false)
-      finalizeScaleTareAfterSale()
+      finalizeScaleTareAfterSale(cart)
       clearCart()
       setPaymentLines([])
       setPaymentMode(false)
@@ -3283,6 +3292,8 @@ export default function POSScreen({
                 }
 
                 setCart(prev => [...prev, item])
+                // Tartılı ürün eklendi → belge sonunda dara gönderilsin
+                scaleTareUsedRef.current = true
                 setScaleModal(null)
                 playClickSound()
               }}
