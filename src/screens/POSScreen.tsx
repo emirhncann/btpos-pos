@@ -403,6 +403,8 @@ export default function POSScreen({
     stable: boolean
     raw: string
     tareCount: number
+    tareItems: { name: string; quantity: number; netTotal: number; unit: string }[]
+    tareItemsOpen: boolean
   } | null>(null)
   const [scaleEnabled, setScaleEnabled] = useState(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
@@ -880,6 +882,8 @@ export default function POSScreen({
             stable: last?.stable ?? false,
             raw: last?.raw ?? '',
             tareCount: 0,
+            tareItems: [],
+            tareItemsOpen: false,
           })
         })
         return
@@ -950,6 +954,8 @@ export default function POSScreen({
         stable: last?.stable ?? false,
         raw: last?.raw ?? '',
         tareCount: 0,
+        tareItems: [],
+        tareItemsOpen: false,
       })
       return
     }
@@ -3208,10 +3214,19 @@ export default function POSScreen({
             <button
               type="button"
               onClick={() => {
+                const weighedInCart = cart
+                  .filter(c => isWeighedUnit(c.unit))
+                  .map(c => ({
+                    name: c.name,
+                    quantity: c.quantity,
+                    netTotal: c.netTotal,
+                    unit: c.unit,
+                  }))
                 setScaleModal(m => m ? {
                   ...m,
                   tare: 0,
                   tareCount: m.tareCount + 1,
+                  tareItems: weighedInCart,
                 } : m)
                 void window.electron.scale.write('T')
               }}
@@ -3226,11 +3241,65 @@ export default function POSScreen({
 
             {scaleModal.tareCount > 0 && (
               <div style={{
-                fontSize: 12, color: '#6B7280', textAlign: 'center',
-                padding: '6px 10px', borderRadius: 8,
-                background: '#F9FAFB', border: '1px solid #E5E7EB',
+                borderRadius: 8, border: '1px solid #E5E7EB', background: '#F9FAFB',
+                overflow: 'hidden',
               }}>
-                Dara alınan: {scaleModal.tareCount} adet
+                <button
+                  type="button"
+                  onClick={() => setScaleModal(m => m ? {
+                    ...m,
+                    tareItemsOpen: !m.tareItemsOpen,
+                  } : m)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between', gap: 8,
+                    padding: '8px 12px', border: 'none', background: 'transparent',
+                    cursor: 'pointer', fontSize: 12, color: '#6B7280', fontWeight: 600,
+                  }}
+                >
+                  <span>Dara alınan: {scaleModal.tareCount} adet</span>
+                  <span style={{ color: '#9CA3AF' }}>
+                    {scaleModal.tareItemsOpen ? '▲' : '▼'}
+                  </span>
+                </button>
+                {scaleModal.tareItemsOpen && (
+                  <div style={{
+                    borderTop: '1px solid #E5E7EB', padding: '8px 12px',
+                    display: 'flex', flexDirection: 'column', gap: 6,
+                    maxHeight: 140, overflowY: 'auto',
+                  }}>
+                    {scaleModal.tareItems.length === 0 ? (
+                      <div style={{ fontSize: 12, color: '#9CA3AF' }}>
+                        Sepette önceki ağırlıklı ürün yok
+                      </div>
+                    ) : (
+                      scaleModal.tareItems.map((it, i) => (
+                        <div
+                          key={`${it.name}-${i}`}
+                          style={{
+                            display: 'flex', justifyContent: 'space-between', gap: 8,
+                            fontSize: 12, color: '#4B5563',
+                          }}
+                        >
+                          <span style={{
+                            flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {it.name}
+                          </span>
+                          <span style={{ fontFamily: 'monospace', flexShrink: 0 }}>
+                            {fmtQty(it.quantity)} {it.unit}
+                          </span>
+                          <span style={{
+                            fontFamily: 'monospace', flexShrink: 0, color: '#111827',
+                          }}>
+                            {fmt(it.netTotal)}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
