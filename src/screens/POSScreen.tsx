@@ -399,12 +399,9 @@ export default function POSScreen({
   const [scaleModal, setScaleModal] = useState<{
     product: ProductRow
     weight: number
-    tare: number
     stable: boolean
     raw: string
-    tareCount: number
-    tareItems: { name: string; quantity: number; netTotal: number; unit: string }[]
-    tareItemsOpen: boolean
+    tareTaken: boolean
   } | null>(null)
   const [scaleEnabled, setScaleEnabled] = useState(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
@@ -878,12 +875,9 @@ export default function POSScreen({
           setScaleModal({
             product: byBarcode,
             weight: last?.weight ?? 0,
-            tare: 0,
             stable: last?.stable ?? false,
             raw: last?.raw ?? '',
-            tareCount: 0,
-            tareItems: [],
-            tareItemsOpen: false,
+            tareTaken: false,
           })
         })
         return
@@ -950,12 +944,9 @@ export default function POSScreen({
       setScaleModal({
         product,
         weight: last?.weight ?? 0,
-        tare: 0,
         stable: last?.stable ?? false,
         raw: last?.raw ?? '',
-        tareCount: 0,
-        tareItems: [],
-        tareItemsOpen: false,
+        tareTaken: false,
       })
       return
     }
@@ -965,6 +956,12 @@ export default function POSScreen({
     addToCartWithQty(product, qty)
     setSearchQ('')
     searchRef.current?.blur()
+  }
+
+  function closeScaleModal(opts?: { tareTaken?: boolean }) {
+    const tareTaken = opts?.tareTaken ?? scaleModal?.tareTaken ?? false
+    if (tareTaken) void window.electron.scale.write('T')
+    setScaleModal(null)
   }
 
   function updateQty(id: string, delta: number) {
@@ -3173,7 +3170,7 @@ export default function POSScreen({
               </div>
               <button
                 type="button"
-                onClick={() => setScaleModal(null)}
+                onClick={() => closeScaleModal()}
                 style={{
                   background: 'none', border: 'none', fontSize: 20,
                   color: '#9CA3AF', cursor: 'pointer',
@@ -3214,20 +3211,7 @@ export default function POSScreen({
             <button
               type="button"
               onClick={() => {
-                const weighedInCart = cart
-                  .filter(c => isWeighedUnit(c.unit))
-                  .map(c => ({
-                    name: c.name,
-                    quantity: c.quantity,
-                    netTotal: c.netTotal,
-                    unit: c.unit,
-                  }))
-                setScaleModal(m => m ? {
-                  ...m,
-                  tare: 0,
-                  tareCount: m.tareCount + 1,
-                  tareItems: weighedInCart,
-                } : m)
+                setScaleModal(m => m ? { ...m, tareTaken: true } : m)
                 void window.electron.scale.write('T')
               }}
               style={{
@@ -3236,72 +3220,8 @@ export default function POSScreen({
                 color: '#1D4ED8', fontSize: 13, fontWeight: 700, cursor: 'pointer',
               }}
             >
-              Dara Al{scaleModal.tareCount > 0 ? ` (${scaleModal.tareCount})` : ''}
+              Dara Al
             </button>
-
-            {scaleModal.tareCount > 0 && (
-              <div style={{
-                borderRadius: 8, border: '1px solid #E5E7EB', background: '#F9FAFB',
-                overflow: 'hidden',
-              }}>
-                <button
-                  type="button"
-                  onClick={() => setScaleModal(m => m ? {
-                    ...m,
-                    tareItemsOpen: !m.tareItemsOpen,
-                  } : m)}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center',
-                    justifyContent: 'space-between', gap: 8,
-                    padding: '8px 12px', border: 'none', background: 'transparent',
-                    cursor: 'pointer', fontSize: 12, color: '#6B7280', fontWeight: 600,
-                  }}
-                >
-                  <span>Dara alınan: {scaleModal.tareCount} adet</span>
-                  <span style={{ color: '#9CA3AF' }}>
-                    {scaleModal.tareItemsOpen ? '▲' : '▼'}
-                  </span>
-                </button>
-                {scaleModal.tareItemsOpen && (
-                  <div style={{
-                    borderTop: '1px solid #E5E7EB', padding: '8px 12px',
-                    display: 'flex', flexDirection: 'column', gap: 6,
-                    maxHeight: 140, overflowY: 'auto',
-                  }}>
-                    {scaleModal.tareItems.length === 0 ? (
-                      <div style={{ fontSize: 12, color: '#9CA3AF' }}>
-                        Sepette önceki ağırlıklı ürün yok
-                      </div>
-                    ) : (
-                      scaleModal.tareItems.map((it, i) => (
-                        <div
-                          key={`${it.name}-${i}`}
-                          style={{
-                            display: 'flex', justifyContent: 'space-between', gap: 8,
-                            fontSize: 12, color: '#4B5563',
-                          }}
-                        >
-                          <span style={{
-                            flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {it.name}
-                          </span>
-                          <span style={{ fontFamily: 'monospace', flexShrink: 0 }}>
-                            {fmtQty(it.quantity)} {it.unit}
-                          </span>
-                          <span style={{
-                            fontFamily: 'monospace', flexShrink: 0, color: '#111827',
-                          }}>
-                            {fmt(it.netTotal)}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{
@@ -3357,7 +3277,7 @@ export default function POSScreen({
                 }
 
                 setCart(prev => [...prev, item])
-                setScaleModal(null)
+                closeScaleModal({ tareTaken: scaleModal.tareTaken })
                 playClickSound()
               }}
               style={{
