@@ -139,7 +139,7 @@ function formatPaymentNumpadValue(amount: number): string {
   return amount.toFixed(2).replace('.', ',')
 }
 
-const CART_GRID = '84px 1fr 72px 82px'
+const CART_GRID = '80px 1fr 88px 76px'
 
 /** SMS cep: 10 hane, 5 ile başlar; gösterim 555 555 55 55 */
 const SMS_MOBILE_LEN = 10
@@ -4140,29 +4140,43 @@ export default function POSScreen({
                       {pills}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, marginTop: 2, minWidth: 0 }}>
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
                       style={{
-                        width: 28, height: 28, border: '1px solid #e5e7eb',
-                        background: '#ffffff', borderRadius: 7, cursor: 'pointer',
-                        fontSize: 16, display: 'flex', alignItems: 'center',
+                        width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
+                        background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                        fontSize: 14, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', color: '#374151', fontWeight: 600,
                       }}
                     >−</button>
                     <span style={{
-                      fontSize: cartSettings.fsMiktar, fontWeight: 700,
+                      fontSize: (() => {
+                        const q = fmtQty(item.quantity)
+                        const base = cartSettings.fsMiktar
+                        if (q.length >= 6) return Math.min(base, 10)
+                        if (q.length >= 4) return Math.min(base, 11)
+                        return base
+                      })(),
+                      fontWeight: 700,
                       color: '#374151',
-                      minWidth: 24, textAlign: 'center',
+                      minWidth: 28,
+                      maxWidth: 52,
+                      textAlign: 'center',
+                      fontVariantNumeric: 'tabular-nums',
+                      lineHeight: 1.1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}>{fmtQty(item.quantity)}</span>
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
                       style={{
-                        width: 28, height: 28, border: '1px solid #e5e7eb',
-                        background: '#ffffff', borderRadius: 7, cursor: 'pointer',
-                        fontSize: 16, display: 'flex', alignItems: 'center',
+                        width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
+                        background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                        fontSize: 14, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', color: '#374151', fontWeight: 600,
                       }}
                     >+</button>
