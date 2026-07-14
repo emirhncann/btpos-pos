@@ -229,5 +229,10 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.on('scale:data', handler)
       return () => ipcRenderer.removeListener('scale:data', handler)
     },
+    onRaw: (cb: (raw: string) => void) => {
+      const handler = (_: unknown, raw: string) => cb(raw)
+      ipcRenderer.on('scale:raw', handler)
+      return () => ipcRenderer.removeListener('scale:raw', handler)
+    },
   },
 })

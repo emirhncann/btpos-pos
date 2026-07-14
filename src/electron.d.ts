@@ -284,12 +284,13 @@ declare global {
       }
       scale: {
         listPorts(): Promise<string[]>
-        connect(opts: { portPath: string; baudRate: number }): Promise<{ success: boolean }>
+        connect(opts: { portPath: string; baudRate: number }): Promise<{ success: boolean; error?: string }>
         disconnect(): Promise<{ success: boolean }>
         getLastReading(): Promise<ScaleReading | null>
         saveSettings(s: { portPath: string; baudRate: number; enabled: boolean }): Promise<{ success: boolean }>
         getSettings(): Promise<ScaleSettingsRow | null>
         onData(cb: (reading: ScaleReading) => void): () => void
+        onRaw(cb: (raw: string) => void): () => void
       }
     }
   }

@@ -30,32 +30,63 @@ export default function ScaleSettings() {
     setTesting(true)
     setTestValue(null)
     let received = false
+    let sawRaw = false
 
-    await window.electron.scale.connect({ portPath, baudRate })
+    const result = await window.electron.scale.connect({ portPath, baudRate })
+    if (!result.success) {
+      setTestValue(`Bağlantı hatası: ${result.error ?? 'bilinmiyor'}`)
+      setTesting(false)
+      return
+    }
 
-    const cleanup = window.electron.scale.onData(r => {
+    const cleanupData = window.electron.scale.onData(r => {
       if (received) return
       received = true
       setTestValue(`${r.stable ? '✓' : '~'} ${(r.weight / 1000).toFixed(3)} kg (${r.raw})`)
-      cleanup()
-      testCleanupRef.current = null
+      cleanupAll()
       setTesting(false)
     })
-    testCleanupRef.current = cleanup
+
+    const cleanupRaw = window.electron.scale.onRaw(raw => {
+      sawRaw = true
+      if (received) return
+      // Parse henüz olmadıysa ham veriyi göster — bağlantı çalışıyor demektir
+      setTestValue(`Ham veri: ${raw}`)
+    })
+
+    function cleanupAll() {
+      cleanupData()
+      cleanupRaw()
+      testCleanupRef.current = null
+    }
+
+    testCleanupRef.current = cleanupAll
 
     setTimeout(() => {
       if (received) return
-      cleanup()
-      testCleanupRef.current = null
-      setTestValue('Veri alınamadı — bağlantıyı kontrol edin')
+      cleanupAll()
+      if (sawRaw) {
+        setTestValue('Ham veri geldi ama format tanınmadı — konsoldaki [scale] satırına bakın')
+      } else {
+        setTestValue(
+          'Veri alınamadı — Serial Monitörü kapatıp tekrar deneyin (COM port aynı anda tek programda açık olabilir)',
+        )
+      }
       setTesting(false)
-    }, 5000)
+    }, 8000)
   }
 
   async function handleSave() {
     await window.electron.scale.saveSettings({ portPath, baudRate, enabled })
-    if (enabled) await window.electron.scale.connect({ portPath, baudRate })
-    else await window.electron.scale.disconnect()
+    if (enabled) {
+      const r = await window.electron.scale.connect({ portPath, baudRate })
+      if (!r.success) {
+        setTestValue(`Bağlantı hatası: ${r.error ?? 'bilinmiyor'}`)
+        return
+      }
+    } else {
+      await window.electron.scale.disconnect()
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -64,6 +95,14 @@ export default function ScaleSettings() {
     <div style={{ padding: 16, border: '1px solid #E5E7EB', borderRadius: 12 }}>
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>
         Terazi Ayarları (CAS RS232)
+      </div>
+
+      <div style={{
+        fontSize: 11, color: '#92400E', background: '#FFFBEB',
+        border: '1px solid #FDE68A', borderRadius: 8, padding: '8px 10px', marginBottom: 14,
+      }}>
+        Test ederken Serial Monitör / başka seri programı kapatın. Windows’ta COM port
+        aynı anda yalnızca bir uygulama tarafından açılabilir.
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
@@ -123,9 +162,13 @@ export default function ScaleSettings() {
       {testValue && (
         <div style={{
           padding: '8px 12px', borderRadius: 8, marginBottom: 10,
-          background: testValue.startsWith('✓') || testValue.startsWith('~') ? '#E8F5E9' : '#FEF2F2',
-          color: testValue.startsWith('✓') || testValue.startsWith('~') ? '#2E7D32' : '#DC2626',
-          fontSize: 12, fontFamily: 'monospace',
+          background: testValue.startsWith('✓') || testValue.startsWith('~') || testValue.startsWith('Ham')
+            ? '#E8F5E9'
+            : '#FEF2F2',
+          color: testValue.startsWith('✓') || testValue.startsWith('~') || testValue.startsWith('Ham')
+            ? '#2E7D32'
+            : '#DC2626',
+          fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
         }}>
           {testValue}
         </div>

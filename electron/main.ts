@@ -587,6 +587,12 @@ app.whenReady().then(async () => {
     })
   }
 
+  function broadcastScaleRaw(raw: string) {
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) w.webContents.send('scale:raw', raw)
+    })
+  }
+
   function autoConnectScale() {
     try {
       const settings = db.prepare('SELECT * FROM scale_settings WHERE id=1').get() as {
@@ -596,12 +602,15 @@ app.whenReady().then(async () => {
       } | undefined
       if (!settings?.enabled || !settings.port_path) return
 
-      connectScale({
+      void connectScale({
         portPath: settings.port_path,
         baudRate: settings.baud_rate ?? 9600,
         onData: broadcastScaleData,
+        onRaw: broadcastScaleRaw,
+      }).then(r => {
+        if (r.success) console.log('[scale] Otomatik bağlandı:', settings.port_path)
+        else console.warn('[scale] Otomatik bağlantı başarısız:', r.error)
       })
-      console.log('[scale] Otomatik bağlandı:', settings.port_path)
     } catch (e) {
       console.warn('[scale] Otomatik bağlantı hatası:', e)
     }
@@ -612,13 +621,13 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('scale:listPorts', async () => listSerialPorts())
 
-  ipcMain.handle('scale:connect', (_e, opts: { portPath: string; baudRate: number }) => {
-    connectScale({
+  ipcMain.handle('scale:connect', async (_e, opts: { portPath: string; baudRate: number }) => {
+    return connectScale({
       portPath: opts.portPath,
       baudRate: opts.baudRate,
       onData: broadcastScaleData,
+      onRaw: broadcastScaleRaw,
     })
-    return { success: true }
   })
 
   ipcMain.handle('scale:disconnect', () => {
