@@ -14,18 +14,33 @@ let rawListeners: ((raw: string) => void)[] = []
 let lineBuf = ''
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 
+function toGrams(value: string, unit: 'kg' | 'g'): number {
+  const n = parseFloat(value.replace(',', '.'))
+  if (Number.isNaN(n)) return NaN
+  return unit === 'kg' ? Math.round(n * 1000) : Math.round(n)
+}
+
 /**
  * CAS / genel terazi formatlarını parse et
- *   "ST,GS,+  0.250kg"  → stable, gross, 250g
- *   "ST,NT,+  0.250kg"  → stable, net, 250g
- *   "US,GS,+  0.250kg"  → unstable
- *   "S 00250" / "S00250" → gram
- *   " 0.250kg" / "+0.250 kg"
- *   "WN+0000.250kg" / "WT+0001.234kg" (bazı CAS modelleri)
+ *   "S  0.000kg" / "U  1.234kg"  → birincil CAS formatı (S=stabil, U=unstabil)
+ *   "ST,GS,+  0.250kg" / "US,GS,..."
+ *   "S 00250" (yalnızca tam sayı gram)
+ *   "WN+0000.250kg"
  */
 export function parseCasOutput(raw: string): ScaleReading | null {
   const trimmed = raw.trim().replace(/\0/g, '')
   if (!trimmed) return null
+
+  // Format 0 (birincil): "S  0.000kg" / "U  1.234kg" / "S+0.250kg" / "U  -0.010kg"
+  const fmt0 = trimmed.match(/^(S|U)\s*([+\-]?)\s*([\d.,]+)\s*(kg|g)\s*$/i)
+  if (fmt0) {
+    const stable = fmt0[1]!.toUpperCase() === 'S'
+    const unit = fmt0[4]!.toLowerCase() as 'kg' | 'g'
+    let weight = toGrams(fmt0[3]!, unit)
+    if (Number.isNaN(weight)) return null
+    if (fmt0[2] === '-') weight = -weight
+    return { weight, stable, unit, raw: trimmed }
+  }
 
   // Format 1: "ST,GS,+  0.250kg" (virgül veya boşluk ayracı)
   const fmt1 = trimmed.match(
@@ -34,9 +49,8 @@ export function parseCasOutput(raw: string): ScaleReading | null {
   if (fmt1) {
     const stable = fmt1[1]!.toUpperCase() === 'ST'
     const unit = fmt1[5]!.toLowerCase() as 'kg' | 'g'
-    let weight = parseFloat(fmt1[4]!.replace(',', '.'))
+    let weight = toGrams(fmt1[4]!, unit)
     if (Number.isNaN(weight)) return null
-    if (unit === 'kg') weight = Math.round(weight * 1000)
     if (fmt1[3]!.includes('-')) weight = -weight
     return { weight, stable, unit, raw: trimmed }
   }
@@ -48,15 +62,14 @@ export function parseCasOutput(raw: string): ScaleReading | null {
   if (fmt1b) {
     const stable = fmt1b[1]!.toUpperCase() === 'ST'
     const unit = fmt1b[5]!.toLowerCase() as 'kg' | 'g'
-    let weight = parseFloat(fmt1b[4]!.replace(',', '.'))
+    let weight = toGrams(fmt1b[4]!, unit)
     if (Number.isNaN(weight)) return null
-    if (unit === 'kg') weight = Math.round(weight * 1000)
     if (fmt1b[3] === '-') weight = -weight
     return { weight, stable, unit, raw: trimmed }
   }
 
-  // Format 2: "S 00250" veya "S00250" (gram, CAS ER)
-  const fmt2 = trimmed.match(/^S\s*(\d+)\s*$/i)
+  // Format 2: yalnız "S 00250" / "S00250" (tam sayı gram — ondalık/kg yok)
+  const fmt2 = trimmed.match(/^S\s+(\d+)\s*$/i)
   if (fmt2) {
     return { weight: parseInt(fmt2[1]!, 10), stable: true, unit: 'g', raw: trimmed }
   }
@@ -65,42 +78,44 @@ export function parseCasOutput(raw: string): ScaleReading | null {
   const fmt3 = trimmed.match(/^([+\-]?)\s*([\d.,]+)\s*(kg|g)\s*$/i)
   if (fmt3) {
     const unit = fmt3[3]!.toLowerCase() as 'kg' | 'g'
-    let weight = parseFloat(fmt3[2]!.replace(',', '.'))
+    let weight = toGrams(fmt3[2]!, unit)
     if (Number.isNaN(weight)) return null
-    if (unit === 'kg') weight = Math.round(weight * 1000)
     if (fmt3[1] === '-') weight = -weight
     return { weight, stable: true, unit, raw: trimmed }
   }
 
-  // Format 4: "WN+0000.250kg" / "WT+0001.234kg" / "GS+0000.250kg"
+  // Format 4: "WN+0000.250kg" / "WT+0001.234kg"
   const fmt4 = trimmed.match(/^(WN|WT|GS|NT|NW|GW)\s*([+\-])\s*([\d.,]+)\s*(kg|g)?\s*$/i)
   if (fmt4) {
     const unit = (fmt4[4]?.toLowerCase() as 'kg' | 'g' | undefined) ?? 'kg'
-    let weight = parseFloat(fmt4[3]!.replace(',', '.'))
+    let weight = toGrams(fmt4[3]!, unit)
     if (Number.isNaN(weight)) return null
-    if (unit === 'kg') weight = Math.round(weight * 1000)
     if (fmt4[2] === '-') weight = -weight
     return { weight, stable: true, unit, raw: trimmed }
   }
 
-  // Format 5: satır içinde herhangi bir yerde "±0.250kg" / "±250g"
+  // Format 5: satır içinde "±0.250kg" — baştaki S/U’yu da dikkate al
   const fmt5 = trimmed.match(/([+\-]?)\s*([\d.,]+)\s*(kg|g)\b/i)
   if (fmt5) {
     const unit = fmt5[3]!.toLowerCase() as 'kg' | 'g'
-    let weight = parseFloat(fmt5[2]!.replace(',', '.'))
+    let weight = toGrams(fmt5[2]!, unit)
     if (Number.isNaN(weight)) return null
-    if (unit === 'kg') weight = Math.round(weight * 1000)
     if (fmt5[1] === '-') weight = -weight
-    const unstable = /\bUS\b|unstable|unst/i.test(trimmed)
-    return { weight, stable: !unstable, unit, raw: trimmed }
+    const status = trimmed.match(/^(S|U|ST|US)\b/i)
+    const statusChar = status?.[1]?.toUpperCase()
+    const stable = statusChar === 'S' || statusChar === 'ST'
+      ? true
+      : statusChar === 'U' || statusChar === 'US'
+        ? false
+        : !/\bunstable|unst\b/i.test(trimmed)
+    return { weight, stable, unit, raw: trimmed }
   }
 
-  // Format 6: sadece sayı (kg varsay — 0.001–999 arası)
+  // Format 6: sadece sayı
   const fmt6 = trimmed.match(/^([+\-]?)\s*([\d]+[.,]\d+|[\d]+)\s*$/)
   if (fmt6) {
     let weight = parseFloat(fmt6[2]!.replace(',', '.'))
     if (Number.isNaN(weight)) return null
-    // 10'dan küçükse genellikle kg; büyükse gram (ör. 250)
     if (Math.abs(weight) < 50) weight = Math.round(weight * 1000)
     else weight = Math.round(weight)
     if (fmt6[1] === '-') weight = -weight

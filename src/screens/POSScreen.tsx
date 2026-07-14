@@ -401,6 +401,7 @@ export default function POSScreen({
     weight: number
     tare: number
     stable: boolean
+    raw: string
   } | null>(null)
   const [scaleEnabled, setScaleEnabled] = useState(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
@@ -629,6 +630,7 @@ export default function POSScreen({
         ...prev,
         weight: reading.weight,
         stable: reading.stable,
+        raw: reading.raw,
       } : prev)
     })
   }, [scaleEnabled])
@@ -875,6 +877,7 @@ export default function POSScreen({
             weight: last?.weight ?? 0,
             tare: 0,
             stable: last?.stable ?? false,
+            raw: last?.raw ?? '',
           })
         })
         return
@@ -943,6 +946,7 @@ export default function POSScreen({
         weight: last?.weight ?? 0,
         tare: 0,
         stable: last?.stable ?? false,
+        raw: last?.raw ?? '',
       })
       return
     }
@@ -3174,7 +3178,7 @@ export default function POSScreen({
               borderRadius: 12, padding: 16, textAlign: 'center',
             }}>
               <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
-                {scaleModal.stable ? 'Stabil' : 'Ölçülüyor...'}
+                {scaleModal.stable ? 'Stabil (S)' : 'Ölçülüyor (U)...'}
               </div>
               <div style={{
                 fontSize: 42, fontWeight: 800,
@@ -3184,6 +3188,18 @@ export default function POSScreen({
                 {(scaleModal.weight / 1000).toFixed(3)}
                 <span style={{ fontSize: 20, marginLeft: 6 }}>kg</span>
               </div>
+              {scaleModal.raw ? (
+                <div style={{
+                  marginTop: 8, fontSize: 12, fontFamily: 'monospace',
+                  color: '#6B7280', wordBreak: 'break-all',
+                }}>
+                  {scaleModal.raw}
+                </div>
+              ) : (
+                <div style={{ marginTop: 8, fontSize: 11, color: '#9CA3AF' }}>
+                  Teraziden veri bekleniyor...
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
