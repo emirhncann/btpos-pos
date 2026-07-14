@@ -8,6 +8,13 @@ import Store from 'electron-store'
 import { getDeviceUID, getDeviceInfo } from './device'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
+import {
+  listSerialPorts,
+  connectScale,
+  disconnectScale,
+  getLastReading,
+  type ScaleReading,
+} from './scaleService'
 
 function pavoLocalISOString(): string {
   const now = new Date()
@@ -564,10 +571,84 @@ app.whenReady().then(async () => {
     )
   `)
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scale_settings (
+      id        INTEGER PRIMARY KEY DEFAULT 1,
+      port_path TEXT,
+      baud_rate INTEGER DEFAULT 9600,
+      enabled   INTEGER DEFAULT 0
+    )
+  `)
+  db.prepare('INSERT OR IGNORE INTO scale_settings (id) VALUES (1)').run()
+
+  function broadcastScaleData(reading: ScaleReading) {
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) w.webContents.send('scale:data', reading)
+    })
+  }
+
+  function autoConnectScale() {
+    try {
+      const settings = db.prepare('SELECT * FROM scale_settings WHERE id=1').get() as {
+        port_path: string | null
+        baud_rate: number | null
+        enabled: number | null
+      } | undefined
+      if (!settings?.enabled || !settings.port_path) return
+
+      connectScale({
+        portPath: settings.port_path,
+        baudRate: settings.baud_rate ?? 9600,
+        onData: broadcastScaleData,
+      })
+      console.log('[scale] Otomatik bağlandı:', settings.port_path)
+    } catch (e) {
+      console.warn('[scale] Otomatik bağlantı hatası:', e)
+    }
+  }
+
   registerPrinterIpc(ipcMain, db)
   registerTemplatesIpc(ipcMain, db)
 
+  ipcMain.handle('scale:listPorts', async () => listSerialPorts())
+
+  ipcMain.handle('scale:connect', (_e, opts: { portPath: string; baudRate: number }) => {
+    connectScale({
+      portPath: opts.portPath,
+      baudRate: opts.baudRate,
+      onData: broadcastScaleData,
+    })
+    return { success: true }
+  })
+
+  ipcMain.handle('scale:disconnect', () => {
+    disconnectScale()
+    return { success: true }
+  })
+
+  ipcMain.handle('scale:getLastReading', () => getLastReading())
+
+  ipcMain.handle('scale:saveSettings', (_e, settings: {
+    portPath: string
+    baudRate: number
+    enabled: boolean
+  }) => {
+    db.prepare(`
+      UPDATE scale_settings SET port_path=?, baud_rate=?, enabled=? WHERE id=1
+    `).run(settings.portPath, settings.baudRate, settings.enabled ? 1 : 0)
+    return { success: true }
+  })
+
+  ipcMain.handle('scale:getSettings', () => {
+    try {
+      return db.prepare('SELECT * FROM scale_settings WHERE id=1').get() ?? null
+    } catch {
+      return null
+    }
+  })
+
   createWindow()
+  void autoConnectScale()
 
   ipcMain.handle('app:selectFolder', async () => {
     const result = await dialog.showOpenDialog({

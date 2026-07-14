@@ -6,6 +6,7 @@ import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
 import { SalesReportScreen } from './SalesReportScreen'
 import PrinterSettingsPanel from '../components/PrinterSettingsPanel'
+import ScaleSettings from '../components/ScaleSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 
@@ -464,6 +465,7 @@ export default function DashboardScreen({
                       : 'Henüz yapılandırılmamış — merkezden sync_settings ile gelir.'}
                   </div>
                   <PrinterSettingsPanel />
+                  <ScaleSettings />
                 </div>
               )}
               {settingsTab === 'screen' && (<>

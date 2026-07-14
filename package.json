@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && electron-builder",
     "postinstall": "node scripts/prebuild-sqlite-electron.js",
-    "rebuild:native": "node scripts/prebuild-sqlite-electron.js",
+    "rebuild:native": "node scripts/prebuild-sqlite-electron.js && npx electron-rebuild -f -w serialport,@serialport/bindings-cpp",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.js",
     "test": "vitest run",
@@ -62,6 +62,14 @@
     "directories": {
       "output": "release"
     },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/serialport/**",
+      "node_modules/@serialport/**",
+      "node_modules/bindings/**",
+      "node_modules/node-addon-api/**",
+      "node_modules/node-gyp-build/**"
+    ],
     "extraResources": [
       {
         "from": "src/assets/logo_bt.png",
