@@ -19,6 +19,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/serialport": "^8.0.5",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.17",
@@ -40,6 +41,7 @@
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-slot": "^1.0.2",
+    "@serialport/parser-readline": "^13.0.0",
     "@thiagoelg/node-printer": "^0.6.2",
     "better-sqlite3": "^11.10.0",
     "class-variance-authority": "^0.7.0",
@@ -51,6 +53,7 @@
     "pdfjs-dist": "^3.11.174",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "serialport": "^13.0.0",
     "tailwind-merge": "^2.2.1"
   },
   "build": {

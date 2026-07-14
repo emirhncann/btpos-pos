@@ -16,7 +16,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron',
             rollupOptions: {
-              external: ['better-sqlite3', 'electron-store', '@thiagoelg/node-printer'],
+              external: ['better-sqlite3', 'electron-store', '@thiagoelg/node-printer', 'serialport', '@serialport/parser-readline'],
             },
           },
         },

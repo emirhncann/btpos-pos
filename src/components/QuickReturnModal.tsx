@@ -404,30 +404,44 @@ export default function QuickReturnModal({
             </label>
           </div>
 
-          <input
-            value={modal.saleNumber}
-            onChange={e => onSaleNumberChange(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') onSearch(modal.saleNumber, modal.searchBy) }}
-            onClick={() => {
-              if (!touchEnabled) return
-              onOpenKeyboard({
-                title:     searchLabel,
-                initial:   modal.saleNumber,
-                onConfirm: (v) => {
-                  onSaleNumberChange(v)
-                  onSearch(v, modal.searchBy)
-                },
-              })
-            }}
-            readOnly={touchEnabled}
-            placeholder={searchPlaceholder}
-            autoFocus={!touchEnabled}
-            style={{
-              padding: '12px 14px', borderRadius: 10, border: '1.5px solid #E5E7EB',
-              fontSize: 15, fontFamily: 'monospace',
-              cursor: touchEnabled ? 'default' : 'text',
-            }}
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              value={modal.saleNumber}
+              onChange={e => onSaleNumberChange(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') onSearch(modal.saleNumber, modal.searchBy) }}
+              placeholder={searchPlaceholder}
+              autoFocus={!touchEnabled}
+              style={{
+                flex: 1,
+                padding: '12px 14px', borderRadius: 10, border: '1.5px solid #E5E7EB',
+                fontSize: 15, fontFamily: 'monospace',
+                cursor: 'text',
+                boxSizing: 'border-box',
+              }}
+            />
+            {touchEnabled && (
+              <button
+                type="button"
+                onClick={() => onOpenKeyboard({
+                  title:     searchLabel,
+                  initial:   modal.saleNumber,
+                  onConfirm: (v) => {
+                    onSaleNumberChange(v)
+                    onSearch(v, modal.searchBy)
+                  },
+                })}
+                style={{
+                  padding: '12px 14px', borderRadius: 10,
+                  border: '1.5px solid #E5E7EB', background: '#F9FAFB',
+                  cursor: 'pointer', color: '#6B7280', fontSize: 18,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                ⌨️
+              </button>
+            )}
+          </div>
 
           {error && (
             <div style={{
