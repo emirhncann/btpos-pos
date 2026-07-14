@@ -282,23 +282,7 @@ declare global {
           receiptWidth?: '58mm' | '80mm'
         }): Promise<{ success: boolean; message?: string; data?: unknown }>
       }
-      scale: {
-        listPorts():  Promise<string[]>
-        connect(opts: { portPath: string; baudRate: number }): Promise<{ success: boolean }>
-        disconnect(): Promise<{ success: boolean }>
-        getLastReading(): Promise<ScaleReading | null>
-        saveSettings(s: { portPath: string; baudRate: number; enabled: boolean }): Promise<{ success: boolean }>
-        getSettings(): Promise<{ port_path: string; baud_rate: number; enabled: number } | null>
-        onData(cb: (reading: ScaleReading) => void): () => void
-      }
     }
-  }
-
-  interface ScaleReading {
-    weight:  number
-    stable:  boolean
-    unit:    'kg' | 'g'
-    raw:     string
   }
 
   interface RecentSaleRow {

@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && electron-builder",
-    "postinstall": "node scripts/prebuild-sqlite-electron.js",
-    "rebuild:native": "node scripts/prebuild-sqlite-electron.js",
+    "postinstall": "node scripts/prebuild-sqlite-electron.js && electron-rebuild -f -w serialport || echo [postinstall] serialport rebuild skipped",
+    "rebuild:native": "node scripts/prebuild-sqlite-electron.js && electron-rebuild -f -w serialport",
+    "rebuild:serialport": "electron-rebuild -f -w serialport",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.js",
     "test": "vitest run",

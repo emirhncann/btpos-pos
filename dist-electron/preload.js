@@ -126,18 +126,5 @@ electron.contextBridge.exposeInMainWorld("electron", {
   pavo: {
     getReturnableSale: (opts) => electron.ipcRenderer.invoke("pavo:getReturnableSale", opts),
     partialReturn: (opts) => electron.ipcRenderer.invoke("pavo:partialReturn", opts)
-  },
-  scale: {
-    listPorts: () => electron.ipcRenderer.invoke("scale:listPorts"),
-    connect: (opts) => electron.ipcRenderer.invoke("scale:connect", opts),
-    disconnect: () => electron.ipcRenderer.invoke("scale:disconnect"),
-    getLastReading: () => electron.ipcRenderer.invoke("scale:getLastReading"),
-    saveSettings: (s) => electron.ipcRenderer.invoke("scale:saveSettings", s),
-    getSettings: () => electron.ipcRenderer.invoke("scale:getSettings"),
-    onData: (cb) => {
-      const handler = (_, r) => cb(r);
-      electron.ipcRenderer.on("scale:data", handler);
-      return () => electron.ipcRenderer.removeListener("scale:data", handler);
-    }
   }
 });

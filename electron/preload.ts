@@ -1,12 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-interface ScaleReading {
-  weight: number
-  stable: boolean
-  unit:   'kg' | 'g'
-  raw:    string
-}
-
 contextBridge.exposeInMainWorld('electron', {
   store: {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
@@ -221,20 +214,5 @@ contextBridge.exposeInMainWorld('electron', {
       }>
       receiptWidth?: '58mm' | '80mm'
     }) => ipcRenderer.invoke('pavo:partialReturn', opts),
-  },
-  scale: {
-    listPorts:      () => ipcRenderer.invoke('scale:listPorts'),
-    connect:        (opts: { portPath: string; baudRate: number }) =>
-      ipcRenderer.invoke('scale:connect', opts),
-    disconnect:     () => ipcRenderer.invoke('scale:disconnect'),
-    getLastReading: () => ipcRenderer.invoke('scale:getLastReading'),
-    saveSettings:   (s: { portPath: string; baudRate: number; enabled: boolean }) =>
-      ipcRenderer.invoke('scale:saveSettings', s),
-    getSettings:    () => ipcRenderer.invoke('scale:getSettings'),
-    onData: (cb: (reading: ScaleReading) => void) => {
-      const handler = (_: unknown, r: ScaleReading) => cb(r)
-      ipcRenderer.on('scale:data', handler)
-      return () => ipcRenderer.removeListener('scale:data', handler)
-    },
   },
 })
