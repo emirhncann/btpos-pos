@@ -227,16 +227,6 @@ interface PaymentLine {
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
-function fmtQty(qty: number): string {
-  return qty % 1 === 0 ? qty.toString() : qty.toFixed(3)
-}
-
-const WEIGHED_UNITS = new Set(['KG', 'GR', 'G', 'kg', 'gr', 'g', 'Kg'])
-
-function isWeighedUnit(unit?: string): boolean {
-  return WEIGHED_UNITS.has(unit ?? '')
-}
-
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
   let net = lineTotal
   if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
@@ -425,13 +415,6 @@ export default function POSScreen({
   const [pavoError, setPavoError] = useState<string | null>(null)
   const { dialogProps, showError, showSuccess, showInfo, confirm } = useAlertDialog()
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
-  const [scaleModal, setScaleModal] = useState<{
-    product: CartItem
-    weight:  number
-    tare:    number
-    stable:  boolean
-  } | null>(null)
-  const [scaleEnabled, setScaleEnabled] = useState(false)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
   const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
   const [paymentNumpad, setPaymentNumpad] = useState<{
@@ -600,26 +583,6 @@ export default function POSScreen({
     return () => clearInterval(t)
   }, [])
   useEffect(() => { searchRef.current?.focus() }, [])
-
-  useEffect(() => {
-    void window.electron.scale.getSettings().then(s => {
-      setScaleEnabled(!!s?.enabled)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!scaleEnabled) return
-
-    const cleanup = window.electron.scale.onData(reading => {
-      setScaleModal(prev => prev ? {
-        ...prev,
-        weight: reading.weight,
-        stable: reading.stable,
-      } : prev)
-    })
-
-    return cleanup
-  }, [scaleEnabled])
 
   useEffect(() => {
     void (async () => {
@@ -919,33 +882,7 @@ export default function POSScreen({
     })
   }
 
-  async function handlePluClick(product: ProductRow) {
-    if (isWeighedUnit(product.unit) && scaleEnabled) {
-      const last = await window.electron.scale.getLastReading()
-      setScaleModal({
-        product: {
-          id:             crypto.randomUUID(),
-          productId:      product.id,
-          code:           product.code ?? '',
-          name:           product.name,
-          category:       product.category ?? '',
-          price:          product.price,
-          vatRate:        product.vatRate ?? 18,
-          unit:           product.unit ?? 'KG',
-          quantity:       0,
-          lineTotal:      0,
-          discountRate:   0,
-          discountAmount: 0,
-          netTotal:       0,
-          barcode:        product.barcode ?? '',
-        },
-        weight: last?.weight ?? 0,
-        tare:   0,
-        stable: last?.stable ?? false,
-      })
-      return
-    }
-
+  function handlePluClick(product: ProductRow) {
     const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
     setNumBuf('')
     addToCartWithQty(product, qty)
@@ -2991,165 +2928,6 @@ export default function POSScreen({
         </div>
       )}
 
-      {scaleModal && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <div style={{
-            background: 'white', borderRadius: 16, padding: 24,
-            width: 'min(380px, 94vw)',
-            display: 'flex', flexDirection: 'column', gap: 14,
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>⚖️ Terazi</div>
-                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
-                  {scaleModal.product.name}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setScaleModal(null)}
-                style={{
-                  background: 'none', border: 'none', fontSize: 20,
-                  color: '#9CA3AF', cursor: 'pointer',
-                }}
-              >✕</button>
-            </div>
-
-            <div style={{
-              background:   scaleModal.stable ? '#F0FDF4' : '#FFF8E1',
-              border:       `2px solid ${scaleModal.stable ? '#86EFAC' : '#FDE68A'}`,
-              borderRadius: 12, padding: '16px',
-              textAlign:    'center',
-            }}>
-              <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
-                {scaleModal.stable ? '✓ Stabil' : '⟳ Ölçülüyor...'}
-              </div>
-              <div style={{
-                fontSize:   42,
-                fontWeight: 800,
-                color:      scaleModal.stable ? '#15803D' : '#D97706',
-                fontFamily: 'monospace',
-                letterSpacing: 2,
-              }}>
-                {(scaleModal.weight / 1000).toFixed(3)}
-                <span style={{ fontSize: 20, marginLeft: 6 }}>kg</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '8px 12px', borderRadius: 8,
-                background: '#F9FAFB', border: '1px solid #E5E7EB',
-              }}>
-                <span style={{ fontSize: 12, color: '#6B7280' }}>Dara (Brüt Ağırlık)</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="number"
-                    min={0}
-                    value={scaleModal.tare / 1000}
-                    onChange={e => setScaleModal(m => m ? {
-                      ...m, tare: Math.round(parseFloat(e.target.value || '0') * 1000),
-                    } : m)}
-                    style={{
-                      width: 70, padding: '4px 8px', borderRadius: 6,
-                      border: '1px solid #E5E7EB', fontSize: 13,
-                      textAlign: 'right',
-                    }}
-                  />
-                  <span style={{ fontSize: 12, color: '#6B7280' }}>kg</span>
-                </div>
-              </div>
-
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '8px 12px', borderRadius: 8,
-                background: '#EFF6FF', border: '1px solid #BFDBFE',
-              }}>
-                <span style={{ fontSize: 12, color: '#1D4ED8', fontWeight: 600 }}>Net Ağırlık</span>
-                <span style={{
-                  fontSize: 16, fontWeight: 800, color: '#1D4ED8', fontFamily: 'monospace',
-                }}>
-                  {(Math.max(0, scaleModal.weight - scaleModal.tare) / 1000).toFixed(3)} kg
-                </span>
-              </div>
-
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '8px 12px', borderRadius: 8,
-                background: '#F9FAFB', border: '1px solid #E5E7EB',
-              }}>
-                <span style={{ fontSize: 12, color: '#6B7280' }}>Birim Fiyat (kg)</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#374151' }}>
-                  {fmt(scaleModal.product.price)}
-                </span>
-              </div>
-
-              <div style={{
-                display: 'flex', justifyContent: 'space-between',
-                alignItems: 'center', padding: '10px 12px', borderRadius: 8,
-                background: '#111827', border: 'none',
-              }}>
-                <span style={{ fontSize: 13, color: 'white', fontWeight: 600 }}>Tutar</span>
-                <span style={{ fontSize: 18, fontWeight: 800, color: 'white' }}>
-                  {fmt(
-                    Math.max(0, scaleModal.weight - scaleModal.tare) / 1000 * scaleModal.product.price,
-                  )}
-                </span>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              disabled={!scaleModal.stable || scaleModal.weight <= scaleModal.tare}
-              onClick={() => {
-                const netGram = Math.max(0, scaleModal.weight - scaleModal.tare)
-                const netKg   = Math.round(netGram) / 1000
-                if (netKg <= 0) return
-
-                const item: CartItem = {
-                  id:             crypto.randomUUID(),
-                  productId:      scaleModal.product.productId,
-                  code:           scaleModal.product.code,
-                  name:           scaleModal.product.name,
-                  category:       scaleModal.product.category,
-                  price:          scaleModal.product.price,
-                  vatRate:        scaleModal.product.vatRate,
-                  unit:           scaleModal.product.unit,
-                  quantity:       netKg,
-                  lineTotal:      Math.round(netKg * scaleModal.product.price * 100) / 100,
-                  discountRate:   0,
-                  discountAmount: 0,
-                  netTotal:       Math.round(netKg * scaleModal.product.price * 100) / 100,
-                  barcode:        scaleModal.product.barcode,
-                }
-
-                setCart(prev => [...prev, item])
-                setScaleModal(null)
-              }}
-              style={{
-                padding:      '14px',
-                borderRadius: 10,
-                border:       'none',
-                background:   scaleModal.stable && scaleModal.weight > scaleModal.tare
-                  ? '#15803D' : '#D1D5DB',
-                color:        'white',
-                fontSize:     15,
-                fontWeight:   700,
-                cursor:       scaleModal.stable && scaleModal.weight > scaleModal.tare
-                  ? 'pointer' : 'default',
-              }}
-            >
-              {!scaleModal.stable ? '⟳ Terazi stabil değil...' : '✓ Sepete Ekle'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {quickReturnModal && (
         <QuickReturnModal
           modal={quickReturnModal}
@@ -3552,7 +3330,7 @@ export default function POSScreen({
                       {item.name}
                     </div>
                     <div style={{ fontSize: 11, color: '#9CA3AF' }}>
-                      {fmtQty(item.quantity)} {item.unit ?? 'Adet'} × {fmt(item.price)}
+                      {item.quantity} {item.unit ?? 'Adet'} × {fmt(item.price)}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#111827',
@@ -4096,7 +3874,7 @@ export default function POSScreen({
                       fontSize: cartSettings.fsMiktar, fontWeight: 700,
                       color: '#374151',
                       minWidth: 24, textAlign: 'center',
-                    }}>{fmtQty(item.quantity)}</span>
+                    }}>{item.quantity}</span>
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
@@ -4126,7 +3904,7 @@ export default function POSScreen({
                       cursor: paymentMode ? 'default' : 'pointer',
                       borderBottom: paymentMode ? 'none' : '1px dashed #D1D5DB',
                       display: 'inline-block',
-                    }}>{fmt(item.price)}×{fmtQty(item.quantity)}</div>
+                    }}>{fmt(item.price)}×{item.quantity}</div>
                   </div>
                   </div>
                 </div>
