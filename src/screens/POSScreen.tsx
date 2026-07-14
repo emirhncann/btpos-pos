@@ -399,11 +399,12 @@ export default function POSScreen({
   const [scaleModal, setScaleModal] = useState<{
     product: ProductRow
     weight: number
+    tare: number
     stable: boolean
     raw: string
-    tareTaken: boolean
   } | null>(null)
   const [scaleEnabled, setScaleEnabled] = useState(false)
+  const scaleTareUsedRef = useRef(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
     trigger: string
     templates: { id: string; name: string; template_type: string; is_default: boolean }[]
@@ -875,9 +876,9 @@ export default function POSScreen({
           setScaleModal({
             product: byBarcode,
             weight: last?.weight ?? 0,
+            tare: 0,
             stable: last?.stable ?? false,
             raw: last?.raw ?? '',
-            tareTaken: false,
           })
         })
         return
@@ -944,9 +945,9 @@ export default function POSScreen({
       setScaleModal({
         product,
         weight: last?.weight ?? 0,
+        tare: 0,
         stable: last?.stable ?? false,
         raw: last?.raw ?? '',
-        tareTaken: false,
       })
       return
     }
@@ -956,12 +957,6 @@ export default function POSScreen({
     addToCartWithQty(product, qty)
     setSearchQ('')
     searchRef.current?.blur()
-  }
-
-  function closeScaleModal(opts?: { tareTaken?: boolean }) {
-    const tareTaken = opts?.tareTaken ?? scaleModal?.tareTaken ?? false
-    if (tareTaken) void window.electron.scale.write('T')
-    setScaleModal(null)
   }
 
   function updateQty(id: string, delta: number) {
@@ -1079,7 +1074,16 @@ export default function POSScreen({
     setLineDiscountTarget(null)
     applyCustomerSelection(null)
     setMenuOpen(null)
+    scaleTareUsedRef.current = false
     void window.electron.cart.clearDraft().catch(() => {})
+  }
+
+  /** Belgede dara kullanıldıysa ödeme sonrası teraziyi sıfırla */
+  function finalizeScaleTareAfterSale() {
+    if (!scaleTareUsedRef.current) return
+    scaleTareUsedRef.current = false
+    if (!scaleEnabled) return
+    void window.electron.scale.write('T').catch(() => {})
   }
 
   useEffect(() => {
@@ -1688,6 +1692,7 @@ export default function POSScreen({
       setPaymentLines([])
       setActiveMethod(null)
       setPendingAmount('')
+      finalizeScaleTareAfterSale()
       clearCart()
       setLastReceipt(printOrderNo)
       searchRef.current?.focus()
@@ -2201,6 +2206,7 @@ export default function POSScreen({
       }))
 
       setReturnMode(false)
+      finalizeScaleTareAfterSale()
       clearCart()
       setPaymentLines([])
       setPaymentMode(false)
@@ -3170,7 +3176,7 @@ export default function POSScreen({
               </div>
               <button
                 type="button"
-                onClick={() => closeScaleModal()}
+                onClick={() => setScaleModal(null)}
                 style={{
                   background: 'none', border: 'none', fontSize: 20,
                   color: '#9CA3AF', cursor: 'pointer',
@@ -3211,7 +3217,7 @@ export default function POSScreen({
             <button
               type="button"
               onClick={() => {
-                setScaleModal(m => m ? { ...m, tareTaken: true } : m)
+                scaleTareUsedRef.current = true
                 void window.electron.scale.write('T')
               }}
               style={{
@@ -3277,7 +3283,7 @@ export default function POSScreen({
                 }
 
                 setCart(prev => [...prev, item])
-                closeScaleModal({ tareTaken: scaleModal.tareTaken })
+                setScaleModal(null)
                 playClickSound()
               }}
               style={{
