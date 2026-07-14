@@ -404,7 +404,6 @@ export default function POSScreen({
     raw: string
   } | null>(null)
   const [scaleEnabled, setScaleEnabled] = useState(false)
-  const scaleTareUsedRef = useRef(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
     trigger: string
     templates: { id: string; name: string; template_type: string; is_default: boolean }[]
@@ -1074,25 +1073,7 @@ export default function POSScreen({
     setLineDiscountTarget(null)
     applyCustomerSelection(null)
     setMenuOpen(null)
-    scaleTareUsedRef.current = false
     void window.electron.cart.clearDraft().catch(() => {})
-  }
-
-  /** Ödeme başarılı bitince teraziyi dara sıfırla (T gönder) */
-  function finalizeScaleTareAfterSale(soldCart: CartItem[]) {
-    const hadWeighed = soldCart.some(c => isWeighedUnit(c.unit))
-    const usedTare = scaleTareUsedRef.current
-    scaleTareUsedRef.current = false
-
-    // Dara alındıysa veya belgede tartılı ürün varsa satış sonunda dara gönder
-    if (!usedTare && !hadWeighed) return
-
-    console.log('[scale] satış sonu dara gönderiliyor', { usedTare, hadWeighed })
-    void window.electron.scale.write('T').then(r => {
-      console.log('[scale] satış sonu dara sonucu:', r)
-    }).catch(e => {
-      console.warn('[scale] satış sonu dara hatası:', e)
-    })
   }
 
   useEffect(() => {
@@ -1701,8 +1682,8 @@ export default function POSScreen({
       setPaymentLines([])
       setActiveMethod(null)
       setPendingAmount('')
-      finalizeScaleTareAfterSale(cart)
       clearCart()
+      if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
       setLastReceipt(printOrderNo)
       searchRef.current?.focus()
     } catch (e) {
@@ -2215,7 +2196,6 @@ export default function POSScreen({
       }))
 
       setReturnMode(false)
-      finalizeScaleTareAfterSale(cart)
       clearCart()
       setPaymentLines([])
       setPaymentMode(false)
@@ -3226,7 +3206,6 @@ export default function POSScreen({
             <button
               type="button"
               onClick={() => {
-                scaleTareUsedRef.current = true
                 void window.electron.scale.write('T')
               }}
               style={{
@@ -3292,8 +3271,6 @@ export default function POSScreen({
                 }
 
                 setCart(prev => [...prev, item])
-                // Tartılı ürün eklendi → belge sonunda dara gönderilsin
-                scaleTareUsedRef.current = true
                 setScaleModal(null)
                 playClickSound()
               }}
