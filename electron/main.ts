@@ -13,6 +13,7 @@ import {
   connectScale,
   disconnectScale,
   getLastReading,
+  writeScale,
   type ScaleReading,
 } from './scaleService'
 
@@ -636,6 +637,8 @@ app.whenReady().then(async () => {
   })
 
   ipcMain.handle('scale:getLastReading', () => getLastReading())
+
+  ipcMain.handle('scale:write', (_e, data: string) => writeScale(data))
 
   ipcMain.handle('scale:saveSettings', (_e, settings: {
     portPath: string

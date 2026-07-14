@@ -221,6 +221,7 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('scale:connect', opts),
     disconnect: () => ipcRenderer.invoke('scale:disconnect'),
     getLastReading: () => ipcRenderer.invoke('scale:getLastReading'),
+    write: (data: string) => ipcRenderer.invoke('scale:write', data),
     saveSettings: (s: { portPath: string; baudRate: number; enabled: boolean }) =>
       ipcRenderer.invoke('scale:saveSettings', s),
     getSettings: () => ipcRenderer.invoke('scale:getSettings'),

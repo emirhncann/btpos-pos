@@ -3179,15 +3179,21 @@ export default function POSScreen({
             }}>
               <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
                 {scaleModal.stable ? 'Stabil (S)' : 'Ölçülüyor (U)...'}
+                {scaleModal.tare > 0 ? ' · net' : ''}
               </div>
               <div style={{
                 fontSize: 42, fontWeight: 800,
                 color: scaleModal.stable ? '#15803D' : '#D97706',
                 fontFamily: 'monospace', letterSpacing: 2,
               }}>
-                {(scaleModal.weight / 1000).toFixed(3)}
+                {(Math.max(0, scaleModal.weight - scaleModal.tare) / 1000).toFixed(3)}
                 <span style={{ fontSize: 20, marginLeft: 6 }}>kg</span>
               </div>
+              {scaleModal.tare > 0 && (
+                <div style={{ marginTop: 4, fontSize: 11, color: '#6B7280', fontFamily: 'monospace' }}>
+                  Brüt {(scaleModal.weight / 1000).toFixed(3)} − Dara {(scaleModal.tare / 1000).toFixed(3)}
+                </div>
+              )}
               {scaleModal.raw ? (
                 <div style={{
                   marginTop: 8, fontSize: 12, fontFamily: 'monospace',
@@ -3202,32 +3208,51 @@ export default function POSScreen({
               )}
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '8px 12px', borderRadius: 8,
-                background: '#F9FAFB', border: '1px solid #E5E7EB',
-              }}>
-                <span style={{ fontSize: 12, color: '#6B7280' }}>Dara</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.001}
-                    value={scaleModal.tare / 1000}
-                    onChange={e => setScaleModal(m => m ? {
-                      ...m,
-                      tare: Math.round(parseFloat(e.target.value || '0') * 1000),
-                    } : m)}
-                    style={{
-                      width: 70, padding: '4px 8px', borderRadius: 6,
-                      border: '1px solid #E5E7EB', fontSize: 13, textAlign: 'right',
-                    }}
-                  />
-                  <span style={{ fontSize: 12, color: '#6B7280' }}>kg</span>
-                </div>
-              </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setScaleModal(m => m ? { ...m, tare: Math.max(0, m.weight) } : m)}
+                disabled={scaleModal.weight <= 0}
+                style={{
+                  flex: 1, padding: '12px 10px', borderRadius: 10,
+                  border: '1px solid #E5E7EB', background: '#F9FAFB',
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                  opacity: scaleModal.weight <= 0 ? 0.5 : 1,
+                }}
+              >
+                Dara
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Yazılımsal dara sıfırlanır; terazi donanım dara alır
+                  setScaleModal(m => m ? { ...m, tare: 0 } : m)
+                  void window.electron.scale.write('T')
+                }}
+                style={{
+                  flex: 1, padding: '12px 10px', borderRadius: 10,
+                  border: '1px solid #BFDBFE', background: '#EFF6FF',
+                  color: '#1D4ED8', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                }}
+              >
+                Dara Al
+              </button>
+              {scaleModal.tare > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setScaleModal(m => m ? { ...m, tare: 0 } : m)}
+                  style={{
+                    padding: '12px 10px', borderRadius: 10,
+                    border: '1px solid #E5E7EB', background: 'white',
+                    fontSize: 12, color: '#6B7280', cursor: 'pointer',
+                  }}
+                >
+                  Sıfırla
+                </button>
+              )}
+            </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '8px 12px', borderRadius: 8,
