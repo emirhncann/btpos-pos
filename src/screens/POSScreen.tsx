@@ -626,12 +626,19 @@ export default function POSScreen({
   useEffect(() => {
     if (!scaleEnabled) return
     return window.electron.scale.onData(reading => {
-      setScaleModal(prev => prev ? {
-        ...prev,
-        weight: reading.weight,
-        stable: reading.stable,
-        raw: reading.raw,
-      } : prev)
+      setScaleModal(prev => {
+        if (!prev) return prev
+        // Donanım darası tuttuysa (gösterge ~0) yazılımsal darayı bırak
+        const tare =
+          prev.tare > 0 && reading.weight <= 5 ? 0 : prev.tare
+        return {
+          ...prev,
+          weight: reading.weight,
+          stable: reading.stable,
+          raw: reading.raw,
+          tare,
+        }
+      })
     })
   }, [scaleEnabled])
 
@@ -3180,15 +3187,21 @@ export default function POSScreen({
             }}>
               <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
                 {scaleModal.stable ? 'Stabil (S)' : 'Ölçülüyor (U)...'}
+                {scaleModal.tare > 0 ? ' · net' : ''}
               </div>
               <div style={{
                 fontSize: 42, fontWeight: 800,
                 color: scaleModal.stable ? '#15803D' : '#D97706',
                 fontFamily: 'monospace', letterSpacing: 2,
               }}>
-                {(scaleModal.weight / 1000).toFixed(3)}
+                {(Math.max(0, scaleModal.weight - scaleModal.tare) / 1000).toFixed(3)}
                 <span style={{ fontSize: 20, marginLeft: 6 }}>kg</span>
               </div>
+              {scaleModal.tare > 0 && (
+                <div style={{ marginTop: 4, fontSize: 11, color: '#6B7280', fontFamily: 'monospace' }}>
+                  Brüt {(scaleModal.weight / 1000).toFixed(3)} − Dara {(scaleModal.tare / 1000).toFixed(3)}
+                </div>
+              )}
               {scaleModal.raw ? (
                 <div style={{
                   marginTop: 8, fontSize: 12, fontFamily: 'monospace',
@@ -3206,6 +3219,7 @@ export default function POSScreen({
             <button
               type="button"
               onClick={() => {
+                setScaleModal(m => m ? { ...m, tare: Math.max(0, m.weight) } : m)
                 void window.electron.scale.write('T')
               }}
               style={{
@@ -3235,16 +3249,17 @@ export default function POSScreen({
               }}>
                 <span style={{ fontSize: 13, color: 'white', fontWeight: 600 }}>Tutar</span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: 'white' }}>
-                  {fmt(Math.max(0, scaleModal.weight) / 1000 * scaleModal.product.price)}
+                  {fmt(Math.max(0, scaleModal.weight - scaleModal.tare) / 1000 * scaleModal.product.price)}
                 </span>
               </div>
             </div>
 
             <button
               type="button"
-              disabled={!scaleModal.stable || scaleModal.weight <= 0}
+              disabled={!scaleModal.stable || scaleModal.weight <= scaleModal.tare}
               onClick={() => {
-                const netKg = Math.round(Math.max(0, scaleModal.weight)) / 1000
+                const netGram = Math.max(0, scaleModal.weight - scaleModal.tare)
+                const netKg = Math.round(netGram) / 1000
                 if (netKg <= 0) return
 
                 if (cart.length === 0 && !currentOrderNo) {
@@ -3276,10 +3291,10 @@ export default function POSScreen({
               }}
               style={{
                 padding: 14, borderRadius: 10, border: 'none',
-                background: scaleModal.stable && scaleModal.weight > 0
+                background: scaleModal.stable && scaleModal.weight > scaleModal.tare
                   ? '#15803D' : '#D1D5DB',
                 color: 'white', fontSize: 15, fontWeight: 700,
-                cursor: scaleModal.stable && scaleModal.weight > 0
+                cursor: scaleModal.stable && scaleModal.weight > scaleModal.tare
                   ? 'pointer' : 'default',
               }}
             >

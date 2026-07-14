@@ -297,9 +297,15 @@ export function writeScale(data: string): { success: boolean; error?: string } {
     return { success: false, error: 'Terazi bağlı değil' }
   }
   try {
-    port.write(data, err => {
+    // CAS çoğu modelde satır sonu ister; yoksa ekle
+    const payload =
+      data.endsWith('\r') || data.endsWith('\n') ? data : `${data}\r`
+    port.write(payload, err => {
       if (err) console.error('[scale] Yazma hatası:', err.message)
     })
+    // Buffer'ı mümkün olduğunca hemen boşalt
+    try { port.drain() } catch { /* ignore */ }
+    console.log('[scale] yazıldı:', JSON.stringify(payload))
     return { success: true }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
