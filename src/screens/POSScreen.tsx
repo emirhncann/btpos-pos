@@ -288,8 +288,6 @@ const MENU_ACCENT: Record<'islemler' | 'belge' | 'musteri', string> = {
   musteri:  '#2E7D32',
 }
 
-const MAX_HELD_DOCS = 10
-
 function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout = 'row', onClick }: {
   icon:     string
   label:    string
@@ -387,6 +385,7 @@ export default function POSScreen({
   const [lastReceipt, setLastReceipt]     = useState<string | null>(null)
   const [returnMode, setReturnMode]       = useState(false)
   const [docDiscountMode, setDocDiscountMode] = useState(false)
+  const [cancelNextAdd, setCancelNextAdd] = useState(false)
   const [discMode, setDiscMode] = useState<'rate' | 'amt'>('rate')
   const [docDiscMode, setDocDiscMode] = useState<'rate' | 'amt'>('rate')
   const [docDiscInput, setDocDiscInput] = useState('')
@@ -482,7 +481,7 @@ export default function POSScreen({
   const [heldToast, setHeldToast] = useState<string | null>(null)
   const heldToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showToast = useCallback((msg: string, _type: 'error' | 'success' = 'error') => {
+  const showToast = useCallback((msg: string, _type: 'error' | 'success' | 'info' = 'error') => {
     if (heldToastTimer.current) clearTimeout(heldToastTimer.current)
     setHeldToast(msg)
     heldToastTimer.current = setTimeout(() => setHeldToast(null), 4000)
@@ -915,6 +914,14 @@ export default function POSScreen({
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
+    if (cancelNextAdd) {
+      setCancelNextAdd(false)
+      cancelOneFromCart(
+        cart.find(c => c.productId === product.id)?.id ?? '',
+      )
+      return
+    }
+
     if (cart.length === 0 && !currentOrderNo) {
       setCurrentOrderNo(nextOrderNo(posSettings.terminalNumber))
       setLastReceipt(null)
@@ -1117,6 +1124,7 @@ export default function POSScreen({
     setNumBuf('')
     resetSlide()
     setDocDiscountMode(false)
+    setCancelNextAdd(false)
     setDocDiscMode('rate')
     setDocDiscInput('')
     setDocDiscountRate(0)
@@ -1221,12 +1229,6 @@ export default function POSScreen({
 
   async function holdDoc() {
     if (!cart.length) return
-
-    if (heldDocs.length >= MAX_HELD_DOCS) {
-      setShowHeld(true)
-      showToast(`Maksimum ${MAX_HELD_DOCS} belge bekletilebilir. Önce bir belgeyi getirin veya silin.`, 'error')
-      return
-    }
 
     const orderNo = currentOrderNo
       ?? nextOrderNo(posSettings.terminalNumber)
@@ -1390,7 +1392,8 @@ export default function POSScreen({
 
   /* ── Ödeme — ara toplam, satır/belge indirimi, KDV, genel toplam ── */
   const araToplamBrut = cart.reduce((s, c) => s + c.price * c.quantity, 0)
-  const totalQty = cart.reduce((s, c) => s + c.quantity, 0)
+  const totalQtyRaw = cart.reduce((s, c) => s + c.quantity, 0)
+  const totalQty = parseFloat(totalQtyRaw.toFixed(3))
   const satirIndirimi = cart.reduce((s, c) => {
     const brut = c.price * c.quantity
     const lt = c.lineTotal ?? brut
@@ -2346,12 +2349,7 @@ export default function POSScreen({
                 fontSize:       11,
                 fontWeight:     700,
                 transition:     'all 0.2s',
-                ...(heldDocs.length >= MAX_HELD_DOCS ? {
-                  background: '#C62828',
-                  color:      'white',
-                  animation:  'pulse-red 0.8s infinite',
-                  boxShadow:  '0 0 0 2px rgba(198,40,40,0.3)',
-                } : heldDocs.length <= 3 ? {
+                ...(heldDocs.length <= 3 ? {
                   background: '#E8F5E9',
                   color:      '#2E7D32',
                 } : heldDocs.length <= 6 ? {
@@ -2366,23 +2364,20 @@ export default function POSScreen({
               }}
             >
               <span style={{ fontSize: 14 }}>
-                {heldDocs.length >= MAX_HELD_DOCS ? '🚨' : heldDocs.length <= 3 ? '📂' : heldDocs.length <= 6 ? '⚠️' : '🚨'}
+                {heldDocs.length <= 3 ? '🛒' : heldDocs.length <= 6 ? '⚠️' : '🚨'}
               </span>
               <span>
-                {heldDocs.length >= MAX_HELD_DOCS
-                  ? `Belge limiti doldu! `
-                  : heldDocs.length <= 3
-                    ? `${heldDocs.length} Bekleyen Belge`
-                    : heldDocs.length <= 6
-                      ? `${heldDocs.length} Bekleyen Belge!`
-                      : `${heldDocs.length} Bekleyen Belge — dolmak üzere!`}
+                {heldDocs.length <= 3
+                  ? `${heldDocs.length} Bekleyen Belge`
+                  : heldDocs.length <= 6
+                    ? `${heldDocs.length} Bekleyen Belge!`
+                    : `${heldDocs.length} Bekleyen Belge`}
               </span>
               <span style={{
-                background: heldDocs.length >= MAX_HELD_DOCS ? 'white'
-                  : heldDocs.length <= 3 ? '#2E7D32'
-                    : heldDocs.length <= 6 ? '#F57F17'
-                      : '#C62828',
-                color: heldDocs.length >= MAX_HELD_DOCS ? '#C62828' : 'white',
+                background: heldDocs.length <= 3 ? '#2E7D32'
+                  : heldDocs.length <= 6 ? '#F57F17'
+                    : '#C62828',
+                color: 'white',
                 borderRadius: '50%',
                 width:        18,
                 height:       18,
@@ -3509,12 +3504,7 @@ export default function POSScreen({
                   Bekletilen Belgeler
                 </div>
                 <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                  {heldDocs.length} / {MAX_HELD_DOCS}
-                  {heldDocs.length >= MAX_HELD_DOCS && (
-                    <span style={{ color: '#DC2626', fontWeight: 600, marginLeft: 4 }}>
-                      — limit doldu
-                    </span>
-                  )}
+                  {heldDocs.length} belge
                 </div>
               </div>
               <button
@@ -4343,36 +4333,6 @@ export default function POSScreen({
             flexShrink: 0,
           }}>
             <div style={{ padding: '8px 14px 0' }}>
-              {(posSettings.allowDocDiscount ?? true) && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (docDiscountMode) {
-                        setDocDiscountMode(false)
-                        return
-                      }
-                      setSmsPhonePanelOpen(false)
-                      setMenuOpen(null)
-                      const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
-                      setDocDiscMode(openMode)
-                      setDocDiscInput(
-                        openMode === 'rate'
-                          ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
-                          : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
-                      )
-                      setDocDiscountMode(true)
-                    }}
-                    style={{
-                      fontSize: 11, color: '#E65100', background: 'none', border: 'none',
-                      cursor: 'pointer', padding: '2px 0', display: 'block', marginBottom: 4,
-                      textDecoration: docDiscountMode ? 'none' : 'underline',
-                    }}
-                  >
-                    {docDiscountMode ? 'İndirimi Kapat' : '+ Belge İndirimi'}
-                  </button>
-                </>
-              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', padding: '2px 0' }}>
                 <span>Ara Toplam</span>
                 <span>{fmt(araToplamBrut)}</span>
@@ -4777,9 +4737,8 @@ export default function POSScreen({
                 {menuOpen === 'islemler' && [
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
                   { icon: '💸', label: 'Cari ödeme', disabled: false },
-                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 || heldDocs.length >= MAX_HELD_DOCS },
-                  { icon: '📂', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
-                  { icon: '%', label: 'Belge indirim', disabled: cart.length === 0 },
+                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
+                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
                   { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler} layout="stack"
@@ -4809,19 +4768,6 @@ export default function POSScreen({
                       }
                       if (item.label.startsWith('Beklemeye')) { void holdDoc(); return }
                       if (item.label.startsWith('Belge getir')) { setShowHeld(true); setMenuOpen(null); return }
-                      if (item.label.startsWith('Belge ind')) {
-                        setSmsPhonePanelOpen(false)
-                        setMenuOpen(null)
-                        const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
-                        setDocDiscMode(openMode)
-                        setDocDiscInput(
-                          openMode === 'rate'
-                            ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
-                            : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
-                        )
-                        setDocDiscountMode(true)
-                        return
-                      }
                       if (item.label.startsWith('Belge iptal')) {
                         void confirm({
                           title:   'Belge İptal',
@@ -4837,9 +4783,40 @@ export default function POSScreen({
                 {menuOpen === 'belge' && [
                   { icon: '↩️', label: 'İade Al', disabled: false },
                   { icon: '⚡', label: 'Hızlı İade', disabled: !pavoSettings },
+                  { icon: '%', label: docDiscountRate > 0 || docDiscountAmt > 0
+                      ? `Belge İndirimi (${docDiscountRate > 0 ? `%${docDiscountRate}` : fmt(docDiscountAmt)})`
+                      : 'Belge İndirimi',
+                    disabled: cart.length === 0 || !(posSettings.allowDocDiscount ?? true) },
+                  { icon: '✕', label: 'Ürün İptal', disabled: cart.length === 0 },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
                     onClick={() => {
+                      if (item.disabled) return
+                      if (item.label.startsWith('Belge İndirimi')) {
+                        setSmsPhonePanelOpen(false)
+                        setMenuOpen(null)
+                        const openMode: 'rate' | 'amt' = docDiscountAmt > 0 ? 'amt' : 'rate'
+                        setDocDiscMode(openMode)
+                        setDocDiscInput(
+                          openMode === 'rate'
+                            ? (docDiscountRate > 0 ? String(docDiscountRate) : '')
+                            : (docDiscountAmt > 0 ? String(docDiscountAmt) : ''),
+                        )
+                        setDocDiscountMode(true)
+                        return
+                      }
+                      if (item.label === 'Ürün İptal') {
+                        if (numBuf) {
+                          setSearchQ(numBuf)
+                          setCancelNextAdd(true)
+                          setNumBuf('')
+                        } else {
+                          setCancelNextAdd(true)
+                          showToast('Barkod okutun veya ürüne tıklayın — iptal edilecek', 'info')
+                        }
+                        setMenuOpen(null)
+                        return
+                      }
                       if (item.label === 'Hızlı İade') {
                         setQuickReturnModal({
                           step: 'search', searchBy: 'order', saleNumber: '', selected: {}, selectedPayments: {},

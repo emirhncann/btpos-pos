@@ -143,7 +143,11 @@ export default function CustomerDisplayScreen() {
           borderLeft: '1px solid #e2e8f0',
         }}>
           <div style={{ fontSize: 14, color: '#475569', flexShrink: 0 }}>
-            Toplam adet: <strong style={{ color: '#0f172a' }}>{payload.totals.totalQty}</strong>
+            Toplam adet: <strong style={{ color: '#0f172a' }}>
+              {Number.isInteger(payload.totals.totalQty)
+                ? payload.totals.totalQty
+                : parseFloat(payload.totals.totalQty.toFixed(3))}
+            </strong>
           </div>
 
           {hasDiscounts && (
