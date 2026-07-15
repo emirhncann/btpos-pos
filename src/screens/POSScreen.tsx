@@ -26,10 +26,23 @@ import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { playClickSound } from '../lib/clickSound'
 
-const WEIGHED_UNITS = new Set(['KG', 'GR', 'G', 'KG.', 'GR.'])
+const WEIGHED_UNITS = new Set([
+  'KG', 'KG.', 'KGS', 'KILO', 'KILOGRAM', 'KILOGRAMS',
+  'G', 'G.', 'GR', 'GR.', 'GRS', 'GRAM', 'GRAMS', 'GRAMAJ',
+])
 
 function isWeighedUnit(unit?: string | null): boolean {
-  return WEIGHED_UNITS.has((unit ?? '').trim().toUpperCase())
+  const raw = (unit ?? '').trim()
+  if (!raw) return false
+  // Boşluk / nokta / Türkçe karakterleri normalize et → KILOGRAM, GRAM vb.
+  const norm = raw
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I')
+    .replace(/İ/g, 'I')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Z0-9]/g, '')
+  return WEIGHED_UNITS.has(norm)
 }
 
 function fmtQty(n: number): string {
