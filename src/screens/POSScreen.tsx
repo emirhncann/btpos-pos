@@ -139,7 +139,7 @@ function formatPaymentNumpadValue(amount: number): string {
   return amount.toFixed(2).replace('.', ',')
 }
 
-const CART_GRID = '80px 1fr 88px 76px'
+const CART_GRID = '76px 1fr 104px 74px'
 
 /** SMS cep: 10 hane, 5 ile başlar; gösterim 555 555 55 55 */
 const SMS_MOBILE_LEN = 10
@@ -4088,7 +4088,7 @@ export default function POSScreen({
                       {pills}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, marginTop: 2, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2, minWidth: 0 }}>
                     <button
                       type="button"
                       onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
@@ -4103,14 +4103,15 @@ export default function POSScreen({
                       fontSize: (() => {
                         const q = fmtQty(item.quantity)
                         const base = cartSettings.fsMiktar
-                        if (q.length >= 6) return Math.min(base, 10)
-                        if (q.length >= 4) return Math.min(base, 11)
+                        // 5 hane/karakter sabit; 6+ sığdırmak için küçült
+                        if (q.length >= 8) return Math.min(base, 10)
+                        if (q.length >= 6) return Math.min(base, 11)
                         return base
                       })(),
                       fontWeight: 700,
                       color: '#374151',
-                      minWidth: 28,
-                      maxWidth: 52,
+                      minWidth: 44,
+                      maxWidth: 56,
                       textAlign: 'center',
                       fontVariantNumeric: 'tabular-nums',
                       lineHeight: 1.1,
