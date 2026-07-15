@@ -2364,7 +2364,7 @@ export default function POSScreen({
               }}
             >
               <span style={{ fontSize: 14 }}>
-                {heldDocs.length <= 3 ? '🛒' : heldDocs.length <= 6 ? '⚠️' : '🚨'}
+                {heldDocs.length <= 3 ? '🧺' : heldDocs.length <= 6 ? '⚠️' : '🚨'}
               </span>
               <span>
                 {heldDocs.length <= 3
@@ -4016,7 +4016,7 @@ export default function POSScreen({
           }}>
             {cart.length === 0 ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#d1d5db', fontSize: 13, flexDirection: 'column', gap: 8 }}>
-                <span style={{ fontSize: 32 }}>🛒</span>
+                <span style={{ fontSize: 32 }}>🧺</span>
                 <span>Sepet boş — ürün seçin veya barkod okutun</span>
               </div>
             ) : cart.map((item, rowIdx) => {
@@ -4738,7 +4738,7 @@ export default function POSScreen({
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
                   { icon: '💸', label: 'Cari ödeme', disabled: false },
                   { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
-                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
+                  { icon: '🧺', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
                   { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler} layout="stack"
