@@ -384,6 +384,8 @@ export default function POSScreen({
   const [lineDiscAmtIn, setLineDiscAmtIn]     = useState('')
   const [priceEditTarget, setPriceEditTarget] = useState<string | null>(null)
   const [priceEditInput, setPriceEditInput]   = useState('')
+  const [weightEditTarget, setWeightEditTarget] = useState<string | null>(null)
+  const [weightEditInput, setWeightEditInput]   = useState('')
   const [menuOpen, setMenuOpen] = useState<'islemler' | 'belge' | 'musteri' | 'fiyatgor' | null>(null)
   const [fiyatGorQ, setFiyatGorQ] = useState('')
   const [fiyatGorItem, setFiyatGorItem] = useState<ProductRow | null>(null)
@@ -1030,6 +1032,35 @@ export default function POSScreen({
     setMenuOpen(null)
     setPriceEditTarget(itemId)
     setPriceEditInput(price.toFixed(2).replace('.', ','))
+  }
+
+  function applyWeightEdit() {
+    if (!weightEditTarget) return
+    const raw = weightEditInput.replace(',', '.')
+    const qty = parseFloat(raw)
+    if (isNaN(qty) || qty <= 0) {
+      setWeightEditTarget(null)
+      setWeightEditInput('')
+      return
+    }
+
+    setCart(prev => prev.map(c => {
+      if (c.id !== weightEditTarget) return c
+      const newTotal = parseFloat((qty * c.price).toFixed(2))
+      const netTotal = calcLineDiscount(newTotal, c.discountRate, c.discountAmount)
+      return { ...c, quantity: qty, lineTotal: newTotal, netTotal }
+    }))
+
+    setWeightEditTarget(null)
+    setWeightEditInput('')
+  }
+
+  function openWeightEdit(itemId: string, quantity: number) {
+    if (paymentMode) return
+    setSmsPhonePanelOpen(false)
+    setMenuOpen(null)
+    setWeightEditTarget(itemId)
+    setWeightEditInput(quantity.toFixed(3).replace('.', ','))
   }
 
   function cancelQtyFromNumBuf(): number {
@@ -2683,6 +2714,111 @@ export default function POSScreen({
         )
       })()}
 
+      {weightEditTarget && (() => {
+        const targetItem = cart.find(c => c.id === weightEditTarget)
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 9998,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+          }}>
+            <div style={{
+              background: 'white', borderRadius: '16px 16px 0 0',
+              padding: '20px 16px 32px', width: '100%', maxWidth: 420,
+            }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', marginBottom: 12,
+              }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Ağırlık Düzenle</div>
+                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                    {targetItem?.name}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setWeightEditTarget(null); setWeightEditInput('') }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+                >✕</button>
+              </div>
+
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                padding: '8px 12px', borderRadius: 8, background: '#F9FAFB',
+                marginBottom: 12, fontSize: 12, color: '#6B7280',
+              }}>
+                <span>Mevcut ağırlık</span>
+                <span style={{ fontWeight: 700, color: '#374151', fontFamily: 'monospace' }}>
+                  {(targetItem?.quantity ?? 0).toFixed(3)} kg
+                </span>
+              </div>
+
+              <div style={{
+                textAlign: 'center', padding: '12px 0', fontSize: 32, fontWeight: 700,
+                color: '#1D4ED8', letterSpacing: 2, minHeight: 56, fontFamily: 'monospace',
+              }}>
+                {weightEditInput || '0'} kg
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => {
+                      if (k === '⌫') {
+                        setWeightEditInput(v => v.slice(0, -1))
+                        return
+                      }
+                      if (k === ',') {
+                        setWeightEditInput(v => {
+                          if (v.includes(',')) return v
+                          return v === '' ? '0,' : v + ','
+                        })
+                        return
+                      }
+                      setWeightEditInput(v => {
+                        if (v.includes(',') && (v.split(',')[1] ?? '').length >= 3) return v
+                        if (v.replace(',', '').length >= 6) return v
+                        return v + k
+                      })
+                    }}
+                    style={{
+                      padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
+                      background: k === '⌫' ? '#FEF2F2' : '#F9FAFB',
+                      fontSize: 18, fontWeight: 600,
+                      color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer',
+                    }}
+                  >{k}</button>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setWeightEditInput('')}
+                  style={{
+                    padding: 14, borderRadius: 10, border: '1px solid #E0E0E0',
+                    background: '#F5F5F5', fontSize: 15, fontWeight: 600,
+                    color: '#374151', cursor: 'pointer',
+                  }}
+                >C</button>
+                <button
+                  type="button"
+                  onClick={applyWeightEdit}
+                  style={{
+                    padding: 14, borderRadius: 10, border: 'none',
+                    background: '#1D4ED8', fontSize: 15, fontWeight: 700,
+                    color: 'white', cursor: 'pointer',
+                  }}
+                >Uygula</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {docDiscountMode && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
@@ -4089,46 +4225,73 @@ export default function POSScreen({
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3, marginTop: 2, minWidth: 0 }}>
-                    <button
-                      type="button"
-                      onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
-                      style={{
-                        width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
-                        background: '#ffffff', borderRadius: 6, cursor: 'pointer',
-                        fontSize: 14, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', color: '#374151', fontWeight: 600,
-                      }}
-                    >−</button>
-                    <span style={{
-                      fontSize: (() => {
-                        const q = fmtQty(item.quantity)
-                        const base = cartSettings.fsMiktar
-                        // 5 hane/karakter sabit; 6+ sığdırmak için küçült
-                        if (q.length >= 8) return Math.min(base, 10)
-                        if (q.length >= 6) return Math.min(base, 11)
-                        return base
-                      })(),
-                      fontWeight: 700,
-                      color: '#374151',
-                      minWidth: 44,
-                      maxWidth: 56,
-                      textAlign: 'center',
-                      fontVariantNumeric: 'tabular-nums',
-                      lineHeight: 1.1,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>{fmtQty(item.quantity)}</span>
-                    <button
-                      type="button"
-                      onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
-                      style={{
-                        width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
-                        background: '#ffffff', borderRadius: 6, cursor: 'pointer',
-                        fontSize: 14, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', color: '#374151', fontWeight: 600,
-                      }}
-                    >+</button>
+                    {isWeighedUnit(item.unit) ? (
+                      <button
+                        type="button"
+                        onClick={e => {
+                          e.stopPropagation()
+                          openWeightEdit(item.id, item.quantity)
+                        }}
+                        onMouseDown={e => e.stopPropagation()}
+                        style={{
+                          fontSize: cartSettings.fsMiktar,
+                          fontWeight: 700,
+                          color: paymentMode ? '#374151' : '#1D4ED8',
+                          cursor: paymentMode ? 'default' : 'pointer',
+                          border: 'none',
+                          background: 'transparent',
+                          borderBottom: paymentMode ? 'none' : '1px dashed #93C5FD',
+                          fontFamily: 'monospace',
+                          fontVariantNumeric: 'tabular-nums',
+                          padding: '2px 0',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {item.quantity.toFixed(3)} kg
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
+                          style={{
+                            width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
+                            background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                            fontSize: 14, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', color: '#374151', fontWeight: 600,
+                          }}
+                        >−</button>
+                        <span style={{
+                          fontSize: (() => {
+                            const q = fmtQty(item.quantity)
+                            const base = cartSettings.fsMiktar
+                            if (q.length >= 8) return Math.min(base, 10)
+                            if (q.length >= 6) return Math.min(base, 11)
+                            return base
+                          })(),
+                          fontWeight: 700,
+                          color: '#374151',
+                          minWidth: 44,
+                          maxWidth: 56,
+                          textAlign: 'center',
+                          fontVariantNumeric: 'tabular-nums',
+                          lineHeight: 1.1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>{fmtQty(item.quantity)}</span>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
+                          style={{
+                            width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
+                            background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                            fontSize: 14, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', color: '#374151', fontWeight: 600,
+                          }}
+                        >+</button>
+                      </>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{
