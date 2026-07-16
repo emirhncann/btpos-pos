@@ -2,8 +2,17 @@ import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSPrope
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { sendInvoiceForSale, sendReturnInvoice, resolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
-import { pavoCompleteSale, type PavoSettings } from '../lib/pavoService'
-import type { PaymentDeviceResult } from '../lib/paymentDevice'
+import {
+  pavoCompleteSale,
+  pavoStartSaleWithItems,
+  pavoAddPayment,
+  pavoFinalizeSale,
+  pavoCheckPendingSale,
+  pavoAbandonSuspendedSale,
+  pavoGetSaleResult,
+  type PavoSettings,
+} from '../lib/pavoService'
+import { parsePavoResult, type PaymentDeviceResult } from '../lib/paymentDevice'
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
 import { PluButton, truncatePluName } from '../components/PluButton'
@@ -228,12 +237,6 @@ interface Props {
   commandRecentlyReceived?: boolean
   commandDeferred?: boolean
   customerDisplay?: boolean
-}
-
-interface CardPaymentInfo {
-  acquirerId: string
-  amount: number
-  acquirerName?: string
 }
 
 type PaymentMethodKey = 'cash' | 'card' | 'meal_card'
@@ -1468,282 +1471,478 @@ export default function POSScreen({
     void window.electron.secondScreen.update(payload).catch(() => {})
   }, [cart, customerDisplay, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
 
-  async function completeSale(forcedLines?: PaymentLine[]) {
-    const lines = forcedLines ?? paymentLines
-    if (!cart.length || lines.length === 0) return
-    setSaving(true)
-    setPavoError(null)
-    let deviceResult: PaymentDeviceResult | undefined
-    console.log('[completeSale] paymentLines:', JSON.stringify(lines))
-    console.log('[completeSale] canComplete:', canComplete)
-
+  async function handlePavoRecovery(_saleId: number, orderNo: string) {
+    if (!pavoSettings) return
     try {
-    const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
-    const cashAmt = lines
-      .filter(l => l.method === 'cash')
-      .reduce((s, l) => s + l.amount, 0)
-    const cardAmt = lines
-      .filter(l => l.method !== 'cash')
-      .reduce((s, l) => s + l.amount, 0)
-    const nonCashTotal = lines
-      .filter(l => l.method !== 'cash')
-      .reduce((s, l) => s + l.amount, 0)
-    let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
-    const terminalLabel = posSettings.source?.trim() || 'Kasa'
-    const orderNo = currentOrderNo
-      ?? nextOrderNo(posSettings.terminalNumber)
-    const pavoPaymentsFinal = lines.map(l => {
-      if (l.method === 'cash') {
-        const cashPart = Math.min(l.amount, cashRemaining)
-        cashRemaining = Math.max(0, cashRemaining - cashPart)
-        return { Mediator: l.mediator, Amount: cashPart, CurrencyCode: 'TRY', ExchangeRate: 1 }
+      const seq = await window.electron.db.nextPavoSequence()
+      const pending = await pavoCheckPendingSale(pavoSettings, seq, orderNo)
+
+      if (pending.hasPending && pending.saleId) {
+        const abanSeq = await window.electron.db.nextPavoSequence()
+        await pavoAbandonSuspendedSale(pavoSettings, abanSeq, pending.saleId)
+        console.log('[pavo] Recovery: AbandonSuspendedSale tamamlandı')
       }
-      return { Mediator: l.mediator, Amount: l.amount, CurrencyCode: 'TRY', ExchangeRate: 1 }
-    }).filter(p => p.Amount > 0)
-
-    if (pavoSettings) {
-      if (cardAmt > 0) setPavoLoading(true)
-
-      try {
-        const seq = await window.electron.db.nextPavoSequence()
-        const round2 = (n: number) => parseFloat(n.toFixed(2))
-        const salePriceEffect = docDiscountCalc > 0
-          ? {
-            Type: 2,
-            Rate: docDiscountRate > 0 ? round2(docDiscountRate) : 0,
-            Amount: docDiscountRate > 0 ? 0 : round2(docDiscountCalc),
-          }
-          : undefined
-        const pavoItems = cart.map(c => {
-          const brut = round2(c.price * c.quantity)
-          const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
-          return {
-            name: c.name,
-            unitName: c.unit ?? 'Adet',
-            vatRate: c.vatRate,
-            quantity: c.quantity,
-            unitPrice: c.price,
-            grossPrice: brut,
-            totalPrice: round2(c.netTotal),
-            priceEffect: hasLineDiscount
-              ? {
-                  Type: 1,
-                  Rate: c.discountRate > 0 ? round2(c.discountRate) : 0,
-                  Amount: c.discountRate > 0 ? null : round2(c.discountAmount),
-                }
-              : undefined,
-          }
-        })
-
-        const smsNorm = normalizeTrMobileForSms(smsPhone)
-
-        if (mailAddr.trim() && !isValidNotifyEmail(mailAddr)) {
-          showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya adresi temizleyin.')
-          return
-        }
-
-        deviceResult = await pavoCompleteSale(
-          pavoSettings,
-          seq,
-          orderNo,
-          round2(araToplamBrut),
-          grandTotal,
-          pavoItems,
-          pavoPaymentsFinal,
-          salePriceEffect,
-          selectedCustomer,
-          {
-            sendSms: smsNorm.length === SMS_MOBILE_LEN,
-            smsPhone: smsNorm || '',
-            sendEmail: isValidNotifyEmail(mailAddr),
-            mailAddr: mailAddr.trim(),
-          },
-        )
-
-        if (!deviceResult.success) {
-          showError('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
-          return
-        }
-      } catch (e) {
-        showError('Pavo Bağlantı Hatası', String(e))
-        return
-      } finally {
-        setPavoLoading(false)
-      }
+    } catch (e) {
+      console.warn('[pavo] Recovery başarısız:', e)
     }
+  }
 
-      const pavoData = deviceResult?.raw?.Data as Record<string, unknown> | undefined
-      const printOrderNo = String(pavoData?.OrderNo ?? orderNo)
+  async function finalizeSaleToSQLite(opts: {
+    lines: PaymentLine[]
+    orderNo: string
+    deviceResult?: PaymentDeviceResult
+    cashAmt: number
+    cardAmt: number
+    paidAmt: number
+  }) {
+    const { lines, orderNo, deviceResult, cashAmt, cardAmt, paidAmt } = opts
+    const terminalLabel = posSettings.source?.trim() || 'Kasa'
 
-      type RawPayment = {
-        StatusId?: unknown
-        PaymentMediatorId?: unknown
-        PaymentAmount?: unknown
-        OnlinePayment?: { AcquirerId?: unknown; AcquirerName?: unknown }
-        CashPayment?: { GivenAmount?: unknown }
+    const pavoData = deviceResult?.raw?.Data as Record<string, unknown> | undefined
+    const printOrderNo = String(pavoData?.OrderNo ?? orderNo)
+
+    type RawPayment = {
+      StatusId?: unknown
+      PaymentMediatorId?: unknown
+      PaymentAmount?: unknown
+      OnlinePayment?: { AcquirerId?: unknown; AcquirerName?: unknown }
+      CashPayment?: { GivenAmount?: unknown }
+    }
+    const rawData = (deviceResult?.raw?.Data as { AddedPayments?: unknown[] } | undefined)
+    const addedPayments = Array.isArray(rawData?.AddedPayments) ? rawData.AddedPayments : []
+    const successPayments = addedPayments
+      .map(p => p as RawPayment)
+      .filter(p => Number(p.StatusId) === 2)
+    const cashPayments = successPayments.filter(p => Number(p.PaymentMediatorId) === 1)
+    const actualCashAmt = cashPayments.reduce((s, p) => s + Number(p.PaymentAmount ?? 0), 0)
+    const cardPaymentsRaw = successPayments.filter(p => Number(p.PaymentMediatorId) === 2)
+
+    const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
+    for (const p of cardPaymentsRaw) {
+      const acquirerId = String(p.OnlinePayment?.AcquirerId ?? 'unknown')
+      const acquirerName = String(p.OnlinePayment?.AcquirerName ?? '')
+      const amount = Number(p.PaymentAmount ?? 0)
+      if (!cardByBank[acquirerId]) {
+        cardByBank[acquirerId] = { amount: 0, acquirerName }
       }
-      const rawData = (deviceResult?.raw?.Data as { AddedPayments?: unknown[] } | undefined)
-      const addedPayments = Array.isArray(rawData?.AddedPayments) ? rawData.AddedPayments : []
-      const successPayments = addedPayments
-        .map(p => p as RawPayment)
-        .filter(p => Number(p.StatusId) === 2)
-      const cashPayments = successPayments.filter(p => Number(p.PaymentMediatorId) === 1)
-      const actualCashAmt = cashPayments.reduce((s, p) => s + Number(p.PaymentAmount ?? 0), 0)
-      const cardPaymentsRaw = successPayments.filter(p => Number(p.PaymentMediatorId) === 2)
+      cardByBank[acquirerId].amount += amount
+    }
+    const firstCard = cardPaymentsRaw[0]
+    const cardAcquirerId = firstCard?.OnlinePayment?.AcquirerId != null
+      ? String(firstCard.OnlinePayment.AcquirerId)
+      : null
+    console.log('[completeSale] cardAcquirerId:', cardAcquirerId)
+    console.log('[completeSale] addedPayments:', addedPayments)
+    console.log('[completeSale] cardByBank:', cardByBank)
+    console.log('[completeSale] actualCashAmt:', actualCashAmt)
 
-      const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
-      for (const p of cardPaymentsRaw) {
-        const acquirerId = String(p.OnlinePayment?.AcquirerId ?? 'unknown')
-        const acquirerName = String(p.OnlinePayment?.AcquirerName ?? '')
-        const amount = Number(p.PaymentAmount ?? 0)
-        if (!cardByBank[acquirerId]) {
-          cardByBank[acquirerId] = { amount: 0, acquirerName }
-        }
-        cardByBank[acquirerId].amount += amount
-      }
-      const cardPaymentInfos: CardPaymentInfo[] = Object.entries(cardByBank).map(([acquirerId, info]) => ({
-        acquirerId,
-        amount: info.amount,
-        acquirerName: info.acquirerName,
-      }))
-      const firstCard = cardPaymentsRaw[0]
-      const cardAcquirerId = firstCard?.OnlinePayment?.AcquirerId != null
-        ? String(firstCard.OnlinePayment.AcquirerId)
-        : null
-      console.log('[completeSale] cardAcquirerId:', cardAcquirerId)
-      console.log('[completeSale] addedPayments:', addedPayments)
-      console.log('[completeSale] cardByBank:', cardByBank)
-      console.log('[completeSale] cardPaymentInfos:', cardPaymentInfos)
-      console.log('[completeSale] actualCashAmt:', actualCashAmt)
+    const salePaymentType: 'cash' | 'card' | 'mixed' =
+      cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
+    const saleRow = {
+      orderNo: printOrderNo,
+      totalAmount: lineSubtotal,
+      discountRate: docDiscountRate,
+      discountAmount: docDiscountCalc,
+      netAmount: grandTotal,
+      paymentType: salePaymentType,
+      cashAmount: cashAmt,
+      cardAmount: cardAmt,
+      cardAcquirerId,
+      cashierId: cashier.id,
+      cashierName: cashier.fullName,
+      customerId:   selectedCustomer?.id   ?? null,
+      customerName: selectedCustomer?.name ?? null,
+      customerCode: selectedCustomer?.code ?? null,
+    }
+    const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, cart.map(c => ({
+      productId: c.productId,
+      productCode: c.code,
+      productName: c.name,
+      quantity: c.quantity,
+      unitPrice: c.price,
+      vatRate: c.vatRate,
+      discountRate: c.discountRate,
+      discountAmount: c.discountAmount,
+      lineTotal: c.netTotal,
+      appliedBy: cashier.id,
+    })), deviceResult)
 
-      const salePaymentType: 'cash' | 'card' | 'mixed' =
-        cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
-      const saleRow = {
-        orderNo: printOrderNo,
-        totalAmount: lineSubtotal,
-        discountRate: docDiscountRate,
-        discountAmount: docDiscountCalc,
-        netAmount: grandTotal,
-        paymentType: salePaymentType,
-        cashAmount: cashAmt,
-        cardAmount: cardAmt,
-        cardAcquirerId,
-        cashierId: cashier.id,
-        cashierName: cashier.fullName,
-        customerId:   selectedCustomer?.id   ?? null,
-        customerName: selectedCustomer?.name ?? null,
-        customerCode: selectedCustomer?.code ?? null,
-      }
-      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, cart.map(c => ({
-        productId: c.productId,
-        productCode: c.code,
-        productName: c.name,
-        quantity: c.quantity,
-        unitPrice: c.price,
-        vatRate: c.vatRate,
-        discountRate: c.discountRate,
-        discountAmount: c.discountAmount,
-        lineTotal: c.netTotal,
-        appliedBy: cashier.id,
-      })), deviceResult)
-
-      const cardBankKeys = Object.keys(cardByBank)
-      let cardIdx = 0
-      const paymentRows: SalePaymentRow[] = lines.map(line => {
-        if (line.method === 'card') {
-          const bankKey = cardBankKeys[cardIdx] ?? null
-          const bankInfo = bankKey ? cardByBank[bankKey] : null
-          cardIdx += 1
-          return {
-            id: crypto.randomUUID(),
-            saleId,
-            method: line.method,
-            amount: line.amount,
-            mediator: line.mediator,
-            acquirerId: bankKey,
-            acquirerName: bankInfo?.acquirerName ?? null,
-            cashierId: cashier.id,
-            cashierName: cashier.fullName,
-          }
-        }
+    const cardBankKeys = Object.keys(cardByBank)
+    let cardIdx = 0
+    const paymentRows: SalePaymentRow[] = lines.map(line => {
+      if (line.method === 'card') {
+        const bankKey = cardBankKeys[cardIdx] ?? null
+        const bankInfo = bankKey ? cardByBank[bankKey] : null
+        cardIdx += 1
         return {
           id: crypto.randomUUID(),
           saleId,
           method: line.method,
           amount: line.amount,
           mediator: line.mediator,
-          acquirerId: null,
-          acquirerName: null,
+          acquirerId: bankKey,
+          acquirerName: bankInfo?.acquirerName ?? null,
           cashierId: cashier.id,
           cashierName: cashier.fullName,
         }
-      })
-      await window.electron.db.saveSalePayments(paymentRows)
-
-      if (selectedCustomer && saleId && companyId) {
-        void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType, {
-          cashAmount: cashAmt,
-          cardAmount: cardAmt,
-          cardAcquirerId,
-          cardByBank,
-        }, printOrderNo)
       }
+      return {
+        id: crypto.randomUUID(),
+        saleId,
+        method: line.method,
+        amount: line.amount,
+        mediator: line.mediator,
+        acquirerId: null,
+        acquirerName: null,
+        cashierId: cashier.id,
+        cashierName: cashier.fullName,
+      }
+    })
+    await window.electron.db.saveSalePayments(paymentRows)
 
-      const terminalId = await window.electron.store.get('terminal_id') as string | null
-      const paymentLabel =
-        salePaymentType === 'mixed' ? 'Karma'
-          : salePaymentType === 'cash' ? 'Nakit' : 'Kart'
-      const firstCardPayment = paymentRows.find(p => p.method === 'card')
-      const cashGiven = cashPayments.reduce(
-        (s, p) => s + Number(p.CashPayment?.GivenAmount ?? p.PaymentAmount ?? 0),
-        0,
-      )
-      const changeAmount = Math.max(0, parseFloat((cashGiven - actualCashAmt).toFixed(2)))
-
-      void printIfTemplate('satis', buildSaleReceiptData({
-        receiptNo,
-        orderNo: printOrderNo,
-        companyId,
-        cashier: { id: cashier.id, fullName: cashier.fullName },
-        cart,
-        paymentType: salePaymentType,
-        paymentLabel,
+    if (selectedCustomer && saleId && companyId) {
+      void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType, {
         cashAmount: cashAmt,
         cardAmount: cardAmt,
-        paidAmount: paidAmt,
-        docDiscountRate: docDiscountRate,
-        docDiscountAmount: docDiscountCalc,
-        customer: selectedCustomer,
-        terminalId: terminalId ?? '',
-        terminalName: terminalLabel,
-        terminalNumber: posSettings.terminalNumber,
-        workplace: {
-          name: posSettings.workplaceName,
-          address: posSettings.workplaceAddress,
-          phone: posSettings.workplacePhone,
-          city: posSettings.workplaceCity,
-          district: posSettings.workplaceDistrict,
-          taxOffice: posSettings.workplaceTaxOffice,
-          taxNo: posSettings.workplaceTaxNo,
-        },
-        planName: license?.planName ?? '',
-        changeAmount,
-        paymentLines: paymentRows,
-        firstCardAcquirerName: firstCardPayment?.acquirerName ?? '',
-      }))
+        cardAcquirerId,
+        cardByBank,
+      }, printOrderNo)
+    }
 
-      setPaymentMode(false)
-      setPaymentLines([])
-      setActiveMethod(null)
-      setPendingAmount('')
-      clearCart()
-      if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
-      setLastReceipt(printOrderNo)
-      searchRef.current?.focus()
+    const terminalId = await window.electron.store.get('terminal_id') as string | null
+    const paymentLabel =
+      salePaymentType === 'mixed' ? 'Karma'
+        : salePaymentType === 'cash' ? 'Nakit' : 'Kart'
+    const firstCardPayment = paymentRows.find(p => p.method === 'card')
+    const cashGiven = cashPayments.reduce(
+      (s, p) => s + Number(p.CashPayment?.GivenAmount ?? p.PaymentAmount ?? 0),
+      0,
+    )
+    const changeAmount = Math.max(0, parseFloat((cashGiven - actualCashAmt).toFixed(2)))
+
+    void printIfTemplate('satis', buildSaleReceiptData({
+      receiptNo,
+      orderNo: printOrderNo,
+      companyId,
+      cashier: { id: cashier.id, fullName: cashier.fullName },
+      cart,
+      paymentType: salePaymentType,
+      paymentLabel,
+      cashAmount: cashAmt,
+      cardAmount: cardAmt,
+      paidAmount: paidAmt,
+      docDiscountRate: docDiscountRate,
+      docDiscountAmount: docDiscountCalc,
+      customer: selectedCustomer,
+      terminalId: terminalId ?? '',
+      terminalName: terminalLabel,
+      terminalNumber: posSettings.terminalNumber,
+      workplace: {
+        name: posSettings.workplaceName,
+        address: posSettings.workplaceAddress,
+        phone: posSettings.workplacePhone,
+        city: posSettings.workplaceCity,
+        district: posSettings.workplaceDistrict,
+        taxOffice: posSettings.workplaceTaxOffice,
+        taxNo: posSettings.workplaceTaxNo,
+      },
+      planName: license?.planName ?? '',
+      changeAmount,
+      paymentLines: paymentRows,
+      firstCardAcquirerName: firstCardPayment?.acquirerName ?? '',
+    }))
+
+    setPaymentMode(false)
+    setPaymentLines([])
+    setActiveMethod(null)
+    setPendingAmount('')
+    clearCart()
+    if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
+    setLastReceipt(printOrderNo)
+    searchRef.current?.focus()
+  }
+
+  async function completeSale(forcedLines?: PaymentLine[]) {
+    const lines = forcedLines ?? paymentLines
+    if (!cart.length || lines.length === 0) return
+
+    const isKarma = lines.length > 1
+    console.log('[completeSale] paymentLines:', JSON.stringify(lines), 'isKarma:', isKarma)
+
+    if (pavoSettings && isKarma) {
+      await completeSaleKarma(lines)
+    } else {
+      await completeSaleSingle(lines)
+    }
+  }
+
+  async function completeSaleSingle(lines: PaymentLine[]) {
+    setSaving(true)
+    setPavoError(null)
+    let deviceResult: PaymentDeviceResult | undefined
+
+    try {
+      const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
+      const cashAmt = lines
+        .filter(l => l.method === 'cash')
+        .reduce((s, l) => s + l.amount, 0)
+      const cardAmt = lines
+        .filter(l => l.method !== 'cash')
+        .reduce((s, l) => s + l.amount, 0)
+      const nonCashTotal = lines
+        .filter(l => l.method !== 'cash')
+        .reduce((s, l) => s + l.amount, 0)
+      let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
+      const orderNo = currentOrderNo
+        ?? nextOrderNo(posSettings.terminalNumber)
+      const pavoPaymentsFinal = lines.map(l => {
+        if (l.method === 'cash') {
+          const cashPart = Math.min(l.amount, cashRemaining)
+          cashRemaining = Math.max(0, cashRemaining - cashPart)
+          return { Mediator: l.mediator, Amount: cashPart, CurrencyCode: 'TRY', ExchangeRate: 1 }
+        }
+        return { Mediator: l.mediator, Amount: l.amount, CurrencyCode: 'TRY', ExchangeRate: 1 }
+      }).filter(p => p.Amount > 0)
+
+      if (pavoSettings) {
+        if (cardAmt > 0) setPavoLoading(true)
+
+        try {
+          const round2 = (n: number) => parseFloat(n.toFixed(2))
+          const salePriceEffect = docDiscountCalc > 0
+            ? {
+              Type: 2,
+              Rate: docDiscountRate > 0 ? round2(docDiscountRate) : 0,
+              Amount: docDiscountRate > 0 ? 0 : round2(docDiscountCalc),
+            }
+            : undefined
+          const pavoItems = cart.map(c => {
+            const brut = round2(c.price * c.quantity)
+            const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
+            return {
+              name: c.name,
+              unitName: c.unit ?? 'Adet',
+              vatRate: c.vatRate,
+              quantity: c.quantity,
+              unitPrice: c.price,
+              grossPrice: brut,
+              totalPrice: round2(c.netTotal),
+              priceEffect: hasLineDiscount
+                ? {
+                    Type: 1,
+                    Rate: c.discountRate > 0 ? round2(c.discountRate) : 0,
+                    Amount: c.discountRate > 0 ? null : round2(c.discountAmount),
+                  }
+                : undefined,
+            }
+          })
+
+          const smsNorm = normalizeTrMobileForSms(smsPhone)
+
+          if (mailAddr.trim() && !isValidNotifyEmail(mailAddr)) {
+            showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya adresi temizleyin.')
+            return
+          }
+
+          const seq = await window.electron.db.nextPavoSequence()
+          deviceResult = await pavoCompleteSale(
+            pavoSettings,
+            seq,
+            orderNo,
+            round2(araToplamBrut),
+            grandTotal,
+            pavoItems,
+            pavoPaymentsFinal,
+            salePriceEffect,
+            selectedCustomer,
+            {
+              sendSms: smsNorm.length === SMS_MOBILE_LEN,
+              smsPhone: smsNorm || '',
+              sendEmail: isValidNotifyEmail(mailAddr),
+              mailAddr: mailAddr.trim(),
+            },
+          )
+
+          if (!deviceResult.success) {
+            showError('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
+            return
+          }
+        } catch (e) {
+          showError('Pavo Bağlantı Hatası', String(e))
+          return
+        } finally {
+          setPavoLoading(false)
+        }
+      }
+
+      await finalizeSaleToSQLite({
+        lines,
+        orderNo,
+        deviceResult,
+        cashAmt,
+        cardAmt,
+        paidAmt,
+      })
     } catch (e) {
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function completeSaleKarma(lines: PaymentLine[]) {
+    setSaving(true)
+    setPavoLoading(true)
+    setPavoError(null)
+
+    const round2 = (n: number) => parseFloat(n.toFixed(2))
+    const cashAmt = lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0)
+    const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
+    const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
+    const orderNo = currentOrderNo ?? nextOrderNo(posSettings.terminalNumber)
+    const smsNorm = normalizeTrMobileForSms(smsPhone)
+
+    const pavoItems = cart.map(c => {
+      const brut = round2(c.price * c.quantity)
+      const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
+      return {
+        name: c.name,
+        unitName: c.unit ?? 'Adet',
+        vatRate: c.vatRate,
+        quantity: c.quantity,
+        unitPrice: c.price,
+        grossPrice: brut,
+        totalPrice: round2(c.netTotal),
+        priceEffect: hasLineDiscount ? {
+          Type: 1,
+          Rate: c.discountRate > 0 ? round2(c.discountRate) : 0,
+          Amount: c.discountRate > 0 ? null : round2(c.discountAmount),
+        } : undefined,
+      }
+    })
+
+    const salePriceEffect = docDiscountCalc > 0 ? {
+      Type: 2,
+      Rate: docDiscountRate > 0 ? round2(docDiscountRate) : 0,
+      Amount: docDiscountRate > 0 ? 0 : round2(docDiscountCalc),
+    } : undefined
+
+    if (mailAddr.trim() && !isValidNotifyEmail(mailAddr)) {
+      showError('E-posta bildirimi', 'Geçerli bir e-posta girin veya adresi temizleyin.')
+      setSaving(false)
+      setPavoLoading(false)
+      return
+    }
+
+    const notifyOpts = {
+      sendSms: smsNorm.length === SMS_MOBILE_LEN,
+      smsPhone: smsNorm || '',
+      sendEmail: isValidNotifyEmail(mailAddr),
+      mailAddr: mailAddr.trim(),
+    }
+
+    let pavoSaleId: number | null = null
+
+    try {
+      const startSeq = await window.electron.db.nextPavoSequence()
+      const startRes = await pavoStartSaleWithItems(
+        pavoSettings!,
+        startSeq,
+        orderNo,
+        round2(araToplamBrut),
+        grandTotal,
+        pavoItems,
+        salePriceEffect,
+        selectedCustomer,
+        notifyOpts,
+      )
+
+      if (!startRes.success || !startRes.saleId) {
+        showError('Pavo Hatası', startRes.message ?? 'Sepet gönderilemedi')
+        return
+      }
+
+      pavoSaleId = startRes.saleId
+
+      // Nakit önce, kart sonra; para üstü nakit satırından düşülür
+      const orderedLines = [
+        ...lines.filter(l => l.method === 'cash'),
+        ...lines.filter(l => l.method !== 'cash'),
+      ]
+      const nonCashTotal = orderedLines
+        .filter(l => l.method !== 'cash')
+        .reduce((s, l) => s + l.amount, 0)
+      let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
+
+      let lastAddResult: Awaited<ReturnType<typeof pavoAddPayment>> | null = null
+
+      for (const line of orderedLines) {
+        if (line.method !== 'cash') setPavoLoading(true)
+
+        let payAmount = round2(line.amount)
+        if (line.method === 'cash') {
+          payAmount = round2(Math.min(line.amount, cashRemaining))
+          cashRemaining = Math.max(0, cashRemaining - payAmount)
+        }
+        if (payAmount <= 0) continue
+
+        const addSeq = await window.electron.db.nextPavoSequence()
+        const addRes = await pavoAddPayment(
+          pavoSettings!,
+          addSeq,
+          pavoSaleId,
+          { mediator: line.mediator, amount: payAmount },
+        )
+
+        if (!addRes.success) {
+          await handlePavoRecovery(pavoSaleId, orderNo)
+          showError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi')
+          return
+        }
+
+        lastAddResult = addRes
+      }
+
+      if (lastAddResult && !lastAddResult.finalized) {
+        const finalSeq = await window.electron.db.nextPavoSequence()
+        const finalRes = await pavoFinalizeSale(pavoSettings!, finalSeq, pavoSaleId)
+        if (!finalRes.success) {
+          await handlePavoRecovery(pavoSaleId, orderNo)
+          showError('Finalize Hatası', finalRes.message ?? 'Satış kapatılamadı')
+          return
+        }
+      }
+
+      const resultSeq = await window.electron.db.nextPavoSequence()
+      const saleResult = await pavoGetSaleResult(pavoSettings!, resultSeq, orderNo)
+
+      if (saleResult.status !== 'completed') {
+        await handlePavoRecovery(pavoSaleId, orderNo)
+        showError('Satış Tamamlanamadı', saleResult.message ?? 'Bilinmeyen durum')
+        return
+      }
+
+      const raw = (saleResult.data ?? {}) as Record<string, unknown>
+      const deviceResult: PaymentDeviceResult = parsePavoResult(
+        raw.Data != null || raw.HasError != null
+          ? raw
+          : { HasError: false, Data: raw },
+      )
+
+      await finalizeSaleToSQLite({
+        lines,
+        orderNo,
+        deviceResult,
+        cashAmt,
+        cardAmt,
+        paidAmt,
+      })
+    } catch (e) {
+      if (pavoSaleId) await handlePavoRecovery(pavoSaleId, orderNo)
+      showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
+    } finally {
+      setSaving(false)
+      setPavoLoading(false)
     }
   }
 

@@ -53,6 +53,7 @@ export interface PavoSaleItem {
 }
 
 const TAX_GROUP: Record<number, string> = {
+  0: 'KDV0',
   1: 'KDV1',
   8: 'KDV8',
   10: 'KDV10',
@@ -62,6 +63,46 @@ const TAX_GROUP: Record<number, string> = {
 
 function taxGroupCode(vatRate: number): string {
   return TAX_GROUP[vatRate] ?? `KDV${vatRate}`
+}
+
+function buildCustomerParty(
+  customer?: CustomerRow | null,
+  notify?: PavoSaleNotifyOptions | null,
+): Record<string, unknown> | undefined {
+  if (!customer) return undefined
+  const parts = (customer.name ?? '').split(' ')
+  const partyMail = (() => {
+    const m = String(notify?.mailAddr ?? '').trim()
+    if (notify?.sendEmail && isValidNotificationEmail(m)) return m
+    return String(customer.email ?? '').trim()
+  })()
+  return {
+    CustomerType:  customer.isPerson ? 1 : 2,
+    FirstName:     customer.isPerson ? (parts[0] ?? '') : '',
+    MiddleName:    '',
+    FamilyName:    customer.isPerson ? parts.slice(1).join(' ') : '',
+    CompanyName:   customer.isPerson ? '' : (customer.name ?? ''),
+    TaxOfficeCode: '',
+    TaxNumber:     customer.taxNo  ?? '',
+    Phone:         customer.phone  ?? '',
+    EMail:         partyMail,
+    Country:       'Türkiye',
+    City:          customer.city     ?? '',
+    District:      customer.district ?? '',
+    Neighborhood:  '',
+    Address:       customer.address  ?? '',
+  }
+}
+
+function buildNotifyPhone(notify?: PavoSaleNotifyOptions | null): string {
+  const raw = String(notify?.smsPhone ?? '')
+  const norm = normalizeTrMobilePavo(raw)
+  return Boolean(notify?.sendSms) && norm.length === 10 ? norm : ''
+}
+
+function buildNotifyMail(notify?: PavoSaleNotifyOptions | null): string {
+  const m = String(notify?.mailAddr ?? '').trim()
+  return Boolean(notify?.sendEmail) && isValidNotificationEmail(m) ? m : ''
 }
 
 /** Fiş altına OrderNo barkodu — Pavo BottomPrintableItems */
@@ -197,31 +238,7 @@ export async function pavoCompleteSale(
   customer?: CustomerRow | null,
   notify?: PavoSaleNotifyOptions | null,
 ): Promise<PaymentDeviceResult> {
-  let customerParty: Record<string, unknown> | undefined
-  if (customer) {
-    const parts = (customer.name ?? '').split(' ')
-    const partyMail = (() => {
-      const m = String(notify?.mailAddr ?? '').trim()
-      if (notify?.sendEmail && isValidNotificationEmail(m)) return m
-      return String(customer.email ?? '').trim()
-    })()
-    customerParty = {
-      CustomerType: customer.isPerson ? 1 : 2,
-      FirstName:    customer.isPerson ? (parts[0] ?? '') : '',
-      MiddleName:   '',
-      FamilyName:   customer.isPerson ? parts.slice(1).join(' ') : '',
-      CompanyName:  customer.isPerson ? '' : (customer.name ?? ''),
-      TaxOfficeCode: '',
-      TaxNumber:    customer.taxNo ?? '',
-      Phone:        customer.phone ?? '',
-      EMail:        partyMail,
-      Country:      'Türkiye',
-      City:         customer.city ?? '',
-      District:     customer.district ?? '',
-      Neighborhood: '',
-      Address:      customer.address ?? '',
-    }
-  }
+  const customerParty = buildCustomerParty(customer, notify)
 
   const saleItems = await Promise.all(items.map(async i => {
     const unitCode = await window.electron.db.getUnitPavoCode(i.unitName ?? 'Adet')
@@ -244,11 +261,8 @@ export async function pavoCompleteSale(
     : undefined
   const priceEffect = explicitPriceEffect ?? computedPriceEffect
 
-  const phoneNorm = normalizeTrMobilePavo(String(notify?.smsPhone ?? ''))
-  const sendPhoneNotification = Boolean(notify?.sendSms) && phoneNorm.length === 10
-
-  const mailTrim = String(notify?.mailAddr ?? '').trim()
-  const sendEmailNotification = Boolean(notify?.sendEmail) && isValidNotificationEmail(mailTrim)
+  const phoneNorm = buildNotifyPhone(notify)
+  const mailTrim = buildNotifyMail(notify)
 
   const body = {
     TransactionHandle: transactionHandle(settings, seq),
@@ -261,10 +275,10 @@ export async function pavoCompleteSale(
       TotalPrice: amount,
       CurrencyCode: 'TRY',
       ExchangeRate: 1,
-      SendPhoneNotification: sendPhoneNotification,
-      ...(sendPhoneNotification ? { NotificationPhone: phoneNorm } : {}),
-      SendEMailNotification: sendEmailNotification,
-      ...(sendEmailNotification ? { NotificationEMail: mailTrim } : {}),
+      SendPhoneNotification: Boolean(phoneNorm),
+      ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
+      SendEMailNotification: Boolean(mailTrim),
+      ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
       ShowCreditCardMenu: false,
       SelectedSlots: ['rf', 'icc', 'manual'],
       AllowDismissCardRead: false,
@@ -293,6 +307,275 @@ export async function pavoCompleteSale(
     return parsePavoResult(data)
   } catch (e) {
     return { success: false, provider: 'pavo', message: String(e), raw: {} }
+  }
+}
+
+export async function pavoStartSaleWithItems(
+  settings: PavoSettings,
+  seq: number,
+  orderNo: string,
+  grossAmount: number,
+  amount: number,
+  items: PavoSaleItem[],
+  explicitPriceEffect?: {
+    Type: number
+    Rate: number
+    Amount: number
+  } | null,
+  customer?: CustomerRow | null,
+  notify?: PavoSaleNotifyOptions | null,
+): Promise<{ success: boolean; message?: string; saleId?: number; data?: unknown }> {
+  try {
+    const saleItems = await Promise.all(items.map(async i => {
+      const unitCode = await window.electron.db.getUnitPavoCode(i.unitName ?? 'Adet')
+      return {
+        Name:             i.name,
+        IsGeneric:        false,
+        UnitCode:         unitCode,
+        TaxGroupCode:     taxGroupCode(i.vatRate),
+        ItemQuantity:     i.quantity,
+        UnitPriceAmount:  i.unitPrice,
+        GrossPriceAmount: i.grossPrice,
+        TotalPriceAmount: i.totalPrice,
+        ...(i.priceEffect ? { PriceEffect: i.priceEffect } : {}),
+      }
+    }))
+
+    const itemsTotal = saleItems.reduce((sum, item) => sum + Number(item.TotalPriceAmount ?? 0), 0)
+    const priceEffectAmount = Math.max(0, parseFloat((itemsTotal - amount).toFixed(2)))
+    const computedPriceEffect = priceEffectAmount > 0
+      ? { Type: 2, Rate: 0, Amount: priceEffectAmount }
+      : undefined
+    const priceEffect = explicitPriceEffect ?? computedPriceEffect
+
+    const customerParty = buildCustomerParty(customer, notify)
+    const phoneNorm     = buildNotifyPhone(notify)
+    const mailTrim      = buildNotifyMail(notify)
+
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        RefererApp:            'BTPOS',
+        RefererAppVersion:     '1.0.0',
+        OrderNo:               orderNo,
+        MainDocumentType:      1,
+        GrossPrice:            grossAmount,
+        TotalPrice:            amount,
+        CurrencyCode:          'TRY',
+        ExchangeRate:          1,
+        SendPhoneNotification: Boolean(phoneNorm),
+        ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
+        SendEMailNotification: Boolean(mailTrim),
+        ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
+        SkipAmountCash:        true,
+        AllowDismissCardRead:  false,
+        CardReadTimeout:       settings.cardReadTimeout,
+        ...(priceEffect ? { PriceEffect: priceEffect } : {}),
+        AddedSaleItems:        saleItems,
+        ReceiptInformation: {
+          ReceiptWidth:             settings.printWidth,
+          PrintCustomerReceipt:     true,
+          PrintCustomerReceiptCopy: false,
+          PrintMerchantReceipt:     true,
+        },
+        BottomPrintableItems: buildOrderNoBottomPrintItems(orderNo, settings.printWidth),
+        ...(customerParty ? { CustomerParty: customerParty } : {}),
+      },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/StartSaleWithItems`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Sepet oluşturulamadı') }
+    }
+
+    const d = data.Data as Record<string, unknown> | undefined
+    const saleId = Number(d?.SaleId ?? d?.Id ?? 0)
+
+    return { success: true, saleId, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoAddPayment(
+  settings: PavoSettings,
+  seq: number,
+  saleId: number,
+  payment: {
+    mediator: number
+    amount: number
+    currencyCode?: string
+  },
+): Promise<{
+  success: boolean
+  message?: string
+  remainingPaymentAmount?: number
+  finalized?: boolean
+  data?: unknown
+}> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        SaleId: saleId,
+        AddedPayments: [{
+          Mediator:     payment.mediator,
+          Amount:       payment.amount,
+          CurrencyCode: payment.currencyCode ?? 'TRY',
+          ExchangeRate: 1,
+        }],
+        SkipAmountCash: true,
+        AllowDismissCardRead: false,
+        CardReadTimeout: settings.cardReadTimeout,
+      },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AddPayment`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Ödeme eklenemedi') }
+    }
+
+    const d = data.Data as Record<string, unknown> | undefined
+    const remaining = Number(d?.RemainingPaymentAmount ?? 0)
+    const finalized = remaining <= 0
+
+    return { success: true, remainingPaymentAmount: remaining, finalized, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoFinalizeSale(
+  settings: PavoSettings,
+  seq: number,
+  saleId: number,
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: { SaleId: saleId },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/FinalizeSale`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Satış kapatılamadı') }
+    }
+
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoCheckPendingSale(
+  settings: PavoSettings,
+  seq: number,
+  orderNo: string,
+): Promise<{
+  success: boolean
+  message?: string
+  hasPending?: boolean
+  saleId?: number
+  remainingPaymentAmount?: number
+  data?: unknown
+}> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: { OrderNo: orderNo },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/CheckPendingSale`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      const msg = pavoErrorMessage(data, 'Kontrol başarısız')
+      const notFound = msg.toLowerCase().includes('bulunamadı') || Number(data.ErrorCode) === 404
+      return { success: true, hasPending: false, message: notFound ? 'Satış bulunamadı' : msg }
+    }
+
+    const d = data.Data as Record<string, unknown> | undefined
+    return {
+      success: true,
+      hasPending: true,
+      saleId: Number(d?.SaleId ?? d?.Id ?? 0),
+      remainingPaymentAmount: Number(d?.RemainingPaymentAmount ?? 0),
+      data,
+    }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoAbandonSuspendedSale(
+  settings: PavoSettings,
+  seq: number,
+  saleId: number,
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: { SaleId: saleId },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AbandonSuspendedSale`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'İptal başarısız') }
+    }
+
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoGetSaleResult(
+  settings: PavoSettings,
+  seq: number,
+  orderNo: string,
+): Promise<{
+  success: boolean
+  message?: string
+  status?: 'completed' | 'pending' | 'cancelled' | 'failed'
+  saleId?: number
+  data?: unknown
+}> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: { OrderNo: orderNo },
+    }
+
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/GetSaleResult`, body)
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Sonuç alınamadı') }
+    }
+
+    const d = data.Data as Record<string, unknown> | undefined
+    const statusId = Number(d?.StatusId ?? d?.SaleStatusId ?? 0)
+    const status: 'completed' | 'pending' | 'cancelled' | 'failed' =
+      statusId === 2 ? 'completed' :
+      statusId === 3 ? 'cancelled' :
+      statusId === 0 ? 'pending'   : 'failed'
+
+    return {
+      success: true,
+      status,
+      saleId: Number(d?.SaleId ?? d?.Id ?? 0),
+      data,
+    }
+  } catch (e) {
+    return { success: false, message: String(e) }
   }
 }
 
