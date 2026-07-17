@@ -177,6 +177,7 @@ export const api = {
       customerDisplay:     d.customer_display == null ? true : Boolean(d.customer_display),
       printBehavior:       parseApiPrintBehavior(d.print_behavior),
       defaultTemplateIds:  parseApiDefaultTemplateIds(d.default_template_ids),
+      allowExitWithHeldDocs: Boolean(d.allow_exit_with_held_docs ?? true),
       terminalNumber:    d.terminal_number != null ? String(d.terminal_number) : null,
       workplaceName:      d.workplace_name ?? null,
       workplaceAddress:   d.workplace_address ?? null,

@@ -333,6 +333,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'print_behavior', 'print_behavior TEXT DEFAULT NULL')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
   addColumnIfMissing(sqlite, 'pos_settings_temp', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_exit_with_held_docs', 'allow_exit_with_held_docs INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'allow_exit_with_held_docs', 'allow_exit_with_held_docs INTEGER DEFAULT 1')
   const workplaceCols = [
     'terminal_number', 'workplace_name', 'workplace_address',
     'workplace_phone', 'workplace_city', 'workplace_district',

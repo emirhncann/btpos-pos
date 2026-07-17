@@ -14,6 +14,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
   app: {
     version: () => electron.ipcRenderer.invoke("app:version"),
     restart: () => electron.ipcRenderer.invoke("app:restart"),
+    requestExit: () => electron.ipcRenderer.invoke("app:requestExit"),
     openKeyboard: () => electron.ipcRenderer.invoke("app:openKeyboard"),
     selectFolder: () => electron.ipcRenderer.invoke("app:selectFolder"),
     reinitDb: (p) => electron.ipcRenderer.invoke("app:reinitDb", p)

@@ -718,6 +718,7 @@ export interface PosSettingsRow {
   customerDisplay?:     boolean
   printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
   defaultTemplateIds?:  Record<string, string>
+  allowExitWithHeldDocs?: boolean
   terminalNumber?:      string | null
   workplaceName?:       string | null
   workplaceAddress?:    string | null
@@ -919,6 +920,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
     defaultTemplateIds: settings.defaultTemplateIds
       ? JSON.stringify(settings.defaultTemplateIds)
       : null,
+    allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
     terminalNumber:      settings.terminalNumber      ?? null,
     workplaceName:       settings.workplaceName       ?? null,
     workplaceAddress:    settings.workplaceAddress    ?? null,
@@ -960,6 +962,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
       defaultTemplateIds: settings.defaultTemplateIds
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
+      allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
       terminalNumber:      settings.terminalNumber      ?? null,
       workplaceName:       settings.workplaceName       ?? null,
       workplaceAddress:    settings.workplaceAddress    ?? null,
@@ -989,6 +992,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        allow_exit_with_held_docs,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
@@ -998,6 +1002,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
         @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds,
+        @allowExitWithHeldDocs,
         @terminalNumber, @workplaceName, @workplaceAddress, @workplacePhone, @workplaceCity, @workplaceDistrict, @workplaceTaxOffice, @workplaceTaxNo
       )
     `).run({
@@ -1033,6 +1038,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       defaultTemplateIds: settings.defaultTemplateIds
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
+      allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false ? 1 : 0,
       terminalNumber:     isLocal ? (settings.terminalNumber ?? null) : null,
       workplaceName:      isLocal ? (settings.workplaceName ?? null) : null,
       workplaceAddress:   isLocal ? (settings.workplaceAddress ?? null) : null,
@@ -1059,6 +1065,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        allow_exit_with_held_docs,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       )
       SELECT
@@ -1069,6 +1076,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
+        allow_exit_with_held_docs,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
@@ -1163,6 +1171,7 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     customerDisplay:      row?.customerDisplay ?? true,
     printBehavior:        parsePrintBehaviorField(row?.printBehavior),
     defaultTemplateIds: parseDefaultTemplateIdsField(row?.defaultTemplateIds),
+    allowExitWithHeldDocs: row?.allowExitWithHeldDocs ?? true,
     terminalNumber:    wp?.terminalNumber     ?? null,
     workplaceName:      wp?.workplaceName       ?? null,
     workplaceAddress:   wp?.workplaceAddress    ?? null,

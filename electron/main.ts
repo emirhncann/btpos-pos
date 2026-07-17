@@ -270,6 +270,66 @@ function mergeCartSettings(raw: unknown): CartSettingsMain {
 let mainWindow: BrowserWindow | null = null
 let customerWindow: BrowserWindow | null = null
 let latestSecondScreenPayload: unknown = null
+let isAppQuitting = false
+
+type ExitCheckResult = { canExit: boolean; heldCount: number } | null
+
+async function runExitCheck(win: BrowserWindow): Promise<ExitCheckResult> {
+  return win.webContents.executeJavaScript(
+    'window.__btpos_exit_check?.()',
+  ).catch(() => null) as Promise<ExitCheckResult>
+}
+
+async function showExitBlockedDialog(win: BrowserWindow, heldCount: number): Promise<void> {
+  await dialog.showMessageBox(win, {
+    type: 'warning',
+    title: 'Çıkış Engellendi',
+    message: `${heldCount} bekleyen belgeniz var.`,
+    detail: 'Bekleyen belgeler tamamlanmadan çıkış yapılamaz.\nBelgeleri tamamlayın veya getirip iptal edin.',
+    buttons: ['Tamam'],
+    defaultId: 0,
+  })
+}
+
+function setupMainWindowExitGuard(win: BrowserWindow) {
+  win.on('close', (e) => {
+    if (isAppQuitting) return
+
+    e.preventDefault()
+    void (async () => {
+      const result = await runExitCheck(win)
+      if (result && !result.canExit) {
+        await showExitBlockedDialog(win, result.heldCount)
+        return
+      }
+      isAppQuitting = true
+      win.close()
+    })()
+  })
+
+  win.on('focus', () => {
+    if (!globalShortcut.isRegistered('Alt+F4')) {
+      globalShortcut.register('Alt+F4', () => {
+        void (async () => {
+          if (!mainWindow || mainWindow.isDestroyed()) return
+          const result = await runExitCheck(mainWindow)
+          if (result?.canExit === false) {
+            await showExitBlockedDialog(mainWindow, result.heldCount)
+            return
+          }
+          isAppQuitting = true
+          mainWindow.close()
+        })()
+      })
+    }
+  })
+
+  win.on('blur', () => {
+    if (globalShortcut.isRegistered('Alt+F4')) {
+      globalShortcut.unregister('Alt+F4')
+    }
+  })
+}
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
@@ -327,6 +387,8 @@ function createWindow() {
     mainWindow.focus()
     mainWindow.webContents.focus()
   })
+
+  setupMainWindowExitGuard(mainWindow)
 
   // F12 / Ctrl+Shift+I — before-input-event kiosk’ta globalShortcut’tan güvenilir
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -691,6 +753,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('app:restart', () => {
     app.relaunch()
     app.exit(0)
+  })
+
+  ipcMain.handle('app:requestExit', () => {
+    mainWindow?.close()
   })
 
   ipcMain.handle('window:isFullscreen',   () => mainWindow?.isFullScreen() ?? false)
@@ -1273,4 +1339,8 @@ app.on('window-all-closed', () => {
   }
   globalShortcut.unregisterAll()
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })

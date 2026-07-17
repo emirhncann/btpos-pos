@@ -610,6 +610,24 @@ export default function POSScreen({
   }, [companyId])
 
   useEffect(() => { loadHeld() }, [loadHeld])
+
+  useEffect(() => {
+    window.__btpos_exit_check = () => {
+      const allowExit = posSettings?.allowExitWithHeldDocs ?? true
+      if (allowExit) return { canExit: true, heldCount: 0 }
+
+      const count = heldDocs.length
+      if (count > 0) {
+        return { canExit: false, heldCount: count }
+      }
+      return { canExit: true, heldCount: 0 }
+    }
+
+    return () => {
+      delete window.__btpos_exit_check
+    }
+  }, [posSettings?.allowExitWithHeldDocs, heldDocs.length])
+
   useEffect(() => {
     const t = setInterval(() => {
       setClock(new Date().toLocaleTimeString('tr-TR', {

@@ -59,6 +59,7 @@ export default function App() {
     pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
+    allowExitWithHeldDocs: true,
     customerDisplay: true,
   })
   const [terminalSettings, setTerminalSettings] = useState<PosSettingsRow>({
@@ -78,6 +79,7 @@ export default function App() {
     pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
+    allowExitWithHeldDocs: true,
     customerDisplay: true,
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
@@ -108,6 +110,27 @@ export default function App() {
   const showPopupMessage = useCallback((text: string) => {
     setPopupMessage(text)
   }, [])
+
+  useEffect(() => {
+    if (state === 'pos' || state === 'cashier_login') return
+
+    window.__btpos_exit_check = async () => {
+      const settings = posSettings
+      const allowExit = settings?.allowExitWithHeldDocs ?? true
+      if (allowExit) return { canExit: true, heldCount: 0 }
+      if (!companyId) return { canExit: true, heldCount: 0 }
+
+      const docs = await window.electron.db.getHeldDocuments(companyId).catch(() => [])
+      if (docs.length > 0) {
+        return { canExit: false, heldCount: docs.length }
+      }
+      return { canExit: true, heldCount: 0 }
+    }
+
+    return () => {
+      delete window.__btpos_exit_check
+    }
+  }, [state, posSettings?.allowExitWithHeldDocs, companyId])
 
   const handleLogout = useCallback(() => {
     setCashier(null)

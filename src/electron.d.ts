@@ -58,6 +58,7 @@ declare global {
       app: {
         version:      () => Promise<string>
         restart:      () => Promise<void>
+        requestExit:  () => Promise<void>
         openKeyboard: () => Promise<void>
         selectFolder: () => Promise<string | null>
         reinitDb:     (path: string) => Promise<{ success: boolean; error?: string }>
@@ -633,6 +634,7 @@ declare global {
     customerDisplay?:     boolean
     printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
     defaultTemplateIds?:  Record<string, string>
+    allowExitWithHeldDocs?: boolean
     terminalNumber?:      string | null
     workplaceName?:       string | null
     workplaceAddress?:    string | null

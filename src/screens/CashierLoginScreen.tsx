@@ -37,6 +37,23 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
     codeRef.current?.focus()
   }, [])
 
+  useEffect(() => {
+    window.__btpos_exit_check = async () => {
+      const allowExit = posSettings?.allowExitWithHeldDocs ?? true
+      if (allowExit) return { canExit: true, heldCount: 0 }
+
+      const docs = await window.electron.db.getHeldDocuments(companyId).catch(() => [])
+      if (docs.length > 0) {
+        return { canExit: false, heldCount: docs.length }
+      }
+      return { canExit: true, heldCount: 0 }
+    }
+
+    return () => {
+      delete window.__btpos_exit_check
+    }
+  }, [companyId, posSettings?.allowExitWithHeldDocs])
+
   const loadingLabel = loginStage === 'auth'
     ? 'Giriş yapılıyor...'
     : loginStage === 'plu'
@@ -377,6 +394,29 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
           <style>{`@keyframes cashier-login-spin { to { transform: rotate(360deg) } }`}</style>
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => { void window.electron.app.requestExit() }}
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          left: 20,
+          padding: '8px 14px',
+          borderRadius: 8,
+          border: '1px solid #E5E7EB',
+          background: '#F9FAFB',
+          fontSize: 12,
+          color: '#6B7280',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span>⏻</span>
+        <span>Programı Kapat</span>
+      </button>
     </div>
   )
 }
