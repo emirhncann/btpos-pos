@@ -629,6 +629,16 @@ export default function POSScreen({
   }, [posSettings?.allowExitWithHeldDocs, heldDocs.length])
 
   useEffect(() => {
+    const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
+      showError(
+        'Çıkış Engellendi',
+        `${heldCount} bekleyen belgeniz var. Belgeleri tamamlayın veya getirip iptal edin.`,
+      )
+    })
+    return cleanup
+  }, [showError])
+
+  useEffect(() => {
     const t = setInterval(() => {
       setClock(new Date().toLocaleTimeString('tr-TR', {
         hour: '2-digit', minute: '2-digit', second: '2-digit',

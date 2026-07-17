@@ -280,15 +280,8 @@ async function runExitCheck(win: BrowserWindow): Promise<ExitCheckResult> {
   ).catch(() => null) as Promise<ExitCheckResult>
 }
 
-async function showExitBlockedDialog(win: BrowserWindow, heldCount: number): Promise<void> {
-  await dialog.showMessageBox(win, {
-    type: 'warning',
-    title: 'Çıkış Engellendi',
-    message: `${heldCount} bekleyen belgeniz var.`,
-    detail: 'Bekleyen belgeler tamamlanmadan çıkış yapılamaz.\nBelgeleri tamamlayın veya getirip iptal edin.',
-    buttons: ['Tamam'],
-    defaultId: 0,
-  })
+function notifyExitBlocked(win: BrowserWindow, heldCount: number): void {
+  win.webContents.send('app:exit-blocked', { heldCount })
 }
 
 function setupMainWindowExitGuard(win: BrowserWindow) {
@@ -299,7 +292,7 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
     void (async () => {
       const result = await runExitCheck(win)
       if (result && !result.canExit) {
-        await showExitBlockedDialog(win, result.heldCount)
+        notifyExitBlocked(win, result.heldCount)
         return
       }
       isAppQuitting = true
@@ -314,7 +307,7 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
           if (!mainWindow || mainWindow.isDestroyed()) return
           const result = await runExitCheck(mainWindow)
           if (result?.canExit === false) {
-            await showExitBlockedDialog(mainWindow, result.heldCount)
+            notifyExitBlocked(mainWindow, result.heldCount)
             return
           }
           isAppQuitting = true

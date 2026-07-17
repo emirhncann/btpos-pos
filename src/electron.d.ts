@@ -59,6 +59,7 @@ declare global {
         version:      () => Promise<string>
         restart:      () => Promise<void>
         requestExit:  () => Promise<void>
+        onExitBlocked: (cb: (data: { heldCount: number }) => void) => () => void
         openKeyboard: () => Promise<void>
         selectFolder: () => Promise<string | null>
         reinitDb:     (path: string) => Promise<{ success: boolean; error?: string }>

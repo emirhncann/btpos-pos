@@ -15,6 +15,13 @@ electron.contextBridge.exposeInMainWorld("electron", {
     version: () => electron.ipcRenderer.invoke("app:version"),
     restart: () => electron.ipcRenderer.invoke("app:restart"),
     requestExit: () => electron.ipcRenderer.invoke("app:requestExit"),
+    onExitBlocked: (cb) => {
+      const handler = (_, data) => cb(data);
+      electron.ipcRenderer.on("app:exit-blocked", handler);
+      return () => {
+        electron.ipcRenderer.removeListener("app:exit-blocked", handler);
+      };
+    },
     openKeyboard: () => electron.ipcRenderer.invoke("app:openKeyboard"),
     selectFolder: () => electron.ipcRenderer.invoke("app:selectFolder"),
     reinitDb: (p) => electron.ipcRenderer.invoke("app:reinitDb", p)

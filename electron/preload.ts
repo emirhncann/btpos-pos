@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electron', {
   store: {
@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld('electron', {
     version:      () => ipcRenderer.invoke('app:version'),
     restart:      () => ipcRenderer.invoke('app:restart'),
     requestExit:  () => ipcRenderer.invoke('app:requestExit'),
+    onExitBlocked: (cb: (data: { heldCount: number }) => void) => {
+      const handler = (_: IpcRendererEvent, data: { heldCount: number }) => cb(data)
+      ipcRenderer.on('app:exit-blocked', handler)
+      return () => { ipcRenderer.removeListener('app:exit-blocked', handler) }
+    },
     openKeyboard: () => ipcRenderer.invoke('app:openKeyboard'),
     selectFolder: () => ipcRenderer.invoke('app:selectFolder'),
     reinitDb:     (p: string) => ipcRenderer.invoke('app:reinitDb', p),

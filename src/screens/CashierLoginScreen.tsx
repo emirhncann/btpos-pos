@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import AppLogo from '../components/AppLogo'
+import AlertDialog from '../components/AlertDialog'
+import { useAlertDialog } from '../hooks/useAlertDialog'
 import { syncCashierPluOnLogin } from '../hooks/merkezCommandHandlers'
 
 interface Props {
@@ -27,6 +29,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
   const [loginStage, setLoginStage] = useState<LoginStage>('idle')
   const [showNumpad, setShowNumpad] = useState(false)
   const [numpadTarget, setNumpadTarget] = useState<'code' | 'password'>('password')
+  const { dialogProps, showError } = useAlertDialog()
 
   const barcodeBuffer   = useRef('')
   const barcodeTimer    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -53,6 +56,16 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
       delete window.__btpos_exit_check
     }
   }, [companyId, posSettings?.allowExitWithHeldDocs])
+
+  useEffect(() => {
+    const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
+      showError(
+        'Çıkış Engellendi',
+        `${heldCount} bekleyen belgeniz var. Belgeleri tamamlayın veya getirip iptal edin.`,
+      )
+    })
+    return cleanup
+  }, [showError])
 
   const loadingLabel = loginStage === 'auth'
     ? 'Giriş yapılıyor...'
@@ -414,9 +427,24 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
           gap: 6,
         }}
       >
-        <span>⏻</span>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M12 2v10" />
+          <path d="M7.5 7.5a7 7 0 1 0 9 0" />
+        </svg>
         <span>Programı Kapat</span>
       </button>
+
+      <AlertDialog {...dialogProps} />
     </div>
   )
 }

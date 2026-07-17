@@ -114,6 +114,16 @@ export default function DashboardScreen({
   }, [companyId, refreshCmdHistory, cmdPollTick])
 
   useEffect(() => {
+    const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
+      showError(
+        'Çıkış Engellendi',
+        `${heldCount} bekleyen belgeniz var. Belgeleri tamamlayın veya getirip iptal edin.`,
+      )
+    })
+    return cleanup
+  }, [showError])
+
+  useEffect(() => {
     if (!showSettings || settingsTab !== 'payment') return
     window.electron.db.getPaymentDeviceSettings('pavo')
       .then(device => {
