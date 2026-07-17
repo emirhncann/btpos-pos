@@ -105,6 +105,22 @@ function buildNotifyMail(notify?: PavoSaleNotifyOptions | null): string {
   return Boolean(notify?.sendEmail) && isValidNotificationEmail(m) ? m : ''
 }
 
+/** CompleteSale ile aynı cihaz UI bayrakları — puanlı satış / müşteri sorularını atla */
+function pavoDeviceUiFlags(settings: PavoSettings) {
+  return {
+    ShowCreditCardMenu: false,
+    SelectedSlots: ['rf', 'icc', 'manual'],
+    AllowDismissCardRead: false,
+    CardReadTimeout: settings.cardReadTimeout,
+    SkipAmountCash: true,
+    CancelPaymentLater: true,
+    AskCustomer: false,
+    ShowLoyalty: false,
+    SkipLoyalty: true,
+    SendResponseBeforePrint: false,
+  }
+}
+
 /** Fiş altına OrderNo barkodu — Pavo BottomPrintableItems */
 export function buildOrderNoBottomPrintItems(
   orderNo: string,
@@ -279,14 +295,7 @@ export async function pavoCompleteSale(
       ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
       SendEMailNotification: Boolean(mailTrim),
       ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
-      ShowCreditCardMenu: false,
-      SelectedSlots: ['rf', 'icc', 'manual'],
-      AllowDismissCardRead: false,
-      CardReadTimeout: settings.cardReadTimeout,
-      SkipAmountCash: true,
-      CancelPaymentLater: true,
-      AskCustomer: false,
-      SendResponseBeforePrint: false,
+      ...pavoDeviceUiFlags(settings),
       AddedSaleItems: saleItems,
       ...(priceEffect ? { PriceEffect: priceEffect } : {}),
       PaymentInformations: payments,
@@ -310,6 +319,19 @@ export async function pavoCompleteSale(
   }
 }
 
+function buildPavoSaleRef(ref: {
+  saleId?: number | null
+  saleNumber?: string | null
+  orderNo?: string | null
+}): Record<string, unknown> {
+  if (ref.saleId != null && Number(ref.saleId) > 0) return { SaleId: Number(ref.saleId) }
+  const saleNumber = String(ref.saleNumber ?? '').trim()
+  if (saleNumber) return { SaleNumber: saleNumber }
+  const orderNo = String(ref.orderNo ?? '').trim()
+  if (orderNo) return { OrderNo: orderNo }
+  return {}
+}
+
 export async function pavoStartSaleWithItems(
   settings: PavoSettings,
   seq: number,
@@ -324,7 +346,14 @@ export async function pavoStartSaleWithItems(
   } | null,
   customer?: CustomerRow | null,
   notify?: PavoSaleNotifyOptions | null,
-): Promise<{ success: boolean; message?: string; saleId?: number; data?: unknown }> {
+): Promise<{
+  success: boolean
+  message?: string
+  saleId?: number
+  saleNumber?: string
+  remainingPaymentAmount?: number
+  data?: unknown
+}> {
   try {
     const saleItems = await Promise.all(items.map(async i => {
       const unitCode = await window.electron.db.getUnitPavoCode(i.unitName ?? 'Adet')
@@ -367,9 +396,7 @@ export async function pavoStartSaleWithItems(
         ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
         SendEMailNotification: Boolean(mailTrim),
         ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
-        SkipAmountCash:        true,
-        AllowDismissCardRead:  false,
-        CardReadTimeout:       settings.cardReadTimeout,
+        ...pavoDeviceUiFlags(settings),
         ...(priceEffect ? { PriceEffect: priceEffect } : {}),
         AddedSaleItems:        saleItems,
         ReceiptInformation: {
@@ -383,7 +410,11 @@ export async function pavoStartSaleWithItems(
       },
     }
 
+    console.log('[StartSaleWithItems] body:', JSON.stringify(body, null, 2))
+
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/StartSaleWithItems`, body)
+
+    console.log('[StartSaleWithItems] response:', JSON.stringify(data, null, 2))
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -392,8 +423,15 @@ export async function pavoStartSaleWithItems(
 
     const d = data.Data as Record<string, unknown> | undefined
     const saleId = Number(d?.SaleId ?? d?.Id ?? 0)
+    const saleNumber = String(d?.SaleNumber ?? '').trim() || undefined
+    const remainingPaymentAmount = Number(d?.RemainingPaymentAmount ?? amount)
 
-    return { success: true, saleId, data }
+    // Offline/askı satışta Id: 0 gelebilir; SaleNumber yeterli referans
+    if (!(saleId > 0 || saleNumber)) {
+      return { success: false, message: 'Sepet oluşturuldu ama satış referansı alınamadı' }
+    }
+
+    return { success: true, saleId, saleNumber, remainingPaymentAmount, data }
   } catch (e) {
     return { success: false, message: String(e) }
   }
@@ -402,11 +440,19 @@ export async function pavoStartSaleWithItems(
 export async function pavoAddPayment(
   settings: PavoSettings,
   seq: number,
-  saleId: number,
+  saleRef: {
+    saleId?: number | null
+    saleNumber?: string | null
+    orderNo?: string | null
+  },
   payment: {
     mediator: number
     amount: number
     currencyCode?: string
+  },
+  saleTotals?: {
+    grossPrice: number
+    totalPrice: number
   },
 ): Promise<{
   success: boolean
@@ -416,23 +462,40 @@ export async function pavoAddPayment(
   data?: unknown
 }> {
   try {
+    const ref = buildPavoSaleRef(saleRef)
+    if (Object.keys(ref).length === 0) {
+      return { success: false, message: 'Ödeme için satış referansı yok' }
+    }
+
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
       Sale: {
-        SaleId: saleId,
-        AddedPayments: [{
+        ...ref,
+        ...(saleTotals ? {
+          GrossPrice: saleTotals.grossPrice,
+          TotalPrice: saleTotals.totalPrice,
+        } : {}),
+        PaymentInformations: [{
           Mediator:     payment.mediator,
           Amount:       payment.amount,
           CurrencyCode: payment.currencyCode ?? 'TRY',
           ExchangeRate: 1,
+          IsVoid:       false,
         }],
-        SkipAmountCash: true,
-        AllowDismissCardRead: false,
-        CardReadTimeout: settings.cardReadTimeout,
+        ...pavoDeviceUiFlags(settings),
+        ReceiptInformation: {
+          ReceiptImageEnabled: false,
+          ReceiptWidth: settings.printWidth,
+          PrintCustomerReceipt: true,
+          PrintCustomerReceiptCopy: false,
+          PrintMerchantReceipt: true,
+        },
       },
     }
 
+    console.log('[AddPayment] body:', JSON.stringify(body, null, 2))
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/AddPayment`, body)
+    console.log('[AddPayment] response:', JSON.stringify(data, null, 2))
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -452,12 +515,21 @@ export async function pavoAddPayment(
 export async function pavoFinalizeSale(
   settings: PavoSettings,
   seq: number,
-  saleId: number,
+  saleRef: {
+    saleId?: number | null
+    saleNumber?: string | null
+    orderNo?: string | null
+  },
 ): Promise<{ success: boolean; message?: string; data?: unknown }> {
   try {
+    const ref = buildPavoSaleRef(saleRef)
+    if (Object.keys(ref).length === 0) {
+      return { success: false, message: 'Finalize için satış referansı yok' }
+    }
+
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
-      Sale: { SaleId: saleId },
+      Sale: ref,
     }
 
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/FinalizeSale`, body)
@@ -482,6 +554,7 @@ export async function pavoCheckPendingSale(
   message?: string
   hasPending?: boolean
   saleId?: number
+  saleNumber?: string
   remainingPaymentAmount?: number
   data?: unknown
 }> {
@@ -505,6 +578,7 @@ export async function pavoCheckPendingSale(
       success: true,
       hasPending: true,
       saleId: Number(d?.SaleId ?? d?.Id ?? 0),
+      saleNumber: String(d?.SaleNumber ?? '').trim() || undefined,
       remainingPaymentAmount: Number(d?.RemainingPaymentAmount ?? 0),
       data,
     }
@@ -516,12 +590,21 @@ export async function pavoCheckPendingSale(
 export async function pavoAbandonSuspendedSale(
   settings: PavoSettings,
   seq: number,
-  saleId: number,
+  saleRef: {
+    saleId?: number | null
+    saleNumber?: string | null
+    orderNo?: string | null
+  },
 ): Promise<{ success: boolean; message?: string; data?: unknown }> {
   try {
+    const ref = buildPavoSaleRef(saleRef)
+    if (Object.keys(ref).length === 0) {
+      return { success: false, message: 'İptal için satış referansı yok' }
+    }
+
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
-      Sale: { SaleId: saleId },
+      Sale: ref,
     }
 
     const data = await pavoRequest(`${pavoBaseUrl(settings)}/AbandonSuspendedSale`, body)
@@ -564,9 +647,9 @@ export async function pavoGetSaleResult(
     const d = data.Data as Record<string, unknown> | undefined
     const statusId = Number(d?.StatusId ?? d?.SaleStatusId ?? 0)
     const status: 'completed' | 'pending' | 'cancelled' | 'failed' =
-      statusId === 2 ? 'completed' :
-      statusId === 3 ? 'cancelled' :
-      statusId === 0 ? 'pending'   : 'failed'
+      statusId === 4 ? 'completed' :
+      statusId === 5 ? 'cancelled' :
+      statusId === 23 ? 'pending'  : 'failed'
 
     return {
       success: true,

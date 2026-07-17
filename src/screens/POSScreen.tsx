@@ -1471,15 +1471,22 @@ export default function POSScreen({
     void window.electron.secondScreen.update(payload).catch(() => {})
   }, [cart, customerDisplay, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
 
-  async function handlePavoRecovery(_saleId: number, orderNo: string) {
+  async function handlePavoRecovery(
+    saleRef: { saleId?: number | null; saleNumber?: string | null },
+    orderNo: string,
+  ) {
     if (!pavoSettings) return
     try {
       const seq = await window.electron.db.nextPavoSequence()
       const pending = await pavoCheckPendingSale(pavoSettings, seq, orderNo)
 
-      if (pending.hasPending && pending.saleId) {
+      if (pending.hasPending) {
         const abanSeq = await window.electron.db.nextPavoSequence()
-        await pavoAbandonSuspendedSale(pavoSettings, abanSeq, pending.saleId)
+        await pavoAbandonSuspendedSale(pavoSettings, abanSeq, {
+          saleId: pending.saleId && pending.saleId > 0 ? pending.saleId : saleRef.saleId,
+          saleNumber: pending.saleNumber ?? saleRef.saleNumber,
+          orderNo,
+        })
         console.log('[pavo] Recovery: AbandonSuspendedSale tamamlandı')
       }
     } catch (e) {
@@ -1842,6 +1849,7 @@ export default function POSScreen({
     }
 
     let pavoSaleId: number | null = null
+    let pavoSaleNumber: string | null = null
 
     try {
       const startSeq = await window.electron.db.nextPavoSequence()
@@ -1857,12 +1865,15 @@ export default function POSScreen({
         notifyOpts,
       )
 
-      if (!startRes.success || !startRes.saleId) {
+      // Offline/askı satışta Id:0 olabilir; SaleNumber yeterli
+      if (!startRes.success || (!(startRes.saleId && startRes.saleId > 0) && !startRes.saleNumber)) {
         showError('Pavo Hatası', startRes.message ?? 'Sepet gönderilemedi')
         return
       }
 
-      pavoSaleId = startRes.saleId
+      pavoSaleId = startRes.saleId && startRes.saleId > 0 ? startRes.saleId : null
+      pavoSaleNumber = startRes.saleNumber ?? null
+      const saleRef = { saleId: pavoSaleId, saleNumber: pavoSaleNumber, orderNo }
 
       // Nakit önce, kart sonra; para üstü nakit satırından düşülür
       const orderedLines = [
@@ -1890,12 +1901,13 @@ export default function POSScreen({
         const addRes = await pavoAddPayment(
           pavoSettings!,
           addSeq,
-          pavoSaleId,
+          saleRef,
           { mediator: line.mediator, amount: payAmount },
+          { grossPrice: round2(araToplamBrut), totalPrice: grandTotal },
         )
 
         if (!addRes.success) {
-          await handlePavoRecovery(pavoSaleId, orderNo)
+          await handlePavoRecovery(saleRef, orderNo)
           showError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi')
           return
         }
@@ -1905,19 +1917,42 @@ export default function POSScreen({
 
       if (lastAddResult && !lastAddResult.finalized) {
         const finalSeq = await window.electron.db.nextPavoSequence()
-        const finalRes = await pavoFinalizeSale(pavoSettings!, finalSeq, pavoSaleId)
+        const finalRes = await pavoFinalizeSale(pavoSettings!, finalSeq, saleRef)
         if (!finalRes.success) {
-          await handlePavoRecovery(pavoSaleId, orderNo)
+          await handlePavoRecovery(saleRef, orderNo)
           showError('Finalize Hatası', finalRes.message ?? 'Satış kapatılamadı')
           return
         }
       }
 
+      const lastData = lastAddResult?.data as Record<string, unknown> | undefined
+      const lastInner = (lastData?.Data as Record<string, unknown> | undefined) ?? lastData
+      const statusId = Number(lastInner?.StatusId ?? 0)
+
+      // StatusId: 4 = tamamlandı, RemainingPaymentAmount: 0
+      if (statusId === 4 || (lastAddResult?.remainingPaymentAmount ?? 1) === 0) {
+        const deviceResult: PaymentDeviceResult = parsePavoResult(
+          lastData?.Data != null || lastData?.HasError != null
+            ? lastData
+            : { HasError: false, Data: lastInner ?? {} },
+        )
+        await finalizeSaleToSQLite({
+          lines,
+          orderNo,
+          deviceResult,
+          cashAmt,
+          cardAmt,
+          paidAmt,
+        })
+        return
+      }
+
+      // Hâlâ bekliyor — GetSaleResult ile doğrula
       const resultSeq = await window.electron.db.nextPavoSequence()
       const saleResult = await pavoGetSaleResult(pavoSettings!, resultSeq, orderNo)
 
       if (saleResult.status !== 'completed') {
-        await handlePavoRecovery(pavoSaleId, orderNo)
+        await handlePavoRecovery(saleRef, orderNo)
         showError('Satış Tamamlanamadı', saleResult.message ?? 'Bilinmeyen durum')
         return
       }
@@ -1938,7 +1973,9 @@ export default function POSScreen({
         paidAmt,
       })
     } catch (e) {
-      if (pavoSaleId) await handlePavoRecovery(pavoSaleId, orderNo)
+      if (pavoSaleId || pavoSaleNumber) {
+        await handlePavoRecovery({ saleId: pavoSaleId, saleNumber: pavoSaleNumber }, orderNo)
+      }
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
@@ -3495,7 +3532,11 @@ export default function POSScreen({
       <AlertDialog {...dialogProps} />
 
       {/* ── Terazi modal ── */}
-      {scaleModal && (
+      {scaleModal && (() => {
+        const netGram = Math.max(0, scaleModal.weight - scaleModal.tare)
+        const netKg = Math.round(netGram) / 1000
+        const scaleDisconnected = !scaleModal.raw && scaleModal.weight <= 0 && !scaleModal.stable
+        return (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(0,0,0,0.5)',
@@ -3524,17 +3565,17 @@ export default function POSScreen({
             </div>
 
             <div style={{
-              background: scaleModal.stable ? '#F0FDF4' : '#FFF8E1',
-              border: `2px solid ${scaleModal.stable ? '#86EFAC' : '#FDE68A'}`,
+              background: scaleModal.stable ? '#F0FDF4' : scaleDisconnected ? '#FEF2F2' : '#FFF8E1',
+              border: `2px solid ${scaleModal.stable ? '#86EFAC' : scaleDisconnected ? '#FECACA' : '#FDE68A'}`,
               borderRadius: 12, padding: 16, textAlign: 'center',
             }}>
               <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
-                {scaleModal.stable ? 'Stabil (S)' : 'Ölçülüyor (U)...'}
+                {scaleModal.stable ? 'Stabil (S)' : scaleDisconnected ? 'Bağlantı kurulamadı' : 'Ölçülüyor (U)...'}
                 {scaleModal.tare > 0 ? ' · net' : ''}
               </div>
               <div style={{
                 fontSize: 42, fontWeight: 800,
-                color: scaleModal.stable ? '#15803D' : '#D97706',
+                color: scaleModal.stable ? '#15803D' : scaleDisconnected ? '#DC2626' : '#D97706',
                 fontFamily: 'monospace', letterSpacing: 2,
               }}>
                 {(Math.max(0, scaleModal.weight - scaleModal.tare) / 1000).toFixed(3)}
@@ -3553,8 +3594,8 @@ export default function POSScreen({
                   {scaleModal.raw}
                 </div>
               ) : (
-                <div style={{ marginTop: 8, fontSize: 11, color: '#9CA3AF' }}>
-                  Teraziden veri bekleniyor...
+                <div style={{ marginTop: 8, fontSize: 11, color: scaleDisconnected ? '#DC2626' : '#9CA3AF' }}>
+                  {scaleDisconnected ? 'Terazi bağlantısı kurulamadı. Lütfen yeniden deneyin.' : 'Teraziden veri bekleniyor...'}
                 </div>
               )}
             </div>
@@ -3599,12 +3640,7 @@ export default function POSScreen({
 
             <button
               type="button"
-              disabled={!scaleModal.stable || scaleModal.weight <= scaleModal.tare}
               onClick={() => {
-                const netGram = Math.max(0, scaleModal.weight - scaleModal.tare)
-                const netKg = Math.round(netGram) / 1000
-                if (netKg <= 0) return
-
                 if (cart.length === 0 && !currentOrderNo) {
                   setCurrentOrderNo(nextOrderNo(posSettings.terminalNumber))
                   setLastReceipt(null)
@@ -3634,18 +3670,17 @@ export default function POSScreen({
               }}
               style={{
                 padding: 14, borderRadius: 10, border: 'none',
-                background: scaleModal.stable && scaleModal.weight > scaleModal.tare
-                  ? '#15803D' : '#D1D5DB',
+                background: scaleDisconnected ? '#2563EB' : scaleModal.stable ? '#15803D' : '#D1D5DB',
                 color: 'white', fontSize: 15, fontWeight: 700,
-                cursor: scaleModal.stable && scaleModal.weight > scaleModal.tare
-                  ? 'pointer' : 'default',
+                cursor: 'pointer',
               }}
             >
-              {!scaleModal.stable ? 'Terazi stabil değil...' : 'Sepete Ekle'}
+              {scaleDisconnected ? '0 ile Sepete Ekle' : !scaleModal.stable ? 'Sepete Ekle' : 'Sepete Ekle'}
             </button>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {/* ── MODALLER ── */}
 

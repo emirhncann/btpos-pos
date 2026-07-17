@@ -132,6 +132,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     connect: (opts) => electron.ipcRenderer.invoke("scale:connect", opts),
     disconnect: () => electron.ipcRenderer.invoke("scale:disconnect"),
     getLastReading: () => electron.ipcRenderer.invoke("scale:getLastReading"),
+    write: (data) => electron.ipcRenderer.invoke("scale:write", data),
     saveSettings: (s) => electron.ipcRenderer.invoke("scale:saveSettings", s),
     getSettings: () => electron.ipcRenderer.invoke("scale:getSettings"),
     onData: (cb) => {
