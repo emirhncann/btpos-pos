@@ -10,6 +10,7 @@ import {
   pavoCheckPendingSale,
   pavoAbandonSuspendedSale,
   pavoGetSaleResult,
+  pavoAdvanceSale,
   type PavoSettings,
 } from '../lib/pavoService'
 import { parsePavoResult, type PaymentDeviceResult } from '../lib/paymentDevice'
@@ -413,6 +414,7 @@ export default function POSScreen({
   const [cariPaymentQ, setCariPaymentQ] = useState('')
   const [cariPaymentResults, setCariPaymentResults] = useState<CustomerRow[]>([])
   const [cariPaymentSearching, setCariPaymentSearching] = useState(false)
+  const [cariPaymentMethod, setCariPaymentMethod] = useState<'cash' | 'card' | null>(null)
   const [scaleModal, setScaleModal] = useState<{
     product: ProductRow
     weight: number
@@ -521,6 +523,7 @@ export default function POSScreen({
       setCariPaymentQ('')
       setCariPaymentResults([])
       setCariPaymentSearching(false)
+      setCariPaymentMethod(null)
       return
     }
 
@@ -1353,8 +1356,54 @@ export default function POSScreen({
 
     const terminalName = posSettings.source?.trim() || 'Kasa'
     const customerIdNum = Number.parseInt(cariPaymentCust.id, 10) || 0
+    const orderNo = nextOrderNo(posSettings.terminalNumber)
+    const reason = `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} — ${cariPaymentCust.name}`
 
     try {
+      // ── 1. Pavo AdvanceSale ─────────────────────────────────────
+      if (pavoSettings) {
+        const seq = await window.electron.db.nextPavoSequence()
+        const nameParts = (cariPaymentCust.name ?? '').split(' ')
+
+        const pavoRes = await pavoAdvanceSale(pavoSettings, seq, {
+          orderNo,
+          amount,
+          reason,
+          mediator: cariPaymentMethod === 'cash' ? 1
+                  : cariPaymentMethod === 'card' ? 2
+                  : undefined,
+          customer: {
+            isPerson:    cariPaymentCust.isPerson ?? true,
+            firstName:   cariPaymentCust.isPerson
+              ? (cariPaymentCust.firstName || nameParts[0] || '')
+              : '',
+            lastName:    cariPaymentCust.isPerson
+              ? (cariPaymentCust.lastName || nameParts.slice(1).join(' '))
+              : '',
+            companyName: !cariPaymentCust.isPerson ? cariPaymentCust.name : undefined,
+            taxNo:       cariPaymentCust.taxNo ?? '',
+            phone:       cariPaymentCust.phone ?? '',
+            email:       cariPaymentCust.email ?? '',
+            country:     'Türkiye',
+            city:        cariPaymentCust.city ?? '',
+            district:    cariPaymentCust.district ?? '',
+            address:     cariPaymentCust.address ?? '',
+          },
+          notify: {
+            sendSms:  Boolean(smsPhone),
+            phone:    smsPhone,
+            sendMail: Boolean(mailAddr),
+            mail:     mailAddr,
+          },
+        })
+
+        if (!pavoRes.success) {
+          setCariPaymentResult({ ok: false, msg: pavoRes.message ?? 'Tahsilat başarısız' })
+          return
+        }
+      }
+
+      // ── 2. Logo'ya tahsilat kaydı ───────────────────────────────
       const res = await fetch(`${API_URL}/integration/cari-payment/${companyId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1366,54 +1415,58 @@ export default function POSScreen({
           customer_name: cariPaymentCust.name ?? '',
           cashier_name:  cashier.fullName,
           terminal_name: terminalName,
-          description:   cariPaymentDesc.trim(),
+          description:   cariPaymentDesc.trim() || reason,
           payment_date:  new Date().toISOString().replace('T', ' ').slice(0, 19),
+          order_no:      orderNo,
         }),
       })
       const data = await res.json() as { success?: boolean; message?: string; label?: string }
 
-      if (res.ok && data.success) {
-        const paymentDesc = cariPaymentDesc.trim()
-        setCariPaymentResult({
-          ok:  true,
-          msg: `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} başarıyla kaydedildi. Tutar: ${amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
-        })
-        setCariPaymentAmt('')
-        setCariPaymentDesc('')
-
-        await window.electron.db.saveCariPayment({
-          id:           crypto.randomUUID(),
-          companyId,
-          type:         cariPaymentModal,
-          amount,
-          customerId:   cariPaymentCust.id,
-          customerName: cariPaymentCust.name,
-          customerCode: cariPaymentCust.code ?? '',
-          cashierId:    cashier.id,
-          cashierName:  cashier.fullName,
-          description:  paymentDesc || undefined,
-          createdAt:    new Date().toISOString(),
-        })
-
-        void printIfTemplate(cariPaymentModal, {
-          sale_payments: {
-            amount,
-            method:     'cash',
-            created_at: new Date().toISOString(),
-          },
-          customers: {
-            name: cariPaymentCust.name,
-            code: cariPaymentCust.code ?? '',
-          },
-          cashiers:  { full_name: cashier.fullName },
-          terminals: { name: terminalName ?? 'Kasa' },
-        })
-      } else {
+      if (!res.ok || !data.success) {
         setCariPaymentResult({
           ok: false,
-          msg: data.message ?? (res.ok ? 'İşlem başarısız.' : `HTTP ${res.status}`),
+          msg: data.message ?? (res.ok ? 'Logo kaydı başarısız' : `HTTP ${res.status}`),
         })
+        return
       }
+
+      // ── 3. SQLite'a kaydet ───────────────────────────────────────
+      await window.electron.db.saveCariPayment({
+        id:           crypto.randomUUID(),
+        companyId,
+        type:         cariPaymentModal,
+        amount,
+        customerId:   cariPaymentCust.id,
+        customerName: cariPaymentCust.name,
+        customerCode: cariPaymentCust.code ?? '',
+        cashierId:    cashier.id,
+        cashierName:  cashier.fullName,
+        description:  cariPaymentDesc.trim() || reason,
+        createdAt:    new Date().toISOString(),
+      })
+
+      setCariPaymentResult({
+        ok:  true,
+        msg: `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} başarıyla tamamlandı. Tutar: ${amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+      })
+      const paidMethod = cariPaymentMethod === 'card' ? 'card' : 'cash'
+      setCariPaymentAmt('')
+      setCariPaymentDesc('')
+      setCariPaymentMethod(null)
+
+      void printIfTemplate(cariPaymentModal, {
+        sale_payments: {
+          amount,
+          method:     paidMethod,
+          created_at: new Date().toISOString(),
+        },
+        customers: {
+          name: cariPaymentCust.name,
+          code: cariPaymentCust.code ?? '',
+        },
+        cashiers:  { full_name: cashier.fullName },
+        terminals: { name: terminalName ?? 'Kasa' },
+      })
     } catch (e) {
       setCariPaymentResult({ ok: false, msg: String(e) })
     } finally {
@@ -1799,11 +1852,19 @@ export default function POSScreen({
           )
 
           if (!deviceResult.success) {
-            showError('Ödeme Hatası', deviceResult.message ?? 'Pavo hatası')
+            setPaymentMode(false)
+            setPaymentLines([])
+            setActiveMethod(null)
+            setPendingAmount('')
+            setPavoError(deviceResult?.message ?? 'Ödeme iptal edildi — sepet korundu')
             return
           }
         } catch (e) {
-          showError('Pavo Bağlantı Hatası', String(e))
+          setPaymentMode(false)
+          setPaymentLines([])
+          setActiveMethod(null)
+          setPendingAmount('')
+          setPavoError(String(e))
           return
         } finally {
           setPavoLoading(false)
@@ -1895,6 +1956,8 @@ export default function POSScreen({
 
       // Offline/askı satışta Id:0 olabilir; SaleNumber yeterli
       if (!startRes.success || (!(startRes.saleId && startRes.saleId > 0) && !startRes.saleNumber)) {
+        setPaymentMode(false)
+        setPaymentLines([])
         showError('Pavo Hatası', startRes.message ?? 'Sepet gönderilemedi')
         return
       }
@@ -1936,6 +1999,8 @@ export default function POSScreen({
 
         if (!addRes.success) {
           await handlePavoRecovery(saleRef, orderNo)
+          setPaymentMode(false)
+          setPaymentLines([])
           showError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi')
           return
         }
@@ -1948,6 +2013,8 @@ export default function POSScreen({
         const finalRes = await pavoFinalizeSale(pavoSettings!, finalSeq, saleRef)
         if (!finalRes.success) {
           await handlePavoRecovery(saleRef, orderNo)
+          setPaymentMode(false)
+          setPaymentLines([])
           showError('Finalize Hatası', finalRes.message ?? 'Satış kapatılamadı')
           return
         }
@@ -1981,6 +2048,8 @@ export default function POSScreen({
 
       if (saleResult.status !== 'completed') {
         await handlePavoRecovery(saleRef, orderNo)
+        setPaymentMode(false)
+        setPaymentLines([])
         showError('Satış Tamamlanamadı', saleResult.message ?? 'Bilinmeyen durum')
         return
       }
@@ -2004,6 +2073,8 @@ export default function POSScreen({
       if (pavoSaleId || pavoSaleNumber) {
         await handlePavoRecovery({ saleId: pavoSaleId, saleNumber: pavoSaleNumber }, orderNo)
       }
+      setPaymentMode(false)
+      setPaymentLines([])
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setSaving(false)
@@ -5014,6 +5085,7 @@ export default function POSScreen({
                         setCariPaymentQ('')
                         setCariPaymentResults([])
                         setCariPaymentCust(selectedCustomer ?? null)
+                        setCariPaymentMethod(null)
                         setMenuOpen(null)
                         return
                       }
@@ -5025,6 +5097,7 @@ export default function POSScreen({
                         setCariPaymentQ('')
                         setCariPaymentResults([])
                         setCariPaymentCust(selectedCustomer ?? null)
+                        setCariPaymentMethod(null)
                         setMenuOpen(null)
                         return
                       }
@@ -5253,7 +5326,14 @@ export default function POSScreen({
             <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
               background: 'rgba(0,0,0,0.45)', display: 'flex',
               alignItems: 'center', justifyContent: 'center' }}
-              onClick={() => { if (!cariPaymentSaving) setCariPaymentModal(null) }}>
+              onClick={() => {
+                if (cariPaymentSaving) return
+                setCariPaymentModal(null)
+                setCariPaymentMethod(null)
+                setCariPaymentAmt('')
+                setCariPaymentDesc('')
+                setCariPaymentResult(null)
+              }}>
               <div onClick={e => e.stopPropagation()}
                 style={{ background: 'white', borderRadius: 16, padding: 24,
                   width: 'min(400px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -5262,7 +5342,15 @@ export default function POSScreen({
                   <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>
                     {cariPaymentModal === 'tahsilat' ? '💰 Cari Tahsilat' : '💸 Cari Ödeme'}
                   </div>
-                  <button type="button" onClick={() => setCariPaymentModal(null)} disabled={cariPaymentSaving}
+                  <button type="button"
+                    onClick={() => {
+                      setCariPaymentModal(null)
+                      setCariPaymentMethod(null)
+                      setCariPaymentAmt('')
+                      setCariPaymentDesc('')
+                      setCariPaymentResult(null)
+                    }}
+                    disabled={cariPaymentSaving}
                     style={{ background: 'none', border: 'none', fontSize: 20,
                       cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
                 </div>
@@ -5371,6 +5459,44 @@ export default function POSScreen({
                       {k}
                     </button>
                   ))}
+                </div>
+
+                {/* Ödeme Yöntemi */}
+                <div style={{ marginBottom: 0 }}>
+                  <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>
+                    Ödeme Yöntemi
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => setCariPaymentMethod('cash')}
+                      style={{
+                        padding:      '10px',
+                        borderRadius: 9,
+                        border:       `1.5px solid ${cariPaymentMethod === 'cash' ? '#A5D6A7' : '#E5E7EB'}`,
+                        background:   cariPaymentMethod === 'cash' ? '#E8F5E9' : '#F9FAFB',
+                        color:        cariPaymentMethod === 'cash' ? '#2E7D32' : '#374151',
+                        fontWeight:   700,
+                        fontSize:     13,
+                        cursor:       'pointer',
+                      }}
+                    >💵 Nakit</button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCariPaymentMethod('card')}
+                      style={{
+                        padding:      '10px',
+                        borderRadius: 9,
+                        border:       `1.5px solid ${cariPaymentMethod === 'card' ? '#BFDBFE' : '#E5E7EB'}`,
+                        background:   cariPaymentMethod === 'card' ? '#EFF6FF' : '#F9FAFB',
+                        color:        cariPaymentMethod === 'card' ? '#1565C0' : '#374151',
+                        fontWeight:   700,
+                        fontSize:     13,
+                        cursor:       'pointer',
+                      }}
+                    >💳 Kredi Kartı</button>
+                  </div>
                 </div>
 
                 <div style={{ position: 'relative' }}>

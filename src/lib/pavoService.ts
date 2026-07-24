@@ -839,3 +839,103 @@ export async function pavoPartialReturn(
     return { success: false, message: String(e) }
   }
 }
+
+/** Pavo AdvanceSale — cari tahsilat / avans (ürün satırı yok) */
+export async function pavoAdvanceSale(
+  settings: PavoSettings,
+  seq: number,
+  opts: {
+    orderNo: string
+    amount: number
+    reason: string
+    mediator?: number // 1=nakit, 2=kart, undefined=cihazdan seçsin
+    customer: {
+      isPerson: boolean
+      firstName: string
+      lastName: string
+      companyName?: string
+      taxNo: string
+      phone?: string
+      email?: string
+      country: string
+      city: string
+      district: string
+      address?: string
+    }
+    notify?: {
+      sendSms: boolean
+      phone: string
+      sendMail: boolean
+      mail: string
+    }
+  },
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  try {
+    const paymentInformations = opts.mediator !== undefined ? [{
+      Mediator:     opts.mediator,
+      Amount:       opts.amount,
+      CurrencyCode: 'TRY',
+      ExchangeRate: 1,
+      IsVoid:       false,
+    }] : []
+
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        RefererApp:            'BTPOS',
+        RefererAppVersion:     '1.0.0',
+        OrderNo:               opts.orderNo,
+        TotalAmount:           opts.amount,
+        SaleReason:            opts.reason,
+        SendPhoneNotification: Boolean(opts.notify?.sendSms && opts.notify?.phone),
+        SendEMailNotification: Boolean(opts.notify?.sendMail && opts.notify?.mail),
+        ...(opts.notify?.sendSms && opts.notify?.phone
+          ? { NotificationPhone: opts.notify.phone } : {}),
+        ...(opts.notify?.sendMail && opts.notify?.mail
+          ? { NotificationEMail: opts.notify.mail } : {}),
+        SkipAmountCash:        true,
+        AllowDismissCardRead:  false,
+        CardReadTimeout:       settings.cardReadTimeout ?? 60,
+        AskCustomer:           false,
+        ...(paymentInformations.length > 0
+          ? { PaymentInformations: paymentInformations } : {}),
+        ReceiptInformation: {
+          ReceiptWidth:             settings.printWidth ?? '80mm',
+          PrintCustomerReceipt:     true,
+          PrintCustomerReceiptCopy: false,
+          PrintMerchantReceipt:     true,
+        },
+        CustomerParty: {
+          CustomerType:  opts.customer.isPerson ? 1 : 2,
+          FirstName:     opts.customer.isPerson ? opts.customer.firstName : '',
+          MiddleName:    '',
+          FamilyName:    opts.customer.isPerson ? opts.customer.lastName : '',
+          CompanyName:   opts.customer.isPerson ? '' : (opts.customer.companyName ?? ''),
+          TaxOfficeCode: '',
+          TaxNumber:     opts.customer.taxNo ?? '',
+          Phone:         opts.customer.phone ?? '',
+          EMail:         opts.customer.email ?? '',
+          Country:       opts.customer.country ?? 'Türkiye',
+          City:          opts.customer.city ?? '',
+          District:      opts.customer.district ?? '',
+          Neighborhood:  '',
+          Address:       opts.customer.address ?? '',
+        },
+      },
+    }
+
+    console.log('[AdvanceSale] body:', JSON.stringify(body, null, 2))
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AdvanceSale`, body)
+    console.log('[AdvanceSale] response:', JSON.stringify(data, null, 2))
+
+    await syncPavoSequenceFromResponse(data)
+
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Tahsilat başarısız') }
+    }
+
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
