@@ -122,6 +122,28 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
         setTimeout(() => setError(''), 2000)
         return
       }
+
+      // Terminal erişim kontrolü — kod/şifre girişi ile aynı Slim endpoint
+      try {
+        const data = await api.loginCashier(
+          cashier.cashierCode,
+          cashier.password,
+          companyId,
+          terminalId,
+        )
+        if (!data.ok || !data.success) {
+          if (data.code === 'TERMINAL_ACCESS_DENIED' || data.status === 403) {
+            setError('Bu kasaya giriş yapma yetkiniz yoktur.')
+          } else {
+            setError(data.message ?? data.error ?? 'Giriş başarısız')
+          }
+          setTimeout(() => setError(''), 4000)
+          return
+        }
+      } catch {
+        // Ağ yoksa yerel kart doğrulamasıyla devam
+      }
+
       await finishLogin(cashier)
     } catch (e) {
       setError('Giriş yapılamadı: ' + (e instanceof Error ? e.message : String(e)))
