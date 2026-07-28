@@ -136,6 +136,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
       setError('Kasiyer kodu ve şifre zorunludur.')
       return
     }
+    setShowNumpad(false)
     setLoggingIn(true)
     setLoginStage('auth')
     setError('')
@@ -146,11 +147,12 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
       const data = await api.loginCashier(trimmedCode, trimmedPw, companyId, terminalId)
 
       if (!data.ok || !data.success) {
-        if (data.code === 'TERMINAL_ACCESS_DENIED') {
-          setError('Bu kasiyerin bu kasada giriş yapma yetkisi bulunmuyor.')
+        if (data.code === 'TERMINAL_ACCESS_DENIED' || data.status === 403) {
+          setError('Bu kasaya giriş yapma yetkiniz yoktur.')
         } else {
           setError(data.message ?? data.error ?? 'Giriş başarısız')
         }
+        setShowNumpad(false)
         setCode('')
         setPassword('')
         codeRef.current?.focus()
@@ -184,6 +186,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
         const cashier = await window.electron.db.verifyCashier(code.trim(), password.trim())
         if (!cashier) {
           setError('Kasiyer kodu veya şifre hatalı.')
+          setShowNumpad(false)
           setCode('')
           setPassword('')
           codeRef.current?.focus()
@@ -403,8 +406,14 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
       </div>
 
       {showNumpad && !loggingIn && (
-        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-end justify-center p-3">
-          <div className="w-full max-w-xs bg-gray-900 border border-gray-700 rounded-xl p-3">
+        <div
+          className="fixed inset-0 z-[9999] bg-black/60 flex items-end justify-center p-3"
+          onClick={() => setShowNumpad(false)}
+        >
+          <div
+            className="w-full max-w-xs bg-gray-900 border border-gray-700 rounded-xl p-3"
+            onClick={e => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm text-gray-300">
                 Sayısal Klavye - {numpadTarget === 'code' ? 'Kasiyer Kodu' : 'Şifre'}

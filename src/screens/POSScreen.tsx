@@ -1858,7 +1858,11 @@ export default function POSScreen({
             setPaymentLines([])
             setActiveMethod(null)
             setPendingAmount('')
-            setPavoError(deviceResult?.message ?? 'Ödeme iptal edildi — sepet korundu')
+            showError(
+              'Ödeme İptal Edildi',
+              deviceResult?.message ?? 'Sepet korundu, tekrar deneyebilirsiniz.',
+            )
+            setPavoError(null)
             return
           }
         } catch (e) {
@@ -1866,7 +1870,8 @@ export default function POSScreen({
           setPaymentLines([])
           setActiveMethod(null)
           setPendingAmount('')
-          setPavoError(String(e))
+          showError('Ödeme Hatası', String(e))
+          setPavoError(null)
           return
         } finally {
           setPavoLoading(false)

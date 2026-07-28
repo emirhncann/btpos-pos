@@ -88,7 +88,8 @@ export function TouchKeyboard({
               ))}
             </div>
           </div>
-          <button type="button" onClick={onClose}
+          <button type="button"
+            onMouseDown={e => { e.preventDefault(); onClose() }}
             style={{ background: 'none', border: 'none', cursor: 'pointer',
               color: '#9CA3AF', fontSize: 18, padding: 0, lineHeight: 1 }}>✕</button>
         </div>
@@ -218,13 +219,15 @@ export function TouchKeyboard({
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 4 }}>
-          <button type="button" onClick={() => onChange('')}
+          <button type="button"
+            onMouseDown={e => { e.preventDefault(); onChange('') }}
             style={{ padding: '12px 0', fontSize: 14, borderRadius: 10,
               border: '0.5px solid #E5E7EB', background: '#F9FAFB',
               cursor: 'pointer', color: '#374151' }}>
             Temizle
           </button>
-          <button type="button" onClick={() => onConfirm(value)}
+          <button type="button"
+            onMouseDown={e => { e.preventDefault(); onConfirm(value) }}
             style={{ padding: '12px 0', fontSize: 14, fontWeight: 500,
               borderRadius: 10, border: 'none',
               background: '#1565C0', color: 'white', cursor: 'pointer' }}>

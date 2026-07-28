@@ -24,7 +24,7 @@ export function useTouchKeyboard(enabled: boolean) {
   const searchOptsRef = useRef<OpenOpts | null>(null)
 
   const closeKeyboard = useCallback(() => {
-    setState(s => ({ ...s, open: false }))
+    setState(s => (s.open ? { ...s, open: false } : s))
     setSearchResults([])
     searchOptsRef.current = null
   }, [])
