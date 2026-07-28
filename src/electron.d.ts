@@ -584,8 +584,6 @@ declare global {
     plu_items:    Array<{ id: string; product_code: string; sort_order: number }>
   }
 
-  type PluMode = 'terminal' | 'cashier'
-
   interface PaymentReceiptPrintOpts {
     terminalName:  string
     cashierName:   string
@@ -625,7 +623,6 @@ declare global {
     fontSizePrice:        number
     fontSizeCode:         number
     source:               string
-    pluMode:              PluMode
     loginWithCode:        boolean
     loginWithCard:        boolean
     torbaCariId:          string | null
@@ -636,6 +633,8 @@ declare global {
     printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
     defaultTemplateIds?:  Record<string, string>
     allowExitWithHeldDocs?: boolean
+    /** true = cari tahsilat/ödemede Pavo AdvanceSale kullan */
+    cariPaymentUsePavo?:  boolean
     terminalNumber?:      string | null
     workplaceName?:       string | null
     workplaceAddress?:    string | null

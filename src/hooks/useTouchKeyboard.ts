@@ -92,5 +92,5 @@ export function useTouchKeyboard(enabled: boolean) {
     searching,
   }
 
-  return { openKeyboard, closeKeyboard, keyboardProps }
+  return { openKeyboard, closeKeyboard, keyboardProps, keyboardOpen: state.open }
 }

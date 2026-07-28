@@ -690,8 +690,6 @@ export interface PluGroupCacheRow {
 
 export type DuplicateItemAction = 'increase_qty' | 'add_new'
 
-export type PluMode = 'terminal' | 'cashier'
-
 export interface PosSettingsRow {
   showPrice:            boolean
   showCode:             boolean
@@ -708,7 +706,6 @@ export interface PosSettingsRow {
   fontSizePrice:        number
   fontSizeCode:         number
   source:               string
-  pluMode:              PluMode
   loginWithCode:        boolean
   loginWithCard:        boolean
   torbaCariId:          string | null
@@ -719,6 +716,8 @@ export interface PosSettingsRow {
   printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
   defaultTemplateIds?:  Record<string, string>
   allowExitWithHeldDocs?: boolean
+  /** true = cari tahsilat/ödemede Pavo AdvanceSale kullan */
+  cariPaymentUsePavo?:  boolean
   terminalNumber?:      string | null
   workplaceName?:       string | null
   workplaceAddress?:    string | null
@@ -905,7 +904,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
     fontSizePrice:        settings.fontSizePrice ?? 13,
     fontSizeCode:         settings.fontSizeCode ?? 9,
     source:               settings.source,
-    pluMode:              settings.pluMode ?? 'terminal',
+    pluMode:              'cashier',
     loginWithCode:        settings.loginWithCode ?? true,
     loginWithCard:        settings.loginWithCard ?? false,
     syncedAt:             now,
@@ -921,6 +920,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
       ? JSON.stringify(settings.defaultTemplateIds)
       : null,
     allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
+    cariPaymentUsePavo:  Boolean(settings.cariPaymentUsePavo),
     terminalNumber:      settings.terminalNumber      ?? null,
     workplaceName:       settings.workplaceName       ?? null,
     workplaceAddress:    settings.workplaceAddress    ?? null,
@@ -947,7 +947,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
       fontSizePrice:        settings.fontSizePrice ?? 13,
       fontSizeCode:         settings.fontSizeCode ?? 9,
       source:               settings.source,
-      pluMode:              settings.pluMode ?? 'terminal',
+      pluMode:              'cashier',
       loginWithCode:        settings.loginWithCode ?? true,
       loginWithCard:        settings.loginWithCard ?? false,
       syncedAt:             now,
@@ -963,6 +963,7 @@ export function savePosSettings(settings: PosSettingsRow): void {
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
       allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
+      cariPaymentUsePavo:  Boolean(settings.cariPaymentUsePavo),
       terminalNumber:      settings.terminalNumber      ?? null,
       workplaceName:       settings.workplaceName       ?? null,
       workplaceAddress:    settings.workplaceAddress    ?? null,
@@ -992,7 +993,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs,
+        allow_exit_with_held_docs, cari_payment_use_pavo,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       ) VALUES (
         @id, @cashierId, @showPrice, @showCode, @showBarcode,
@@ -1002,7 +1003,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
         @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
         @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds,
-        @allowExitWithHeldDocs,
+        @allowExitWithHeldDocs, @cariPaymentUsePavo,
         @terminalNumber, @workplaceName, @workplaceAddress, @workplacePhone, @workplaceCity, @workplaceDistrict, @workplaceTaxOffice, @workplaceTaxNo
       )
     `).run({
@@ -1023,7 +1024,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
       fontSizePrice:       settings.fontSizePrice,
       fontSizeCode:        settings.fontSizeCode,
       source:              settings.source,
-      pluMode:             settings.pluMode,
+      pluMode:             'cashier',
       loginWithCode:       settings.loginWithCode ? 1 : 0,
       loginWithCard:       settings.loginWithCard ? 1 : 0,
       syncedAt:            now,
@@ -1039,6 +1040,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         ? JSON.stringify(settings.defaultTemplateIds)
         : null,
       allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false ? 1 : 0,
+      cariPaymentUsePavo:  settings.cariPaymentUsePavo ? 1 : 0,
       terminalNumber:     isLocal ? (settings.terminalNumber ?? null) : null,
       workplaceName:      isLocal ? (settings.workplaceName ?? null) : null,
       workplaceAddress:   isLocal ? (settings.workplaceAddress ?? null) : null,
@@ -1065,7 +1067,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs,
+        allow_exit_with_held_docs, cari_payment_use_pavo,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       )
       SELECT
@@ -1076,7 +1078,7 @@ export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
         plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
         source, plu_mode, login_with_code, login_with_card, synced_at,
         torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs,
+        allow_exit_with_held_docs, cari_payment_use_pavo,
         terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
       FROM pos_settings_temp WHERE id = ?
     `).run(rowId)
@@ -1161,7 +1163,6 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     fontSizePrice:        row?.fontSizePrice        ?? 13,
     fontSizeCode:         row?.fontSizeCode         ?? 9,
     source:               row?.source               ?? 'default',
-    pluMode:              (row?.pluMode === 'cashier' ? 'cashier' : 'terminal') as PluMode,
     loginWithCode:        row?.loginWithCode        ?? true,
     loginWithCard:        row?.loginWithCard        ?? false,
     torbaCariId:          row?.torbaCariId          ?? null,
@@ -1172,6 +1173,7 @@ export function getPosSettings(cashierId?: string | null): PosSettingsRow {
     printBehavior:        parsePrintBehaviorField(row?.printBehavior),
     defaultTemplateIds: parseDefaultTemplateIdsField(row?.defaultTemplateIds),
     allowExitWithHeldDocs: row?.allowExitWithHeldDocs ?? true,
+    cariPaymentUsePavo:   Boolean(row?.cariPaymentUsePavo),
     terminalNumber:    wp?.terminalNumber     ?? null,
     workplaceName:      wp?.workplaceName       ?? null,
     workplaceAddress:   wp?.workplaceAddress    ?? null,

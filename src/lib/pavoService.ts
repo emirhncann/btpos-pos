@@ -887,16 +887,24 @@ export async function pavoAdvanceSale(
         OrderNo:               opts.orderNo,
         TotalAmount:           opts.amount,
         SaleReason:            opts.reason,
+        BottomPrintableItems: [
+          {
+            type:      'text',
+            value:     opts.reason,
+            alignment: 'left',
+            fontSize:  25,
+          },
+        ],
         SendPhoneNotification: Boolean(opts.notify?.sendSms && opts.notify?.phone),
         SendEMailNotification: Boolean(opts.notify?.sendMail && opts.notify?.mail),
         ...(opts.notify?.sendSms && opts.notify?.phone
           ? { NotificationPhone: opts.notify.phone } : {}),
         ...(opts.notify?.sendMail && opts.notify?.mail
           ? { NotificationEMail: opts.notify.mail } : {}),
-        SkipAmountCash:        true,
-        AllowDismissCardRead:  false,
-        CardReadTimeout:       settings.cardReadTimeout ?? 60,
-        AskCustomer:           false,
+        SkipAmountCash:       opts.mediator === 1, // nakit ise tutar girişini atla
+        AllowDismissCardRead: false,
+        CardReadTimeout:      settings.cardReadTimeout ?? 60,
+        AskCustomer:          false,
         ...(paymentInformations.length > 0
           ? { PaymentInformations: paymentInformations } : {}),
         ReceiptInformation: {
@@ -932,6 +940,24 @@ export async function pavoAdvanceSale(
 
     if (data.HasError === true || data.IsError === true) {
       return { success: false, message: pavoErrorMessage(data, 'Tahsilat başarısız') }
+    }
+
+    const d = data.Data as Record<string, unknown> | undefined
+    const payments = (d?.AddedPayments ?? []) as Array<Record<string, unknown>>
+
+    const allFailed = payments.length > 0 && payments.every(p => Number(p.StatusId) === 3)
+
+    if (allFailed) {
+      const lastPayment = payments[payments.length - 1]
+      const errMsg = (lastPayment?.OnlinePayment as Record<string, unknown>)
+        ?.ResponseDescription as string ?? 'Ödeme başarısız'
+      return { success: false, message: errMsg }
+    }
+
+    // Sale StatusId — 4=tamamlandı, 23=askıda (tamamlanmamış)
+    const statusId = Number(d?.StatusId ?? 0)
+    if (statusId !== 4) {
+      return { success: false, message: 'Ödeme tamamlanamadı' }
     }
 
     return { success: true, data }

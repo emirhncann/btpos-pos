@@ -373,7 +373,7 @@ export default function POSScreen({
 }: Props) {
 
   const touchEnabled = posSettings?.touchKeyboard ?? true
-  const { openKeyboard, keyboardProps } = useTouchKeyboard(touchEnabled)
+  const { openKeyboard, keyboardProps, keyboardOpen } = useTouchKeyboard(touchEnabled)
 
   /* ── State ── */
   const [cart, setCart]                   = useState<CartItem[]>([])
@@ -1360,15 +1360,15 @@ export default function POSScreen({
     const reason = `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} — ${cariPaymentCust.name}`
 
     try {
-      // ── 1. Pavo AdvanceSale ─────────────────────────────────────
-      if (pavoSettings) {
+      // ── 1. Pavo AdvanceSale — parametre açıksa ───────────────────
+      if (posSettings?.cariPaymentUsePavo && pavoSettings) {
         const seq = await window.electron.db.nextPavoSequence()
         const nameParts = (cariPaymentCust.name ?? '').split(' ')
 
         const pavoRes = await pavoAdvanceSale(pavoSettings, seq, {
           orderNo,
           amount,
-          reason,
+          reason: cariPaymentDesc.trim() || reason,
           mediator: cariPaymentMethod === 'cash' ? 1
                   : cariPaymentMethod === 'card' ? 2
                   : undefined,
@@ -1398,26 +1398,28 @@ export default function POSScreen({
         })
 
         if (!pavoRes.success) {
-          setCariPaymentResult({ ok: false, msg: pavoRes.message ?? 'Tahsilat başarısız' })
+          setCariPaymentResult({ ok: false, msg: pavoRes.message ?? 'Pavo tahsilat başarısız' })
           return
         }
       }
 
-      // ── 2. Logo'ya tahsilat kaydı ───────────────────────────────
+      // ── 2. Logo API — her zaman ─────────────────────────────────
       const res = await fetch(`${API_URL}/integration/cari-payment/${companyId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          process_type:  cariPaymentModal === 'tahsilat' ? 1 : 2,
+          process_type:    cariPaymentModal === 'tahsilat' ? 1 : 2,
           amount,
-          customer_id:   customerIdNum,
-          customer_code: cariPaymentCust.code ?? '',
-          customer_name: cariPaymentCust.name ?? '',
-          cashier_name:  cashier.fullName,
-          terminal_name: terminalName,
-          description:   cariPaymentDesc.trim() || reason,
-          payment_date:  new Date().toISOString().replace('T', ' ').slice(0, 19),
-          order_no:      orderNo,
+          customer_id:     customerIdNum,
+          customer_erp_id: cariPaymentCust.id,
+          customer_code:   cariPaymentCust.code ?? '',
+          customer_name:   cariPaymentCust.name ?? '',
+          cashier_name:    cashier.fullName,
+          terminal_name:   terminalName,
+          description:     cariPaymentDesc.trim() || reason,
+          payment_date:    new Date().toISOString().replace('T', ' ').slice(0, 19),
+          order_no:        orderNo,
+          type:            cariPaymentModal,
         }),
       })
       const data = await res.json() as { success?: boolean; message?: string; label?: string }
@@ -1430,7 +1432,7 @@ export default function POSScreen({
         return
       }
 
-      // ── 3. SQLite'a kaydet ───────────────────────────────────────
+      // ── 3. SQLite ───────────────────────────────────────────────
       await window.electron.db.saveCariPayment({
         id:           crypto.randomUUID(),
         companyId,
@@ -5375,23 +5377,28 @@ export default function POSScreen({
                     <input
                       autoFocus={!touchEnabled}
                       value={cariPaymentQ}
-                      readOnly={touchEnabled}
-                      onClick={() => openKeyboard({
-                        title:     'Cari ara',
-                        initial:   cariPaymentQ,
-                        type:      'qwerty',
-                        onSearch:  async (q) => {
-                          const all = await window.electron.db.getCustomers(companyId)
-                          return rankCustomers(all, q)
-                        },
-                        onSelectResult: (c) => {
-                          setCariPaymentCust(c)
-                          setCariPaymentQ('')
-                        },
-                        onConfirm: (v) => setCariPaymentQ(v),
-                      })}
+                      readOnly={touchEnabled && keyboardOpen}
+                      onClick={() => {
+                        if (!touchEnabled) return
+                        openKeyboard({
+                          title:     'Cari ara',
+                          initial:   cariPaymentQ,
+                          type:      'qwerty',
+                          onSearch:  async (q) => {
+                            const all = await window.electron.db.getCustomers(companyId)
+                            return rankCustomers(all, q)
+                          },
+                          onSelectResult: (c) => {
+                            setCariPaymentCust(c)
+                            setCariPaymentQ('')
+                          },
+                          onConfirm: (v) => setCariPaymentQ(v),
+                        })
+                      }}
                       onChange={e => {
-                        if (!touchEnabled) void searchCariPayment(e.target.value)
+                        const v = e.target.value
+                        setCariPaymentQ(v)
+                        void searchCariPayment(v)
                       }}
                       placeholder="Cari ara... (ad veya kod)"
                       style={{ width: '100%', padding: '10px 14px', fontSize: 13,
@@ -5461,55 +5468,62 @@ export default function POSScreen({
                   ))}
                 </div>
 
-                {/* Ödeme Yöntemi */}
-                <div style={{ marginBottom: 0 }}>
-                  <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>
-                    Ödeme Yöntemi
+                {/* Ödeme Yöntemi — sadece Pavo cari tahsilat açıksa */}
+                {posSettings?.cariPaymentUsePavo && pavoSettings && (
+                  <div style={{ marginBottom: 0 }}>
+                    <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>
+                      Ödeme Yöntemi
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      {([
+                        { method: 'cash' as const, icon: '💵', label: 'Nakit',
+                          bg: '#E8F5E9', border: '#A5D6A7', color: '#2E7D32' },
+                        { method: 'card' as const, icon: '💳', label: 'Kart',
+                          bg: '#EFF6FF', border: '#BFDBFE', color: '#1565C0' },
+                      ]).map(btn => (
+                        <button
+                          key={btn.method}
+                          type="button"
+                          onClick={() => setCariPaymentMethod(
+                            cariPaymentMethod === btn.method ? null : btn.method
+                          )}
+                          style={{
+                            padding:      '10px',
+                            borderRadius: 9,
+                            border:       `1.5px solid ${cariPaymentMethod === btn.method ? btn.border : '#E5E7EB'}`,
+                            background:   cariPaymentMethod === btn.method ? btn.bg : '#F9FAFB',
+                            color:        cariPaymentMethod === btn.method ? btn.color : '#374151',
+                            fontWeight:   700,
+                            fontSize:     13,
+                            cursor:       'pointer',
+                          }}
+                        >
+                          {btn.icon} {btn.label}
+                        </button>
+                      ))}
+                    </div>
+                    {!cariPaymentMethod && (
+                      <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>
+                        Seçilmezse Pavo cihazından seçilir
+                      </div>
+                    )}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <button
-                      type="button"
-                      onClick={() => setCariPaymentMethod('cash')}
-                      style={{
-                        padding:      '10px',
-                        borderRadius: 9,
-                        border:       `1.5px solid ${cariPaymentMethod === 'cash' ? '#A5D6A7' : '#E5E7EB'}`,
-                        background:   cariPaymentMethod === 'cash' ? '#E8F5E9' : '#F9FAFB',
-                        color:        cariPaymentMethod === 'cash' ? '#2E7D32' : '#374151',
-                        fontWeight:   700,
-                        fontSize:     13,
-                        cursor:       'pointer',
-                      }}
-                    >💵 Nakit</button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCariPaymentMethod('card')}
-                      style={{
-                        padding:      '10px',
-                        borderRadius: 9,
-                        border:       `1.5px solid ${cariPaymentMethod === 'card' ? '#BFDBFE' : '#E5E7EB'}`,
-                        background:   cariPaymentMethod === 'card' ? '#EFF6FF' : '#F9FAFB',
-                        color:        cariPaymentMethod === 'card' ? '#1565C0' : '#374151',
-                        fontWeight:   700,
-                        fontSize:     13,
-                        cursor:       'pointer',
-                      }}
-                    >💳 Kredi Kartı</button>
-                  </div>
-                </div>
+                )}
 
                 <div style={{ position: 'relative' }}>
                   <input
                     value={cariPaymentDesc}
-                    readOnly={touchEnabled}
-                    onClick={() => openKeyboard({
-                      title:     'Açıklama',
-                      initial:   cariPaymentDesc,
-                      type:      'qwerty',
-                      onConfirm: (v) => setCariPaymentDesc(v),
-                    })}
-                    onChange={e => { if (!touchEnabled) setCariPaymentDesc(e.target.value) }}
+                    readOnly={touchEnabled && keyboardOpen}
+                    onClick={() => {
+                      if (!touchEnabled) return
+                      openKeyboard({
+                        title:     'Açıklama',
+                        initial:   cariPaymentDesc,
+                        type:      'qwerty',
+                        onConfirm: (v) => setCariPaymentDesc(v),
+                      })
+                    }}
+                    onChange={e => setCariPaymentDesc(e.target.value)}
                     placeholder="Açıklama (opsiyonel)"
                     style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
                       border: '1px solid #E5E7EB', outline: 'none',

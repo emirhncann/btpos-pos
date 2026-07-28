@@ -56,10 +56,10 @@ export default function App() {
     fontSizePrice: 13,
     fontSizeCode: 9,
     source: 'default',
-    pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
     allowExitWithHeldDocs: true,
+    cariPaymentUsePavo: false,
     customerDisplay: true,
   })
   const [terminalSettings, setTerminalSettings] = useState<PosSettingsRow>({
@@ -76,10 +76,10 @@ export default function App() {
     fontSizePrice: 13,
     fontSizeCode: 9,
     source: 'default',
-    pluMode: 'terminal',
     loginWithCode: true,
     loginWithCard: false,
     allowExitWithHeldDocs: true,
+    cariPaymentUsePavo: false,
     customerDisplay: true,
   })
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
@@ -142,7 +142,7 @@ export default function App() {
     setMerkezToast(null)
     setCommandSyncing(false)
     setHasDeferredCommand(false)
-    // posSettings'i kasa default'una sıfırla — stale pluMode bir sonraki kasiyeri etkilemesin
+    // posSettings'i kasa default'una sıfırla — stale settings bir sonraki kasiyeri etkilemesin
     window.electron.db.getPosSettings().then(s => {
       setPosSettings(s)
     }).catch(() => {})
@@ -318,7 +318,7 @@ export default function App() {
       if (companyId && cashier) {
         const wpRaw = await window.electron.store.get('workplace_id').catch(() => null)
         const workplaceId = (typeof wpRaw === 'string' && wpRaw) ? wpRaw : undefined
-        const cashierIdForPlu = fresh?.pluMode === 'cashier' ? cashier.id : null
+        const cashierIdForPlu = cashier.id
         window.electron.db.getPluGroups(companyId, workplaceId, cashierIdForPlu)
           .then(groups => { if (groups.length > 0) setPluGroups(groups) })
           .catch(() => {})

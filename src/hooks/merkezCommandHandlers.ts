@@ -31,14 +31,14 @@ export function pluGroupsToCacheRows(
   groups: PluGroup[],
   companyId: string,
   workplaceId: string | null,
-  terminalId?: string | null,
+  _terminalId?: string | null,
   cashierId?: string | null,
 ): PluGroupCacheRow[] {
   return groups.map((g, gi) => ({
     id:          g.id,
     companyId,
     workplaceId: workplaceId ?? undefined,
-    terminalId:  terminalId  ?? undefined,
+    // terminal_id artık kullanılmıyor — kasiyer bazlı PLU
     cashierId:   cashierId   ?? undefined,
     name:        g.name,
     color:       g.color || '#90CAF9',
@@ -69,48 +69,38 @@ function failResult(msg: string): SyncResult {
 }
 
 /**
- * PLU sync yardımcısı.
- * pluMode=cashier  -> SQLite'taki tüm kasiyerlerin PLU'larını ayrı ayrı çek ve yaz.
- *                    Giriş yapan kasiyerin PLU'sunu ekrana yansıt.
- * pluMode=terminal -> cashierId göndermeden terminal/firma bazlı çek ve yaz.
+ * PLU sync yardımcısı — kasiyer bazlı.
+ * SQLite'taki tüm kasiyerlerin PLU'larını ayrı ayrı çek ve yaz.
  */
 async function syncPlu(
   companyId: string,
   workplaceId: string | null,
   terminalId: string,
-  loggedInCashierId: string | null,
+  _loggedInCashierId: string | null,
   _mode: SyncMode,
 ): Promise<SyncResult> {
-  const terminalSettings = await window.electron.db.getPosSettings()
-  const pluMode = terminalSettings.pluMode
   /** Merkez `diff` gönderse bile PLU tam liste kabul edilir; diff dalı eski grupları silmediği için her zaman full senkron. */
   const pluSyncMode: SyncMode = 'full'
+  const allCashiers = await window.electron.db.getAllCashiers()
+  let anySuccess = false
 
-  if (pluMode === 'cashier') {
-    const allCashiers = await window.electron.db.getAllCashiers()
-    let anySuccess = false
-
-    for (const cashier of allCashiers) {
-      try {
-        const groups = await fetchPluGroupsFromServer(companyId, workplaceId, terminalId, cashier.id)
-        if (groups.length === 0) continue
-        const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, cashier.id)
-        const result = await window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
-        if (result.success) anySuccess = true
-      } catch (e) {
-        console.warn(`[syncPlu] kasiyer ${cashier.fullName} hatası:`, e)
-      }
+  for (const cashier of allCashiers) {
+    try {
+      const groups = await fetchPluGroupsFromServer(
+        companyId, workplaceId, terminalId, cashier.id,
+      )
+      if (groups.length === 0) continue
+      const cacheRows = pluGroupsToCacheRows(
+        groups, companyId, workplaceId, terminalId, cashier.id,
+      )
+      const result = await window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
+      if (result.success) anySuccess = true
+    } catch (e) {
+      console.warn(`[syncPlu] kasiyer ${cashier.fullName} hatası:`, e)
     }
-
-    return { success: anySuccess, inserted: 0, updated: 0, deleted: 0 }
   }
 
-  const groups = await fetchPluGroupsFromServer(companyId, workplaceId, terminalId, null)
-  if (groups.length === 0) {
-    return { success: false, inserted: 0, updated: 0, deleted: 0, error: 'Boş PLU listesi' }
-  }
-  const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, null)
-  return window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
+  return { success: anySuccess, inserted: 0, updated: 0, deleted: 0 }
 }
 
 async function refreshPluDisplay(
@@ -119,8 +109,7 @@ async function refreshPluDisplay(
   loggedInCashierId: string | null,
   onPluUpdated: (groups: PluGroupCacheRow[]) => void,
 ): Promise<void> {
-  const terminalSettings = await window.electron.db.getPosSettings()
-  const cashierIdForDisplay = terminalSettings.pluMode === 'cashier' ? loggedInCashierId : null
+  const cashierIdForDisplay = loggedInCashierId
   const cached = await window.electron.db.getPluGroups(companyId, workplaceId ?? undefined, cashierIdForDisplay)
   onPluUpdated(cached)
 }
@@ -131,12 +120,6 @@ export async function syncCashierPluOnLogin(
   terminalId:  string,
   cashierId:   string,
 ): Promise<PluGroupCacheRow[]> {
-  const terminalSettings = await window.electron.db.getPosSettings()
-
-  if (terminalSettings.pluMode !== 'cashier') {
-    return window.electron.db.getPluGroups(companyId, workplaceId ?? undefined, null)
-  }
-
   try {
     const groups = await Promise.race([
       fetchPluGroupsFromServer(companyId, workplaceId, terminalId, cashierId),
@@ -147,7 +130,9 @@ export async function syncCashierPluOnLogin(
 
     if (groups.length > 0) {
       await window.electron.db.deleteCashierPluForTerminal(terminalId)
-      const cacheRows = pluGroupsToCacheRows(groups, companyId, workplaceId, terminalId, cashierId)
+      const cacheRows = pluGroupsToCacheRows(
+        groups, companyId, workplaceId, terminalId, cashierId,
+      )
       await window.electron.db.syncPluGroupsAcid(cacheRows, 'full')
     } else {
       console.warn('[login] Kasiyer için PLU bulunamadı, eski cache kullanılacak:', cashierId)

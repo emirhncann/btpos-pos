@@ -97,6 +97,39 @@ export const api = {
     }))
   },
 
+  /** Kasiyer girişi — terminal erişim kontrolü dahil */
+  async loginCashier(
+    cashierCode: string,
+    password: string,
+    companyId: string,
+    terminalId: string,
+  ): Promise<{
+    ok: boolean
+    status: number
+    success?: boolean
+    code?: string
+    message?: string
+    error?: string
+    cashier_id?: string
+    full_name?: string
+    cashier_code?: string
+    role?: string
+    cashier?: Record<string, unknown>
+  }> {
+    const res = await fetch(`${API_URL}/cashiers/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cashier_code: cashierCode,
+        password,
+        company_id: companyId,
+        terminal_id: terminalId,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    return { ok: res.ok, status: res.status, ...data }
+  },
+
   // Komutları dinle (poll)
   async pollCommands(terminalId: string) {
     const res = await fetch(`${API_URL}/pos/commands/poll/${terminalId}`)
@@ -163,7 +196,6 @@ export const api = {
       fontSizePrice:       Number(d.font_size_price       ?? 13),
       fontSizeCode:        Number(d.font_size_code        ?? 9),
       source:              String(d.source                ?? 'default'),
-      pluMode:             d.plu_mode === 'cashier' ? 'cashier' : 'terminal',
       loginWithCode:       Boolean(d.login_with_code      ?? true),
       loginWithCard:       Boolean(d.login_with_card      ?? false),
       torbaCariId:         d.torba_cari_id != null && String(d.torba_cari_id).trim() !== ''
@@ -178,6 +210,7 @@ export const api = {
       printBehavior:       parseApiPrintBehavior(d.print_behavior),
       defaultTemplateIds:  parseApiDefaultTemplateIds(d.default_template_ids),
       allowExitWithHeldDocs: Boolean(d.allow_exit_with_held_docs ?? true),
+      cariPaymentUsePavo:  Boolean(d.cari_payment_use_pavo ?? false),
       terminalNumber:    d.terminal_number != null ? String(d.terminal_number) : null,
       workplaceName:      d.workplace_name ?? null,
       workplaceAddress:   d.workplace_address ?? null,
@@ -262,14 +295,12 @@ export const api = {
 /** Sunucudan PLU listesi — yalnızca sync_plu (veya benzeri komut) işlenirken; POS doğrudan SQLite okur. */
 export async function fetchPluGroupsFromServer(
   companyId: string,
-  workplaceId?: string | null,
-  terminalId?: string | null,
+  _workplaceId?: string | null,
+  _terminalId?: string | null,
   cashierId?: string | null,
 ): Promise<PluGroup[]> {
   const params = new URLSearchParams()
-  if (cashierId)   params.append('cashier_id',  cashierId)
-  if (terminalId)  params.append('terminal_id', terminalId)
-  if (workplaceId) params.append('workplace_id', workplaceId)
+  params.append('cashier_id', cashierId ?? '')
 
   const res = await fetch(
     `${API_URL}/plu/groups/${companyId}?${params.toString()}`,

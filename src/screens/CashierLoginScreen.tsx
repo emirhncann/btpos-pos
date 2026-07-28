@@ -3,6 +3,7 @@ import AppLogo from '../components/AppLogo'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { syncCashierPluOnLogin } from '../hooks/merkezCommandHandlers'
+import { api } from '../lib/api'
 
 interface Props {
   companyId:   string
@@ -139,17 +140,59 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
     setLoginStage('auth')
     setError('')
     try {
-      const cashier = await window.electron.db.verifyCashier(code.trim(), password.trim())
-      if (!cashier) {
-        setError('Kasiyer kodu veya şifre hatalı.')
+      const trimmedCode = code.trim()
+      const trimmedPw  = password.trim()
+
+      const data = await api.loginCashier(trimmedCode, trimmedPw, companyId, terminalId)
+
+      if (!data.ok || !data.success) {
+        if (data.code === 'TERMINAL_ACCESS_DENIED') {
+          setError('Bu kasiyerin bu kasada giriş yapma yetkisi bulunmuyor.')
+        } else {
+          setError(data.message ?? data.error ?? 'Giriş başarısız')
+        }
         setCode('')
         setPassword('')
         codeRef.current?.focus()
         return
       }
+
+      const nested = data.cashier ?? {}
+      const cashierId = String(data.cashier_id ?? nested.id ?? '')
+      if (!cashierId) {
+        setError('Giriş başarısız')
+        return
+      }
+
+      // Yerel kayıttan tam satırı al; yoksa API yanıtından oluştur
+      const local = await window.electron.db.verifyCashier(trimmedCode, trimmedPw)
+      const cashier: CashierRow = local ?? {
+        id:          cashierId,
+        companyId,
+        fullName:    String(data.full_name ?? nested.full_name ?? ''),
+        cashierCode: String(data.cashier_code ?? nested.cashier_code ?? trimmedCode),
+        password:    trimmedPw,
+        role:        String(data.role ?? nested.role ?? 'cashier'),
+        isActive:    true,
+        cardNumber:  null,
+      }
+
       await finishLogin(cashier)
     } catch (e) {
-      setError('Giriş yapılamadı: ' + (e instanceof Error ? e.message : String(e)))
+      // Ağ yoksa yerel doğrulamaya düş
+      try {
+        const cashier = await window.electron.db.verifyCashier(code.trim(), password.trim())
+        if (!cashier) {
+          setError('Kasiyer kodu veya şifre hatalı.')
+          setCode('')
+          setPassword('')
+          codeRef.current?.focus()
+          return
+        }
+        await finishLogin(cashier)
+      } catch {
+        setError('Giriş yapılamadı: ' + (e instanceof Error ? e.message : String(e)))
+      }
     } finally {
       setLoggingIn(false)
       setLoginStage('idle')
@@ -284,7 +327,16 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
               />
             </div>
             {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm">
+              <div style={{
+                padding:      '10px 14px',
+                borderRadius: 9,
+                background:   '#FEF2F2',
+                border:       '1px solid #FECACA',
+                color:        '#DC2626',
+                fontSize:     12,
+                fontWeight:   500,
+                textAlign:    'center',
+              }}>
                 {error}
               </div>
             )}
@@ -332,7 +384,17 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
             )}
 
             {error && (
-              <div className="w-full bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
+              <div style={{
+                width:        '100%',
+                padding:      '10px 14px',
+                borderRadius: 9,
+                background:   '#FEF2F2',
+                border:       '1px solid #FECACA',
+                color:        '#DC2626',
+                fontSize:     12,
+                fontWeight:   500,
+                textAlign:    'center',
+              }}>
                 {error}
               </div>
             )}
