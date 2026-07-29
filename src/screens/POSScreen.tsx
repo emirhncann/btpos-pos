@@ -5760,17 +5760,17 @@ export default function POSScreen({
             <div
               className="plu-groups-bar"
               style={{
-              width:         'clamp(68px, 11%, 104px)',
+              width:         'clamp(84px, 13%, 128px)',
               flexShrink:    0,
-              minWidth:      68,
+              minWidth:      84,
               boxSizing:     'border-box',
               background:    'white',
               display:       'flex',
               flexDirection: 'column',
               overflowX:     'hidden',
               overflowY:     'auto',
-              padding:       '4px 0',
-              gap:           3,
+              padding:       '5px 0',
+              gap:           4,
             }}>
               {pluGroups.map(g => {
                 const isActive = activeGroup === g.id
@@ -5780,7 +5780,7 @@ export default function POSScreen({
                     type="button"
                     onClick={() => { setActiveGroup(g.id); setPage(0); setSearchQ('') }}
                     style={{
-                      height:        68,
+                      height:        84,
                       border:        'none',
                       background:    isActive ? g.color : '#f8f9fa',
                       cursor:        'pointer',
@@ -5789,31 +5789,31 @@ export default function POSScreen({
                       flexDirection: 'column',
                       alignItems:    'center',
                       justifyContent:'center',
-                      gap:           3,
+                      gap:           4,
                       color:         isActive ? 'white' : '#6b7280',
-                      fontSize:      10,
+                      fontSize:      12,
                       fontWeight:    600,
                       textTransform: 'uppercase' as const,
                       letterSpacing: '0.2px',
                       flexShrink:    0,
                       width:         '100%',
-                      paddingRight:  5,
+                      paddingRight:  6,
                       borderRadius:  '8px 0 0 8px',
                     }}
                   >
                     <div style={{
                       position: 'absolute', right: 0, top: 0, bottom: 0,
-                      width: isActive ? 7 : 4, background: g.color, transition: 'width 0.15s',
+                      width: isActive ? 8 : 5, background: g.color, transition: 'width 0.15s',
                     }} />
                     {isActive && (
                       <div style={{
                         position: 'absolute', left: -1, top: '50%', transform: 'translateY(-50%)',
-                        borderTop: '6px solid transparent', borderBottom: '6px solid transparent',
-                        borderLeft: `6px solid ${g.color}`, zIndex: 3,
+                        borderTop: '7px solid transparent', borderBottom: '7px solid transparent',
+                        borderLeft: `7px solid ${g.color}`, zIndex: 3,
                       }} />
                     )}
                     <div style={{
-                      width: isActive ? 10 : 8, height: isActive ? 10 : 8,
+                      width: isActive ? 12 : 10, height: isActive ? 12 : 10,
                       borderRadius: '50%', background: isActive ? 'white' : g.color,
                       opacity: isActive ? 1 : 0.4, transition: 'all 0.15s',
                     }} />
@@ -5822,7 +5822,7 @@ export default function POSScreen({
                 )
               })}
               {pluGroups.length === 0 && (
-                <div style={{ padding: 8, fontSize: 9, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
+                <div style={{ padding: 8, fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 8 }}>
                   PLU grubu yok
                 </div>
               )}
