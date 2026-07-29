@@ -5741,14 +5741,68 @@ export default function POSScreen({
 
           {/* Sayfalama */}
           {!searchQ && (
-            <div style={{ padding: '0 8px', borderTop: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 30, flexShrink: 0 }}>
-              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}
-                style={{ background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '2px 8px', cursor: safePage === 0 ? 'default' : 'pointer', fontSize: 9, color: '#6b7280', opacity: safePage === 0 ? 0.3 : 1, height: 20 }}>
+            <div style={{
+              padding: '6px 10px',
+              borderTop: '1px solid #e5e7eb',
+              background: '#F8FAFC',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              minHeight: 48,
+              flexShrink: 0,
+            }}>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={safePage === 0}
+                style={{
+                  background: safePage === 0 ? '#F3F4F6' : '#1565C0',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 16px',
+                  cursor: safePage === 0 ? 'default' : 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: safePage === 0 ? '#9CA3AF' : 'white',
+                  opacity: safePage === 0 ? 0.55 : 1,
+                  minWidth: 110,
+                  boxShadow: safePage === 0 ? 'none' : '0 2px 6px rgba(21,101,192,0.28)',
+                }}
+              >
                 ← Önceki
               </button>
-              <span style={{ fontSize: 9, color: '#9ca3af' }}>{safePage + 1} / {totalPages} · {filtered.length} ürün</span>
-              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage >= totalPages - 1}
-                style={{ background: '#f3f4f6', border: '1px solid #e5e7eb', borderRadius: 4, padding: '2px 8px', cursor: safePage >= totalPages - 1 ? 'default' : 'pointer', fontSize: 9, color: '#6b7280', opacity: safePage >= totalPages - 1 ? 0.3 : 1, height: 20 }}>
+              <span style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: '#374151',
+                letterSpacing: '0.2px',
+                textAlign: 'center',
+                flex: 1,
+              }}>
+                {safePage + 1} / {totalPages}
+                <span style={{ fontWeight: 500, color: '#6B7280', marginLeft: 6 }}>
+                  · {filtered.length} ürün
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={safePage >= totalPages - 1}
+                style={{
+                  background: safePage >= totalPages - 1 ? '#F3F4F6' : '#1565C0',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 16px',
+                  cursor: safePage >= totalPages - 1 ? 'default' : 'pointer',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: safePage >= totalPages - 1 ? '#9CA3AF' : 'white',
+                  opacity: safePage >= totalPages - 1 ? 0.55 : 1,
+                  minWidth: 110,
+                  boxShadow: safePage >= totalPages - 1 ? 'none' : '0 2px 6px rgba(21,101,192,0.28)',
+                }}
+              >
                 Sonraki →
               </button>
             </div>
@@ -5791,7 +5845,7 @@ export default function POSScreen({
                       justifyContent:'center',
                       gap:           4,
                       color:         isActive ? 'white' : '#6b7280',
-                      fontSize:      12,
+                      fontSize:      10,
                       fontWeight:    600,
                       textTransform: 'uppercase' as const,
                       letterSpacing: '0.2px',
