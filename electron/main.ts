@@ -33,7 +33,9 @@ function getPavoLogPath(): string {
   }
 
   const date = new Date().toISOString().slice(0, 10)
-  return join(logsDir, `pavo_${date}.txt`)
+  const logPath = join(logsDir, `pavo_${date}.txt`)
+  console.log('[pavo:log] Log dosyası:', logPath)
+  return logPath
 }
 
 function pavoTransactionHandle(serialNo: string, seq: number) {
