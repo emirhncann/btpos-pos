@@ -132,6 +132,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
     clearDraft: () => electron.ipcRenderer.invoke("cart:clearDraft")
   },
   pavo: {
+    log: (entry) => electron.ipcRenderer.invoke("pavo:log", entry),
     getReturnableSale: (opts) => electron.ipcRenderer.invoke("pavo:getReturnableSale", opts),
     partialReturn: (opts) => electron.ipcRenderer.invoke("pavo:partialReturn", opts)
   },

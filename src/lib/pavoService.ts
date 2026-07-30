@@ -185,6 +185,14 @@ function pavoRetryHandle(data: Record<string, unknown>): Record<string, unknown>
 }
 
 async function pavoRequest(url: string, body: object): Promise<Record<string, unknown>> {
+  const endpoint = url.split('/').pop() ?? url
+
+  void window.electron.pavo.log({
+    direction: 'REQUEST',
+    endpoint,
+    data: body,
+  }).catch(() => {})
+
   const postJson = async (payload: object): Promise<Record<string, unknown>> => {
     const res = await fetch(url, {
       method: 'POST',
@@ -194,6 +202,7 @@ async function pavoRequest(url: string, body: object): Promise<Record<string, un
     return res.json() as Promise<Record<string, unknown>>
   }
 
+  const startTime = Date.now()
   let data = await postJson(body)
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -218,6 +227,15 @@ async function pavoRequest(url: string, body: object): Promise<Record<string, un
   }
 
   await syncPavoSequenceFromResponse(data)
+
+  const durationMs = Date.now() - startTime
+
+  void window.electron.pavo.log({
+    direction:  'RESPONSE',
+    endpoint,
+    data,
+    durationMs,
+  }).catch(() => {})
 
   return data
 }

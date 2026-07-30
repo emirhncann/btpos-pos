@@ -229,6 +229,12 @@ declare global {
         clearDraft(): Promise<{ success: boolean }>
       }
       pavo: {
+        log(entry: {
+          direction:   'REQUEST' | 'RESPONSE'
+          endpoint:    string
+          data:        unknown
+          durationMs?: number
+        }): Promise<void>
         getReturnableSale(opts: { searchBy: 'order' | 'sale'; query: string }): Promise<{
           success: boolean
           message?: string

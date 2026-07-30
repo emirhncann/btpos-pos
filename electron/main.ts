@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog, screen } from 'electron'
 import { exec } from 'child_process'
-import { existsSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdirSync, appendFileSync } from 'fs'
+import { join, dirname } from 'path'
 import type Database from 'better-sqlite3'
 import Store from 'electron-store'
 
@@ -22,6 +22,18 @@ function pavoLocalISOString(): string {
   const offset = now.getTimezoneOffset() * 60000
   const local = new Date(now.getTime() - offset)
   return local.toISOString().replace('Z', '').slice(0, 26)
+}
+
+function getPavoLogPath(): string {
+  const exeDir  = dirname(process.execPath)
+  const logsDir = join(exeDir, 'logs')
+
+  if (!existsSync(logsDir)) {
+    mkdirSync(logsDir, { recursive: true })
+  }
+
+  const date = new Date().toISOString().slice(0, 10)
+  return join(logsDir, `pavo_${date}.txt`)
 }
 
 function pavoTransactionHandle(serialNo: string, seq: number) {
@@ -1171,6 +1183,42 @@ app.whenReady().then(async () => {
   ipcMain.handle('cart:clearDraft', () => {
     db.prepare('DELETE FROM cart_draft WHERE id = ?').run('current')
     return { success: true as const }
+  })
+
+  ipcMain.handle('pavo:log', (_e, entry: {
+    direction:   'REQUEST' | 'RESPONSE'
+    endpoint:    string
+    data:        unknown
+    durationMs?: number
+  }) => {
+    try {
+      const now = new Date()
+      const ts  = now.toLocaleString('tr-TR', {
+        year:   'numeric', month:  '2-digit', day:    '2-digit',
+        hour:   '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
+      })
+
+      const lines: string[] = []
+      lines.push(`[${ts}] ${entry.direction} — ${entry.endpoint}`)
+
+      if (entry.direction === 'RESPONSE' && entry.durationMs !== undefined) {
+        lines.push(`         Süre: ${entry.durationMs}ms`)
+      }
+
+      lines.push(
+        JSON.stringify(entry.data, null, 2)
+          .split('\n')
+          .map(l => '  ' + l)
+          .join('\n')
+      )
+
+      lines.push('─'.repeat(80))
+
+      appendFileSync(getPavoLogPath(), lines.join('\n') + '\n')
+    } catch (e) {
+      console.warn('[pavo:log] Yazma hatası:', e)
+    }
   })
 
   ipcMain.handle('pavo:getReturnableSale', async (_e, opts: {

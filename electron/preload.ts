@@ -194,6 +194,12 @@ contextBridge.exposeInMainWorld('electron', {
     clearDraft: () => ipcRenderer.invoke('cart:clearDraft'),
   },
   pavo: {
+    log: (entry: {
+      direction:   'REQUEST' | 'RESPONSE'
+      endpoint:    string
+      data:        unknown
+      durationMs?: number
+    }) => ipcRenderer.invoke('pavo:log', entry),
     getReturnableSale: (opts: { searchBy: 'order' | 'sale'; query: string }) =>
       ipcRenderer.invoke('pavo:getReturnableSale', opts),
     partialReturn: (opts: {
