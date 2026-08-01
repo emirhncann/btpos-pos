@@ -17,6 +17,9 @@ import {
   type ScaleReading,
 } from './scaleService'
 
+/** Development mode — 1: DevTools konsolu otomatik açılır, 0: açılmaz. */
+const DEVELOPMENT_MODE: number = 1
+
 function pavoLocalISOString(): string {
   const now = new Date()
   const offset = now.getTimezoneOffset() * 60000
@@ -34,7 +37,7 @@ function getPavoLogPath(): string {
 
   const date = new Date().toISOString().slice(0, 10)
   const logPath = join(logsDir, `pavo_${date}.txt`)
-  console.log('[pavo:log] Log dosyası:', logPath)
+  logToDevTools('[pavo:log] Log dosyası:', logPath)
   return logPath
 }
 
@@ -351,6 +354,16 @@ function toggleDevTools(): void {
   }
 }
 
+/** Main process çıktısı renderer DevTools konsoluna düşmez; oraya da yansıtır. */
+function logToDevTools(...args: unknown[]): void {
+  console.log(...args)
+  if (DEVELOPMENT_MODE !== 1) return
+  const wc = mainWindow?.webContents
+  if (!wc || wc.isDestroyed()) return
+  const text = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')
+  wc.executeJavaScript(`console.log(${JSON.stringify(text)})`).catch(() => {})
+}
+
 /** Görev çubuğu / pencere ikonu — dev: kaynak dosya, paket: extraResources */
 function resolveAppIconPath(): string | undefined {
   if (app.isPackaged) {
@@ -383,9 +396,15 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
-    mainWindow.webContents.openDevTools()
   } else {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
+  }
+
+  if (DEVELOPMENT_MODE === 1) {
+    // Kiosk/tam ekranda pencereyi kapatmaması için ayrı pencerede aç
+    mainWindow.webContents.once('did-finish-load', () => {
+      mainWindow?.webContents.openDevTools({ mode: 'detach' })
+    })
   }
 
   mainWindow.once('ready-to-show', () => {
