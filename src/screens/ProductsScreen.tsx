@@ -54,6 +54,7 @@ export default function ProductsScreen({ companyId, cashier, onStartSale, onLogo
         unit:     String(p.unit ?? p.Unit ?? 'Adet'),
         stock:    Number(p.stock ?? p.Stock ?? 0),
         category: String(p.category ?? p.Category ?? ''),
+        modificationDate: p.modificationDate != null ? String(p.modificationDate) : null,
       }))
 
       await window.electron.db.saveProducts(items)

@@ -4,4 +4,4 @@ require("child_process");
 require("fs");
 require("path");
 require("electron-store");
-require("./main-DA-bcFVT.js");
+require("./main-roMA4_Hr.js");

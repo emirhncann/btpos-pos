@@ -231,9 +231,12 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
             const cat = p.category as Record<string, unknown> | null
             return {
               id: String(p.id ?? ''), code: String(p.code ?? ''), name: String(p.name ?? ''),
-              barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
-              vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
+              barcode:          String(p.barcode ?? ''),
+              price:            Number(p.salesPriceTaxIncluded ?? 0),
+              vatRate:          Number(p.vatRate ?? 20),
+              unit:             String(p.mainUnitName ?? 'Adet'),
               stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
+              modificationDate: p.modificationDate != null ? String(p.modificationDate) : null,
             }
           })
           results.products = await window.electron.db.syncProductsAcid(items, mode)
@@ -294,9 +297,12 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
           const cat = p.category as Record<string, unknown> | null
           return {
             id: String(p.id), code: String(p.code ?? ''), name: String(p.name ?? ''),
-            barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
-            vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
+            barcode:          String(p.barcode ?? ''),
+            price:            Number(p.salesPriceTaxIncluded ?? 0),
+            vatRate:          Number(p.vatRate ?? 20),
+            unit:             String(p.mainUnitName ?? 'Adet'),
             stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
+            modificationDate: p.modificationDate != null ? String(p.modificationDate) : null,
             syncedAt: new Date().toISOString(),
           }
         })
@@ -352,9 +358,12 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
           const cat = p.category as Record<string, unknown> | null
           return {
             id: String(p.id ?? ''), code: String(p.code ?? ''), name: String(p.name ?? ''),
-            barcode: String(p.barcode ?? ''), price: Number(p.salesPriceTaxIncluded ?? 0),
-            vatRate: Number(p.vatRate ?? 20), unit: String(p.mainUnitName ?? 'Adet'),
+            barcode:          String(p.barcode ?? ''),
+            price:            Number(p.salesPriceTaxIncluded ?? 0),
+            vatRate:          Number(p.vatRate ?? 20),
+            unit:             String(p.mainUnitName ?? 'Adet'),
             stock: Number(p.stock ?? 0), category: String(cat?.name ?? 'Diğer'),
+            modificationDate: p.modificationDate != null ? String(p.modificationDate) : null,
           }
         })
         const result = await window.electron.db.syncProductsAcid(items, mode)

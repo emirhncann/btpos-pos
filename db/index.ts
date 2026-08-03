@@ -43,7 +43,8 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       unit TEXT DEFAULT 'Adet',
       stock REAL DEFAULT 0,
       category TEXT,
-      synced_at TEXT
+      synced_at TEXT,
+      modification_date TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sales (
@@ -116,7 +117,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       id TEXT PRIMARY KEY, code TEXT, name TEXT NOT NULL,
       barcode TEXT, price REAL DEFAULT 0, vat_rate REAL DEFAULT 18,
       unit TEXT DEFAULT 'Adet', stock REAL DEFAULT 0,
-      category TEXT, synced_at TEXT
+      category TEXT, synced_at TEXT, modification_date TEXT
     );
 
     CREATE TABLE IF NOT EXISTS plu_groups_temp (
@@ -298,6 +299,8 @@ function addColumnIfMissing(sqlite: Database.Database, table: string, column: st
 
 /** Eski btpos.db — iskonto ve POS ayar sütunları */
 function migratePosDiscountAndSettings(sqlite: Database.Database) {
+  addColumnIfMissing(sqlite, 'products', 'modification_date', 'modification_date TEXT')
+  addColumnIfMissing(sqlite, 'products_temp', 'modification_date', 'modification_date TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'duplicate_item_action', `duplicate_item_action TEXT DEFAULT 'increase_qty'`)
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'min_qty_per_line', 'min_qty_per_line INTEGER DEFAULT 1')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_line_discount', 'allow_line_discount INTEGER DEFAULT 1')

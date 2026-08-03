@@ -431,6 +431,7 @@ declare global {
     stock:     number
     category?: string
     syncedAt?: string
+    modificationDate?: string | null
   }
 
   interface SaleItem {

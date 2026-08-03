@@ -21,6 +21,7 @@ export const products = sqliteTable('products', {
   stock: real('stock').default(0),
   category: text('category'),
   syncedAt: text('synced_at'),
+  modificationDate: text('modification_date'),
 })
 
 export const sales = sqliteTable('sales', {
@@ -228,6 +229,7 @@ export const productsTemp = sqliteTable('products_temp', {
   stock:     real('stock').default(0),
   category:  text('category'),
   syncedAt:  text('synced_at'),
+  modificationDate: text('modification_date'),
 })
 
 export const pluGroupsTemp = sqliteTable('plu_groups_temp', {

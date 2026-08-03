@@ -55,6 +55,17 @@ function isWeighedUnit(unit?: string | null): boolean {
   return WEIGHED_UNITS.has(norm)
 }
 
+function normalizetr(s: string): string {
+  return s
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/ı/g, 'i')
+}
+
 function fmtQty(n: number): string {
   return n % 1 === 0 ? String(n) : n.toFixed(3)
 }
@@ -766,11 +777,14 @@ export default function POSScreen({
   })()
 
   const filtered = searchQ
-    ? allProducts.filter(p =>
-        p.name.toLowerCase().includes(searchQ.toLowerCase()) ||
-        (p.code ?? '').toLowerCase().includes(searchQ.toLowerCase()) ||
-        (p.barcode ?? '').includes(searchQ)
-      )
+    ? (() => {
+        const q = normalizetr(searchQ)
+        return allProducts.filter(p =>
+          normalizetr(p.name).includes(q) ||
+          normalizetr(p.code ?? '').includes(q) ||
+          (p.barcode ?? '').includes(searchQ)
+        )
+      })()
     : groupProducts
 
   const pluCols      = posSettings.pluCols ?? 4

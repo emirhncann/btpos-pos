@@ -15,6 +15,7 @@ export interface ProductRow {
   stock: number
   category?: string
   syncedAt: string
+  modificationDate?: string | null
 }
 
 export interface SaleItem {
@@ -96,6 +97,7 @@ export function saveProducts(items: ProductRow[]): number {
       stock: item.stock ?? 0,
       category: item.category ?? '',
       syncedAt: now,
+      modificationDate: item.modificationDate ?? null,
     }).run()
   }
 
@@ -1435,8 +1437,8 @@ export function syncProductsAcid(items: ProductRow[], mode: SyncMode = 'full'): 
     db.prepare('DELETE FROM products_temp').run()
 
     const insertTemp = db.prepare(`
-      INSERT OR IGNORE INTO products_temp (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at)
-      VALUES (@id, @code, @name, @barcode, @price, @vatRate, @unit, @stock, @category, @syncedAt)
+      INSERT OR IGNORE INTO products_temp (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at, modification_date)
+      VALUES (@id, @code, @name, @barcode, @price, @vatRate, @unit, @stock, @category, @syncedAt, @modificationDate)
     `)
     for (const item of items) {
       insertTemp.run({
@@ -1450,6 +1452,7 @@ export function syncProductsAcid(items: ProductRow[], mode: SyncMode = 'full'): 
         stock: item.stock ?? 0,
         category: item.category ?? '',
         syncedAt: now,
+        modificationDate: item.modificationDate ?? null,
       })
     }
 
@@ -1470,8 +1473,8 @@ export function syncProductsAcid(items: ProductRow[], mode: SyncMode = 'full'): 
           .map(r => [r.id, r])
       )
       const insertMain = db.prepare(`
-        INSERT OR REPLACE INTO products (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at)
-        VALUES (@id, @code, @name, @barcode, @price, @vatRate, @unit, @stock, @category, @syncedAt)
+        INSERT OR REPLACE INTO products (id, code, name, barcode, price, vat_rate, unit, stock, category, synced_at, modification_date)
+        VALUES (@id, @code, @name, @barcode, @price, @vatRate, @unit, @stock, @category, @syncedAt, @modificationDate)
       `)
       for (const item of items) {
         const ex = existing.get(item.id)
@@ -1487,6 +1490,7 @@ export function syncProductsAcid(items: ProductRow[], mode: SyncMode = 'full'): 
             stock: item.stock ?? 0,
             category: item.category ?? '',
             syncedAt: now,
+            modificationDate: item.modificationDate ?? null,
           })
           if (ex) updated++
           else inserted++
