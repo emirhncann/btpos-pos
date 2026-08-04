@@ -34,7 +34,7 @@ export interface SaleItem {
 export interface SalePaymentRow {
   id:            string
   saleId:        string
-  method:        'cash' | 'card' | 'meal_card'
+  method:        'cash' | 'card' | 'meal_card' | 'other'
   amount:        number
   mediator?:     number | null
   acquirerId?:   string | null
@@ -2172,4 +2172,31 @@ export function getCariPayments(opts: {
     description:   r.description   != null ? String(r.description)   : null,
     created_at:    String(r.created_at),
   }))
+}
+
+export function saveEnabledBrands(
+  terminalId: string,
+  brands: Array<{ payment_provider_brand_id: number; payment_provider_brand_nm: string; payment_mediator: number }>
+): void {
+  const db = getSqlite()
+  db.prepare(`DELETE FROM enabled_payment_brands WHERE terminal_id = ?`).run(terminalId)
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO enabled_payment_brands
+      (terminal_id, payment_provider_brand_id, payment_provider_brand_nm, payment_mediator, synced_at)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  for (const b of brands) {
+    stmt.run(terminalId, b.payment_provider_brand_id, b.payment_provider_brand_nm, b.payment_mediator, new Date().toISOString())
+  }
+}
+
+export function getEnabledBrands(terminalId: string): Array<{
+  payment_provider_brand_id: number
+  payment_provider_brand_nm: string
+  payment_mediator:          number
+}> {
+  return getSqlite().prepare(
+    `SELECT payment_provider_brand_id, payment_provider_brand_nm, payment_mediator
+     FROM enabled_payment_brands WHERE terminal_id = ? ORDER BY payment_provider_brand_id ASC`
+  ).all(terminalId) as Array<{ payment_provider_brand_id: number; payment_provider_brand_nm: string; payment_mediator: number }>
 }

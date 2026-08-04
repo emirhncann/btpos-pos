@@ -124,7 +124,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
     upsertUnitMapping: (row) => electron.ipcRenderer.invoke("db:upsertUnitMapping", row),
     getAllUnitMappings: (companyId) => electron.ipcRenderer.invoke("db:getAllUnitMappings", companyId),
     getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale"),
-    getRecentSales: (opts) => electron.ipcRenderer.invoke("db:getRecentSales", opts)
+    getRecentSales: (opts) => electron.ipcRenderer.invoke("db:getRecentSales", opts),
+    saveEnabledBrands: (terminalId, brands) => electron.ipcRenderer.invoke("db:saveEnabledBrands", terminalId, brands),
+    getEnabledBrands: (terminalId) => electron.ipcRenderer.invoke("db:getEnabledBrands", terminalId)
   },
   cart: {
     saveDraft: (opts) => electron.ipcRenderer.invoke("cart:saveDraft", opts),

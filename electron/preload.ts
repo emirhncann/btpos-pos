@@ -181,6 +181,10 @@ contextBridge.exposeInMainWorld('electron', {
       timeFrom?: string
       timeTo?: string
     }) => ipcRenderer.invoke('db:getRecentSales', opts),
+    saveEnabledBrands: (terminalId: string, brands: unknown[]) =>
+      ipcRenderer.invoke('db:saveEnabledBrands', terminalId, brands),
+    getEnabledBrands: (terminalId: string) =>
+      ipcRenderer.invoke('db:getEnabledBrands', terminalId),
   },
   cart: {
     saveDraft: (opts: {

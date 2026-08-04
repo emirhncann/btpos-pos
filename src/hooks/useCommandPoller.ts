@@ -9,19 +9,20 @@ export function syncModeFromPayload(payload: unknown): SyncMode {
 }
 
 export interface CommandHandlers {
-  onSyncAll:        (mode?: SyncMode) => Promise<void>
-  onSyncPrices:     () => Promise<void>
-  onSyncCashiers:   (mode?: SyncMode) => Promise<void>
-  onSyncPlu:        (mode?: SyncMode) => Promise<void>
-  onSyncCustomers:  (mode?: SyncMode) => Promise<void>
-  onSyncProducts:   (mode?: SyncMode) => Promise<void>
-  onSyncSettings:   () => Promise<void>
-  onSyncTemplates:  () => Promise<void>
-  onPairPavo:       (payload?: Record<string, unknown>) => Promise<void>
-  onLogout:         () => void
-  onMessage:        (text: string, duration?: number) => void
-  onRestart:        () => void
-  onLock:           (reason?: string) => void
+  onSyncAll:            (mode?: SyncMode) => Promise<void>
+  onSyncPrices:         () => Promise<void>
+  onSyncCashiers:       (mode?: SyncMode) => Promise<void>
+  onSyncPlu:            (mode?: SyncMode) => Promise<void>
+  onSyncCustomers:      (mode?: SyncMode) => Promise<void>
+  onSyncProducts:       (mode?: SyncMode) => Promise<void>
+  onSyncSettings:       () => Promise<void>
+  onSyncTemplates:      () => Promise<void>
+  onSyncPaymentBrands:  () => Promise<void>
+  onPairPavo:           (payload?: Record<string, unknown>) => Promise<void>
+  onLogout:             () => void
+  onMessage:            (text: string, duration?: number) => void
+  onRestart:            () => void
+  onLock:               (reason?: string) => void
 }
 
 const SYNC_KINDS = new Set([
@@ -33,6 +34,7 @@ const SYNC_KINDS = new Set([
   'sync_customers',
   'sync_settings',
   'sync_templates',
+  'sync_payment_brands',
 ])
 
 /** API / panel farklı isim gönderebilir */
@@ -163,6 +165,10 @@ export function useCommandPoller(
                   console.warn('[POLL][sync_settings] 3000ms kontrol hatası:', e)
                 }
               }, 3000)
+              break
+
+            case 'sync_payment_brands':
+              await h.onSyncPaymentBrands()
               break
 
             case 'pair_pavo':

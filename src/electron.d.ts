@@ -212,6 +212,8 @@ declare global {
           timeFrom?: string
           timeTo?: string
         }) => Promise<RecentSaleRow[]>
+        saveEnabledBrands(terminalId: string, brands: PaymentProviderBrand[]): Promise<{ success: boolean }>
+        getEnabledBrands(terminalId: string): Promise<PaymentProviderBrand[]>
       }
       cart: {
         saveDraft(opts: {
@@ -434,6 +436,12 @@ declare global {
     modificationDate?: string | null
   }
 
+  interface PaymentProviderBrand {
+    payment_provider_brand_id: number
+    payment_provider_brand_nm: string
+    payment_mediator:          number
+  }
+
   interface SaleItem {
     productId?:      string
     productCode?:    string
@@ -509,7 +517,7 @@ declare global {
   interface SalePaymentRow {
     id:            string
     saleId:        string
-    method:        'cash' | 'card' | 'meal_card'
+    method:        'cash' | 'card' | 'meal_card' | 'other'
     amount:        number
     mediator?:     number | null
     acquirerId?:   string | null

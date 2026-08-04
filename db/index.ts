@@ -614,6 +614,18 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       created_at    TEXT NOT NULL
     )
   `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS enabled_payment_brands (
+      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+      terminal_id               TEXT    NOT NULL,
+      payment_provider_brand_id INTEGER NOT NULL,
+      payment_provider_brand_nm TEXT    NOT NULL,
+      payment_mediator          INTEGER NOT NULL,
+      synced_at                 TEXT    NOT NULL,
+      UNIQUE(terminal_id, payment_provider_brand_id)
+    )
+  `)
 }
 
 function migrateHeldDocuments(sqlite: Database.Database) {

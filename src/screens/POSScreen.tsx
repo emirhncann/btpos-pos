@@ -237,6 +237,7 @@ interface Props {
   allProducts:     ProductRow[]
   pluGroups:       PluGroupCacheRow[]
   posSettings:     PosSettingsRow
+  syncedEnabledBrands?: PaymentProviderBrand[] | null
   onBack:          () => void
   onLogout:        () => void
   pendingMessage?: { text: string } | null
@@ -251,7 +252,7 @@ interface Props {
   customerDisplay?: boolean
 }
 
-type PaymentMethodKey = 'cash' | 'card' | 'meal_card'
+type PaymentMethodKey = 'cash' | 'card' | 'meal_card' | 'other'
 
 interface PaymentLine {
   id: string
@@ -259,6 +260,7 @@ interface PaymentLine {
   amount: number
   label: string
   mediator: number
+  brand?: number
   acquirerId?: string | null
   acquirerName?: string | null
 }
@@ -371,6 +373,7 @@ function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout =
 export default function POSScreen({
   companyId, cashier, allProducts,
   pluGroups, posSettings,
+  syncedEnabledBrands = null,
   onBack, onLogout,
   pendingMessage, onMessageClose,
   merkezToast = null,
@@ -396,6 +399,10 @@ export default function POSScreen({
   const [paymentLines, setPaymentLines]   = useState<PaymentLine[]>([])
   const [activeMethod, setActiveMethod]   = useState<PaymentMethodKey | null>(null)
   const [pendingAmount, setPendingAmount] = useState('')
+  const [enabledBrands, setEnabledBrands] = useState<PaymentProviderBrand[]>([])
+  const [showOtherPayments, setShowOtherPayments] = useState(false)
+  const [selectedBrand, setSelectedBrand] = useState<PaymentProviderBrand | null>(null)
+  const [terminalId, setTerminalId] = useState<string | null>(null)
   const [saving, setSaving]               = useState(false)
   const [lastReceipt, setLastReceipt]     = useState<string | null>(null)
   const [returnMode, setReturnMode]       = useState(false)
@@ -580,6 +587,42 @@ export default function POSScreen({
       setCustomers([])
     }
   }, [companyId])
+
+  useEffect(() => {
+    void window.electron.store.get('terminal_id').then(v => {
+      setTerminalId((v as string | null) ?? null)
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!terminalId) return
+    void (async () => {
+      try {
+        const token = await window.electron.store.get('token').catch(() => null) as string | null
+        const r = await fetch(`${API_URL}/payment-provider-brands/enabled/${terminalId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!r.ok) throw new Error('API başarısız')
+        const brands = await r.json() as PaymentProviderBrand[]
+        const list = Array.isArray(brands) ? brands : []
+        setEnabledBrands(list)
+        await window.electron.db.saveEnabledBrands(terminalId, list)
+      } catch {
+        try {
+          const cached = await window.electron.db.getEnabledBrands(terminalId)
+          setEnabledBrands(cached)
+        } catch {
+          /* yok say */
+        }
+      }
+    })()
+  }, [terminalId])
+
+  useEffect(() => {
+    if (syncedEnabledBrands !== null) {
+      setEnabledBrands(syncedEnabledBrands)
+    }
+  }, [syncedEnabledBrands])
 
   useEffect(() => {
     if (!showCustomer || !companyId) return
@@ -1241,38 +1284,6 @@ export default function POSScreen({
     }
   }
 
-  function addPaymentLine(method: PaymentMethodKey) {
-    const amt = parseFloat(pendingAmount.replace(',', '.')) || 0
-
-    if (method === 'cash') {
-      const cashAmt = amt > 0 ? amt : remaining
-      setPaymentLines(prev => [...prev, {
-        id: crypto.randomUUID(),
-        method: 'cash',
-        amount: parseFloat(cashAmt.toFixed(2)),
-        label: 'Nakit',
-        mediator: 1,
-      }])
-    } else if (method === 'card') {
-      const cardAmt = amt > 0 ? Math.min(amt, remaining) : remaining
-      if (cardAmt <= 0) return
-      setPaymentLines(prev => [...prev, {
-        id: crypto.randomUUID(),
-        method: 'card',
-        amount: parseFloat(cardAmt.toFixed(2)),
-        label: 'Kart',
-        mediator: 2,
-      }])
-    }
-
-    setPendingAmount('')
-    setActiveMethod(null)
-  }
-
-  function removePaymentLine(id: string) {
-    setPaymentLines(prev => prev.filter(l => l.id !== id))
-  }
-
   /* ── Menü işlemleri ── */
 
   async function holdDoc() {
@@ -1805,7 +1816,15 @@ export default function POSScreen({
           cashRemaining = Math.max(0, cashRemaining - cashPart)
           return { Mediator: l.mediator, Amount: cashPart, CurrencyCode: 'TRY', ExchangeRate: 1 }
         }
-        return { Mediator: l.mediator, Amount: l.amount, CurrencyCode: 'TRY', ExchangeRate: 1 }
+        const p: {
+          Mediator: number
+          Amount: number
+          CurrencyCode: string
+          ExchangeRate: number
+          Brand?: number
+        } = { Mediator: l.mediator, Amount: l.amount, CurrencyCode: 'TRY', ExchangeRate: 1 }
+        if (l.method === 'other' && l.brand) p.Brand = l.brand
+        return p
       }).filter(p => p.Amount > 0)
 
       if (pavoSettings) {
@@ -2014,7 +2033,11 @@ export default function POSScreen({
           pavoSettings!,
           addSeq,
           saleRef,
-          { mediator: line.mediator, amount: payAmount },
+          {
+            mediator: line.mediator,
+            amount: payAmount,
+            ...(line.method === 'other' && line.brand ? { brand: line.brand } : {}),
+          },
           { grossPrice: round2(araToplamBrut), totalPrice: grandTotal },
         )
 
@@ -5900,7 +5923,7 @@ export default function POSScreen({
 
           {/* Ödeme — wrapper altında, tam genişlik */}
           <div style={{ padding: '5px 8px 8px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
-            {!paymentMode ? (
+            {!paymentMode && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
                   onClick={() => {
@@ -5970,7 +5993,7 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
-                    gridColumn: 'span 2',
+                    gridColumn: enabledBrands.length > 0 ? undefined : 'span 2',
                     padding: '11px 4px',
                     borderRadius: 7,
                     border: 'none',
@@ -5984,111 +6007,408 @@ export default function POSScreen({
                   🔀 Karma Ödeme
                 </button>
                 )}
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {paymentLines.map(line => (
-                  <div key={line.id} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '8px 12px',
-                    borderRadius: 8,
-                    background: line.method === 'cash' ? '#E8F5E9' : '#E3F2FD',
-                    border: `1px solid ${line.method === 'cash' ? '#A5D6A7' : '#90CAF9'}`,
-                  }}>
-                    <span style={{ fontSize: 13, flex: 1, fontWeight: 500 }}>{line.label}</span>
-                    <span style={{ fontSize: 14, fontWeight: 700 }}>
-                      {line.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                    </span>
-                    <button onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', fontSize: 16 }}>
-                      ✕
-                    </button>
-                  </div>
-                ))}
-
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  padding: '7px 12px',
-                  borderRadius: 8,
-                  background: remaining === 0 ? '#F0FDF4' : '#FFF8E1',
-                  border: `1px solid ${remaining === 0 ? '#86EFAC' : '#FDE68A'}`,
-                }}>
-                  <span style={{ fontSize: 12, color: '#6B7280' }}>Kalan</span>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: remaining === 0 ? '#2E7D32' : '#E65100' }}>
-                    {remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                  </span>
-                </div>
-
-                {activeMethod && (
-                  <div style={{ padding: '5px 12px', borderRadius: 8, background: '#F3F4F6', fontSize: 12, color: '#374151' }}>
-                    {activeMethod === 'cash' ? '💵' : '💳'} Tutar: <strong>{pendingAmount || '(kalan tutar)'}</strong>
-                  </div>
+                {!returnMode && enabledBrands.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (cart.length === 0) return
+                      setShowOtherPayments(true)
+                      setSelectedBrand(null)
+                    }}
+                    disabled={cart.length === 0}
+                    style={{
+                      padding: '11px 4px',
+                      borderRadius: 7,
+                      border: cart.length === 0 ? 'none' : '1.5px solid #E5E7EB',
+                      background: cart.length === 0 ? '#f5f5f5' : '#F9FAFB',
+                      color: cart.length === 0 ? '#bdbdbd' : '#374151',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: cart.length === 0 ? 'default' : 'pointer',
+                    }}
+                  >
+                    🔖 Diğer
+                  </button>
                 )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                  <button
-                    onClick={() => {
-                      if (activeMethod === 'cash') addPaymentLine('cash')
-                      else { setActiveMethod('cash'); setPendingAmount('') }
-                    }}
-                    disabled={remaining <= 0 && activeMethod !== 'cash'}
-                    style={{
-                      padding: '10px', borderRadius: 8, border: '2px solid',
-                      borderColor: activeMethod === 'cash' ? '#2E7D32' : '#A5D6A7',
-                      background: activeMethod === 'cash' ? '#E8F5E9' : 'white',
-                      color: '#2E7D32', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                    }}>
-                    {activeMethod === 'cash' ? '✓ Nakit Ekle' : '💵 Nakit'}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      if (activeMethod === 'card') addPaymentLine('card')
-                      else { setActiveMethod('card'); setPendingAmount('') }
-                    }}
-                    disabled={remaining <= 0 && activeMethod !== 'card'}
-                    style={{
-                      padding: '10px', borderRadius: 8, border: '2px solid',
-                      borderColor: activeMethod === 'card' ? '#1565C0' : '#90CAF9',
-                      background: activeMethod === 'card' ? '#E3F2FD' : 'white',
-                      color: '#1565C0', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                    }}>
-                    {activeMethod === 'card' ? '✓ Kart Ekle' : '💳 Kart'}
-                  </button>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 6 }}>
-                  <button
-                    onClick={() => {
-                      setPaymentMode(false)
-                      setPaymentLines([])
-                      setActiveMethod(null)
-                      setPendingAmount('')
-                    }}
-                    style={{ padding: '10px', borderRadius: 8, border: '1px solid #E0E0E0', background: 'white', cursor: 'pointer', fontSize: 12, color: '#374151' }}>
-                    İptal
-                  </button>
-                  <button
-                    onClick={() => void (returnMode ? completeReturn() : completeSale())}
-                    disabled={remaining !== 0 || saving}
-                    style={{
-                      padding: '10px', borderRadius: 8, border: 'none',
-                      background: remaining === 0 && !saving ? '#1565C0' : '#E5E7EB',
-                      color: remaining === 0 && !saving ? 'white' : '#9CA3AF',
-                      fontWeight: 700, fontSize: 13,
-                      cursor: remaining === 0 && !saving ? 'pointer' : 'default',
-                    }}>
-                    {saving ? 'İşleniyor...' : `Tamamla ✓  ${grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`}
-                  </button>
-                </div>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {paymentMode && !returnMode && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9000,
+          background: 'rgba(23,26,32,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 24,
+        }}>
+          <div style={{
+            width: '100%', maxWidth: 1000,
+            background: 'white', border: '1px solid #E3E5E9',
+            borderRadius: 16, boxShadow: '0 20px 50px rgba(24,28,38,0.22)',
+            overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '92vh',
+          }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '20px 26px', borderBottom: '1px solid #E3E5E9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#3457D5' }} />
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 600, color: '#232733' }}>Karma Ödeme</div>
+                  <div style={{ fontSize: 12, color: '#989BA3', marginTop: 2 }}>
+                    {cart.length} kalem · {fmt(grandTotal)}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => {
+                setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
+                setPendingAmount(''); setSelectedBrand(null);
+              }}
+                style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: '#FAFAFB', border: '1px solid #E3E5E9', borderRadius: 8,
+                  color: '#61656D', cursor: 'pointer', fontSize: 13 }}>✕</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ display: 'grid', gridTemplateColumns: '322px 1fr', flex: 1, minHeight: 0 }}>
+
+              {/* Sol kolon */}
+              <div style={{ background: '#FAFAFB', borderRight: '1px solid #E3E5E9',
+                display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
+
+                {/* Kalan tutar */}
+                <div style={{ padding: '22px 24px 20px', borderBottom: '1px solid #E3E5E9' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+                    textTransform: 'uppercase' as const, color: '#989BA3', marginBottom: 8 }}>
+                    Kalan Tutar
+                  </div>
+                  <div style={{ fontSize: 34, fontWeight: 600, fontFamily: 'monospace',
+                    color: remaining <= 0 ? '#17845A' : '#232733', lineHeight: 1.1 }}>
+                    <span style={{ fontSize: 19, color: '#989BA3', fontWeight: 500, marginRight: 2 }}>₺</span>
+                    {remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ height: 7, background: '#F1F2F4', borderRadius: 99, marginTop: 16, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%', borderRadius: 99, transition: 'width 0.35s ease',
+                      background: remaining <= 0 ? '#17845A' : '#3457D5',
+                      width: `${grandTotal > 0 ? Math.min((paidTotal / grandTotal) * 100, 100) : 0}%`,
+                    }} />
+                  </div>
+                </div>
+
+                {/* Özet */}
+                <div style={{ borderBottom: '1px solid #E3E5E9' }}>
+                  {[{ k: 'Sepet Tutarı', v: fmt(grandTotal) }, { k: 'Ödenen', v: fmt(paidTotal) }].map(({ k, v }) => (
+                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between',
+                      fontSize: 13, padding: '8px 24px' }}>
+                      <span style={{ color: '#61656D' }}>{k}</span>
+                      <span style={{ fontWeight: 600, color: '#232733', fontFamily: 'monospace' }}>₺{v}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Eklenen ödemeler */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+                    textTransform: 'uppercase' as const, color: '#989BA3', padding: '16px 24px 10px' }}>
+                    Eklenen Ödemeler
+                  </div>
+                  {paymentLines.length === 0 ? (
+                    <div style={{ color: '#989BA3', fontSize: 12.5, textAlign: 'center', padding: '8px 24px 20px' }}>
+                      Henüz ödeme eklenmedi.
+                    </div>
+                  ) : paymentLines.map((line, idx) => {
+                    const badgeMap: Record<string, { bg: string; fg: string; label: string }> = {
+                      cash:  { bg: '#FDF1DE', fg: '#A8620A', label: 'NK' },
+                      card:  { bg: '#ECF0FD', fg: '#3457D5', label: 'KK' },
+                      other: { bg: '#F3E9FB', fg: '#7A3AAB', label: line.label.slice(0, 2).toUpperCase() },
+                    }
+                    const b = badgeMap[line.method] ?? badgeMap.other
+                    return (
+                      <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '9px 24px' }}>
+                        <div style={{ width: 34, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 10.5, fontWeight: 700, borderRadius: 7, flexShrink: 0,
+                          background: b.bg, color: b.fg }}>{b.label}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: '#232733' }}>{line.label}</div>
+                          <div style={{ fontSize: 11, color: '#989BA3' }}>Ödeme {idx + 1}</div>
+                        </div>
+                        <span style={{ fontWeight: 600, fontSize: 13.5, color: '#232733', fontFamily: 'monospace' }}>
+                          ₺{line.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        </span>
+                        <button onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
+                          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#989BA3', cursor: 'pointer', border: 'none', background: 'transparent', fontSize: 12, borderRadius: 6 }}>✕</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Sağ kolon */}
+              <div style={{ padding: '24px 26px', display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+
+                {/* Yöntem butonları — Nakit, Kart + brand'lar inline */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+                    textTransform: 'uppercase' as const, color: '#989BA3', marginBottom: 12 }}>
+                    Ödeme Yöntemi
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <button
+                      onClick={() => { setActiveMethod('cash'); setSelectedBrand(null); setPendingAmount('') }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '10px 12px', borderRadius: 7, cursor: 'pointer',
+                        fontSize: 13, fontWeight: 600, textAlign: 'left' as const,
+                        border:      activeMethod === 'cash' ? '1px solid #A8620A' : '1px solid #E3E5E9',
+                        background:  activeMethod === 'cash' ? '#FDF1DE' : 'white',
+                        color:       activeMethod === 'cash' ? '#A8620A' : '#232733',
+                        boxShadow:   activeMethod === 'cash' ? '0 0 0 1px #A8620A' : 'none',
+                      }}>
+                      <span style={{ width: 28, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 700, borderRadius: 5, background: '#FDF1DE', color: '#A8620A' }}>NK</span>
+                      Nakit
+                    </button>
+
+                    <button
+                      onClick={() => { setActiveMethod('card'); setSelectedBrand(null); setPendingAmount('') }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '10px 12px', borderRadius: 7, cursor: 'pointer',
+                        fontSize: 13, fontWeight: 600, textAlign: 'left' as const,
+                        border:      activeMethod === 'card' ? '1px solid #3457D5' : '1px solid #E3E5E9',
+                        background:  activeMethod === 'card' ? '#ECF0FD' : 'white',
+                        color:       activeMethod === 'card' ? '#3457D5' : '#232733',
+                        boxShadow:   activeMethod === 'card' ? '0 0 0 1px #3457D5' : 'none',
+                      }}>
+                      <span style={{ width: 28, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 700, borderRadius: 5, background: '#ECF0FD', color: '#3457D5' }}>KK</span>
+                      Kart
+                    </button>
+
+                    {enabledBrands.map(brand => (
+                      <button
+                        key={brand.payment_provider_brand_id}
+                        onClick={() => {
+                          setActiveMethod('other')
+                          setSelectedBrand(brand)
+                          setPendingAmount('')
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '10px 12px', borderRadius: 7, cursor: 'pointer',
+                          fontSize: 12, fontWeight: 600, textAlign: 'left' as const,
+                          border:     activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                            ? '1px solid #7A3AAB' : '1px solid #E3E5E9',
+                          background: activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                            ? '#F3E9FB' : 'white',
+                          color:      activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                            ? '#7A3AAB' : '#232733',
+                          boxShadow:  activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                            ? '0 0 0 1px #7A3AAB' : 'none',
+                        }}>
+                        <span style={{ width: 28, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 9, fontWeight: 700, borderRadius: 5, background: '#F3E9FB', color: '#7A3AAB',
+                          flexShrink: 0 }}>
+                          {brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
+                        </span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {brand.payment_provider_brand_nm}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Numpad — HER ZAMAN GÖRÜNÜR */}
+                <div style={{ border: '1px solid #E3E5E9', borderRadius: 9, background: 'white', overflow: 'hidden' }}>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '13px 16px', background: '#FAFAFB', borderBottom: '1px solid #E3E5E9' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: activeMethod ? '#232733' : '#989BA3' }}>
+                      {activeMethod === 'cash' ? '💵 Nakit'
+                        : activeMethod === 'card' ? '💳 Kredi Kartı'
+                        : activeMethod === 'other' && selectedBrand ? selectedBrand.payment_provider_brand_nm
+                        : 'Yöntem Seçin'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => {
+                        const half = remaining / 2
+                        setPendingAmount(half.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
+                      }}
+                        disabled={!activeMethod || remaining <= 0}
+                        style={{ padding: '6px 11px', borderRadius: 6, border: '1px solid #E3E5E9',
+                          background: 'white', color: '#61656D', fontSize: 11, fontWeight: 600,
+                          cursor: activeMethod ? 'pointer' : 'default',
+                          opacity: activeMethod ? 1 : 0.4 }}>Yarısı</button>
+                      <button onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
+                        disabled={!activeMethod || remaining <= 0}
+                        style={{ padding: '6px 11px', borderRadius: 6, border: '1px solid #E3E5E9',
+                          background: 'white', color: '#61656D', fontSize: 11, fontWeight: 600,
+                          cursor: activeMethod ? 'pointer' : 'default',
+                          opacity: activeMethod ? 1 : 0.4 }}>Kalanı Ekle</button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: 34, fontWeight: 600, textAlign: 'right' as const,
+                    padding: '18px 20px 8px', color: pendingAmount ? '#232733' : '#989BA3',
+                    fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 18, color: '#989BA3', fontWeight: 500, marginRight: 4 }}>₺</span>
+                    {pendingAmount || '0,00'}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, padding: '4px 14px 14px' }}>
+                    {['1','2','3','4','5','6','7','8','9','00','0','⌫'].map(k => (
+                      <button key={k}
+                        onClick={() => {
+                          if (k === '⌫') { setPendingAmount(v => v.slice(0, -1)); return }
+                          setPendingAmount(v => {
+                            if (v.replace(/[,\.]/g,'').length >= 9) return v
+                            if (k === '00') return v.includes(',') ? v : (v + '00')
+                            return v + k
+                          })
+                        }}
+                        style={{
+                          padding: '13px 0', borderRadius: 7, border: '1px solid #E3E5E9',
+                          background: k === '⌫' ? '#FBE9EC' : 'white',
+                          color:      k === '⌫' ? '#D1354F' : '#232733',
+                          fontSize: 15, fontWeight: 600, cursor: 'pointer',
+                          fontFamily: 'monospace',
+                        }}>{k}</button>
+                    ))}
+                  </div>
+
+                  <button
+                    disabled={!activeMethod || !pendingAmount || remaining <= 0}
+                    onClick={() => {
+                      if (!activeMethod || !pendingAmount) return
+                      const raw = pendingAmount.replace(/\./g, '').replace(',', '.')
+                      const amt = parseFloat(raw) || 0
+                      if (amt <= 0) return
+                      setPaymentLines(prev => [...prev, {
+                        id:       crypto.randomUUID(),
+                        method:   activeMethod,
+                        amount:   Math.round(amt * 100) / 100,
+                        label:    activeMethod === 'cash' ? 'Nakit'
+                          : activeMethod === 'card' ? 'Kredi Kartı'
+                          : selectedBrand?.payment_provider_brand_nm ?? 'Diğer',
+                        mediator: activeMethod === 'cash' ? 1 : activeMethod === 'card' ? 2
+                          : selectedBrand?.payment_mediator ?? 14,
+                        brand:    activeMethod === 'other' ? selectedBrand?.payment_provider_brand_id : undefined,
+                      }])
+                      setPendingAmount('')
+                      setActiveMethod(null)
+                      setSelectedBrand(null)
+                    }}
+                    style={{
+                      width: 'calc(100% - 28px)', margin: '0 14px 14px',
+                      padding: '13px 0', border: 'none', borderRadius: 8,
+                      background: (!activeMethod || !pendingAmount || remaining <= 0) ? '#F1F2F4' : '#3457D5',
+                      color:      (!activeMethod || !pendingAmount || remaining <= 0) ? '#989BA3' : 'white',
+                      fontWeight: 600, fontSize: 13.5, cursor: 'pointer',
+                    }}
+                  >
+                    {activeMethod ? 'Ödemeyi Ekle' : 'Yöntem Seçin'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 10, padding: '16px 26px', borderTop: '1px solid #E3E5E9' }}>
+              <span style={{ fontSize: 12, color: '#989BA3' }}>
+                {remaining <= 0
+                  ? 'Tutarın tamamı karşılandı, işlemi tamamlayabilirsiniz.'
+                  : 'Toplam tutarın tamamı karşılanmadan işlem tamamlanamaz.'}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
+                    setPendingAmount(''); setSelectedBrand(null);
+                  }}
+                  style={{ padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', border: '1px solid #E3E5E9', background: 'white', color: '#61656D' }}>
+                  İptal
+                </button>
+                <button
+                  disabled={!canComplete || saving}
+                  onClick={() => void completeSale()}
+                  style={{
+                    padding: '10px 20px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    border: 'none', cursor: canComplete && !saving ? 'pointer' : 'default',
+                    background: canComplete && !saving ? '#232733' : '#F1F2F4',
+                    color:      canComplete && !saving ? 'white' : '#989BA3',
+                  }}>
+                  {saving ? 'İşleniyor...' : 'Ödemeyi Tamamla'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOtherPayments && !paymentMode && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9000,
+          background: 'rgba(23,26,32,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 16, padding: 24,
+            width: 'min(420px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Ödeme Yöntemi Seç</div>
+              <button onClick={() => { setShowOtherPayments(false); setSelectedBrand(null) }}
+                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {enabledBrands.map(brand => (
+                <button
+                  key={brand.payment_provider_brand_id}
+                  onClick={() => {
+                    setShowOtherPayments(false)
+                    const line: PaymentLine = {
+                      id:       crypto.randomUUID(),
+                      method:   'other',
+                      amount:   grandTotal,
+                      label:    brand.payment_provider_brand_nm,
+                      mediator: brand.payment_mediator,
+                      brand:    brand.payment_provider_brand_id,
+                    }
+                    void completeSale([line])
+                  }}
+                  style={{
+                    padding: '12px 14px', borderRadius: 9, cursor: 'pointer',
+                    border: '1px solid #E3E5E9', background: 'white',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    fontSize: 13, fontWeight: 600, color: '#232733', textAlign: 'left' as const,
+                  }}
+                >
+                  <span style={{ width: 32, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 700, borderRadius: 6, background: '#F3E9FB', color: '#7A3AAB',
+                    flexShrink: 0 }}>
+                    {brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
+                  </span>
+                  <span style={{ flex: 1 }}>{brand.payment_provider_brand_nm}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: '#3457D5', fontFamily: 'monospace' }}>
+                    {fmt(grandTotal)}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center' as const }}>
+              Seçilen yöntemle {fmt(grandTotal)} tahsil edilecektir.
+            </div>
+          </div>
+        </div>
+      )}
 
       {printSelectModal && (
         <div style={{

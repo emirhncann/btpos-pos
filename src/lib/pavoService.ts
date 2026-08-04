@@ -263,6 +263,7 @@ export async function pavoCompleteSale(
     Amount: number
     CurrencyCode: string
     ExchangeRate: number
+    Brand?: number
   }>,
   explicitPriceEffect?: {
     Type: number
@@ -467,6 +468,7 @@ export async function pavoAddPayment(
     mediator: number
     amount: number
     currencyCode?: string
+    brand?: number
   },
   saleTotals?: {
     grossPrice: number
@@ -485,6 +487,15 @@ export async function pavoAddPayment(
       return { success: false, message: 'Ödeme için satış referansı yok' }
     }
 
+    const paymentInfo: Record<string, unknown> = {
+      Mediator:     payment.mediator,
+      Amount:       payment.amount,
+      CurrencyCode: payment.currencyCode ?? 'TRY',
+      ExchangeRate: 1,
+      IsVoid:       false,
+    }
+    if (payment.brand) paymentInfo.Brand = payment.brand
+
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
       Sale: {
@@ -493,13 +504,7 @@ export async function pavoAddPayment(
           GrossPrice: saleTotals.grossPrice,
           TotalPrice: saleTotals.totalPrice,
         } : {}),
-        PaymentInformations: [{
-          Mediator:     payment.mediator,
-          Amount:       payment.amount,
-          CurrencyCode: payment.currencyCode ?? 'TRY',
-          ExchangeRate: 1,
-          IsVoid:       false,
-        }],
+        PaymentInformations: [paymentInfo],
         ...pavoDeviceUiFlags(settings),
         ReceiptInformation: {
           ReceiptImageEnabled: false,

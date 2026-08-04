@@ -1163,6 +1163,17 @@ app.whenReady().then(async () => {
     return getRecentSales(opts ?? { limit: 20 })
   })
 
+  ipcMain.handle('db:saveEnabledBrands', async (_e, terminalId: string, brands: unknown[]) => {
+    const { saveEnabledBrands } = await import('../db/operations')
+    saveEnabledBrands(terminalId, brands as Parameters<typeof saveEnabledBrands>[1])
+    return { success: true }
+  })
+
+  ipcMain.handle('db:getEnabledBrands', async (_e, terminalId: string) => {
+    const { getEnabledBrands } = await import('../db/operations')
+    return getEnabledBrands(terminalId)
+  })
+
   ipcMain.handle('cart:saveDraft', (_e, opts: {
     companyId:  string
     terminalId: string

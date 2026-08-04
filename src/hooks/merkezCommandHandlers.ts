@@ -12,19 +12,20 @@ async function getWorkplaceId(): Promise<string | null> {
 }
 
 export const noopCommandHandlers: CommandHandlers = {
-  onSyncAll:        async () => {},
-  onSyncPrices:     async () => {},
-  onSyncCashiers:   async () => {},
-  onSyncPlu:        async () => {},
-  onSyncCustomers:  async () => {},
-  onSyncProducts:   async () => {},
-  onSyncSettings:   async () => {},
-  onSyncTemplates:  async () => {},
-  onPairPavo:       async () => {},
-  onLogout:         () => {},
-  onMessage:        () => {},
-  onRestart:        () => {},
-  onLock:           () => {},
+  onSyncAll:            async () => {},
+  onSyncPrices:         async () => {},
+  onSyncCashiers:       async () => {},
+  onSyncPlu:            async () => {},
+  onSyncCustomers:      async () => {},
+  onSyncProducts:       async () => {},
+  onSyncSettings:       async () => {},
+  onSyncTemplates:      async () => {},
+  onSyncPaymentBrands:  async () => {},
+  onPairPavo:           async () => {},
+  onLogout:             () => {},
+  onMessage:            () => {},
+  onRestart:            () => {},
+  onLock:               () => {},
 }
 
 export function pluGroupsToCacheRows(
@@ -62,6 +63,7 @@ export interface MerkezCommandHandlerDeps {
   onLock:               (reason?: string) => void
   showToast:            (msg: string) => void
   onPluUpdated:         (groups: PluGroupCacheRow[]) => void
+  onEnabledBrandsUpdated?: (brands: PaymentProviderBrand[]) => void
 }
 
 function failResult(msg: string): SyncResult {
@@ -218,10 +220,11 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       d.setCommandSyncing(true)
       try {
         const results: Record<string, SyncResult> = {
-          products: failResult(''),
-          plu:      failResult(''),
-          cashiers: failResult(''),
-          settings: failResult(''),
+          products:      failResult(''),
+          plu:           failResult(''),
+          cashiers:      failResult(''),
+          settings:      failResult(''),
+          paymentBrands: failResult(''),
         }
 
         try {
@@ -272,6 +275,23 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         } catch (e) {
           console.warn('[sync_all] settings hatası:', e)
           results.settings = failResult(String(e))
+        }
+
+        try {
+          const token = await window.electron.store.get('token').catch(() => null) as string | null
+          const r = await fetch(`${API_URL}/payment-provider-brands/enabled/${d.terminalId}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+          if (r.ok) {
+            const brands = await r.json() as PaymentProviderBrand[]
+            const list = Array.isArray(brands) ? brands : []
+            await window.electron.db.saveEnabledBrands(d.terminalId, list)
+            d.onEnabledBrandsUpdated?.(list)
+            results.paymentBrands = { success: true, inserted: list.length, updated: 0, deleted: 0 }
+          }
+        } catch (e) {
+          console.warn('[sync_all] payment brands hatası:', e)
+          results.paymentBrands = failResult(String(e))
         }
 
         const vals = Object.values(results)
@@ -382,6 +402,22 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       )
       if (!result.success) throw new Error(result.error)
       d.showToast('Ayarlar güncellendi')
+    },
+
+    onSyncPaymentBrands: async () => {
+      try {
+        const token = await window.electron.store.get('token').catch(() => null) as string | null
+        const r = await fetch(`${API_URL}/payment-provider-brands/enabled/${d.terminalId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!r.ok) return
+        const brands = await r.json() as PaymentProviderBrand[]
+        const list = Array.isArray(brands) ? brands : []
+        await window.electron.db.saveEnabledBrands(d.terminalId, list)
+        d.onEnabledBrandsUpdated?.(list)
+      } catch (e) {
+        console.warn('[sync_payment_brands] hata:', e)
+      }
     },
 
     onSyncTemplates: async () => {
