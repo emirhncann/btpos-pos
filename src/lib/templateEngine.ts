@@ -53,7 +53,7 @@ export interface SaleReceiptCustomer {
 }
 
 export interface SaleReceiptPaymentLine {
-  method:       'cash' | 'card' | 'meal_card'
+  method:       'cash' | 'card' | 'meal_card' | 'other'
   amount:       number
   acquirerName?: string | null
 }
@@ -185,7 +185,7 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
   const customer = input.customer
 
   const paymentMethodLabel = (m: SaleReceiptPaymentLine['method']) =>
-    m === 'cash' ? 'Nakit' : m === 'card' ? 'Kart' : 'Yemek Kartı'
+    m === 'cash' ? 'Nakit' : m === 'card' ? 'Kart' : m === 'meal_card' ? 'Yemek Kartı' : 'Diğer'
 
   const paymentsList = (input.paymentLines ?? []).map(p => [
     paymentMethodLabel(p.method),

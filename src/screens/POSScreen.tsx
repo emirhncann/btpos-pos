@@ -4770,7 +4770,9 @@ export default function POSScreen({
           flexDirection: 'column',
           padding: '6px 6px 0',
           gap: 0,
-          borderRight: '1px solid #e0e0e0',
+          borderRight: '2px solid #9CA3AF',
+          borderLeft: '2px solid #9CA3AF',
+          boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.04)',
           overflow: 'hidden',
           position: 'relative',
         }}>
