@@ -6018,7 +6018,7 @@ export default function POSScreen({
                     cursor: cart.length === 0 ? 'default' : 'pointer',
                   }}
                 >
-                  🔀 Karma Ödeme
+                  🔀 Parçalı Ödeme
                 </button>
                 )}
                 {!returnMode && visibleBrands.length > 0 && (
@@ -6070,13 +6070,15 @@ export default function POSScreen({
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#3457D5' }} />
                 <div>
-                  <div style={{ fontSize: 'clamp(14px, 1.8vh, 17px)', fontWeight: 600, color: '#232733' }}>Karma Ödeme</div>
+                  <div style={{ fontSize: 'clamp(14px, 1.8vh, 17px)', fontWeight: 600, color: '#232733' }}>
+                    Parçalı Ödeme
+                  </div>
                   <div style={{ fontSize: 'clamp(11px, 1.3vh, 12px)', color: '#989BA3', marginTop: 2 }}>
                     {cart.length} kalem · {fmt(grandTotal)}
                   </div>
                 </div>
               </div>
-              <button onClick={() => {
+              <button type="button" onClick={() => {
                 setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
                 setPendingAmount(''); setSelectedBrand(null);
               }}
@@ -6085,25 +6087,27 @@ export default function POSScreen({
                   color: '#61656D', cursor: 'pointer', fontSize: 13 }}>✕</button>
             </div>
 
-            {/* Body */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(26%, 300px) 1fr', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            {/* Body: sol ince + sağ geniş */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 26%) 1fr',
+              flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
-              {/* Sol kolon */}
+              {/* ── SOL KOLON: Özet + Eklenen ödemeler ── */}
               <div style={{ background: '#FAFAFB', borderRight: '1px solid #E3E5E9',
-                display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+                display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
 
                 {/* Kalan tutar */}
                 <div style={{ padding: '2vh 4%', borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600, letterSpacing: '0.04em',
-                    textTransform: 'uppercase' as const, color: '#989BA3', marginBottom: '0.8vh' }}>
+                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
+                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '0.8vh' }}>
                     Kalan Tutar
                   </div>
-                  <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600, fontFamily: 'monospace',
-                    color: remaining <= 0 ? '#17845A' : '#232733', lineHeight: 1.1 }}>
+                  <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600,
+                    fontFamily: 'monospace', color: remaining <= 0 ? '#17845A' : '#232733', lineHeight: 1.1 }}>
                     <span style={{ fontSize: 'clamp(14px, 2.2vh, 19px)', color: '#989BA3', fontWeight: 500, marginRight: 2 }}>₺</span>
                     {remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   </div>
-                  <div style={{ height: '0.8vh', maxHeight: 7, background: '#F1F2F4', borderRadius: 99, marginTop: '1.5vh', overflow: 'hidden' }}>
+                  <div style={{ height: '0.8vh', maxHeight: 7, background: '#F1F2F4',
+                    borderRadius: 99, marginTop: '1.5vh', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 99, transition: 'width 0.35s ease',
                       background: remaining <= 0 ? '#17845A' : '#3457D5',
@@ -6112,7 +6116,7 @@ export default function POSScreen({
                   </div>
                 </div>
 
-                {/* Özet */}
+                {/* Sepet / Ödenen */}
                 <div style={{ borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
                   {[{ k: 'Sepet Tutarı', v: fmt(grandTotal) }, { k: 'Ödenen', v: fmt(paidTotal) }].map(({ k, v }) => (
                     <div key={k} style={{ display: 'flex', justifyContent: 'space-between',
@@ -6125,12 +6129,14 @@ export default function POSScreen({
 
                 {/* Eklenen ödemeler */}
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600, letterSpacing: '0.04em',
-                    textTransform: 'uppercase' as const, color: '#989BA3', padding: '1.6vh 4% 1vh' }}>
+                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
+                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em',
+                    padding: '1.6vh 4% 1vh' }}>
                     Eklenen Ödemeler
                   </div>
                   {paymentLines.length === 0 ? (
-                    <div style={{ color: '#989BA3', fontSize: 'clamp(11px, 1.4vh, 12.5px)', textAlign: 'center', padding: '1vh 4% 2vh' }}>
+                    <div style={{ color: '#989BA3', fontSize: 'clamp(11px, 1.4vh, 12.5px)',
+                      textAlign: 'center', padding: '1vh 4% 2vh' }}>
                       Henüz ödeme eklenmedi.
                     </div>
                   ) : paymentLines.map((line, idx) => {
@@ -6141,153 +6147,159 @@ export default function POSScreen({
                     }
                     const b = badgeMap[line.method] ?? badgeMap.other
                     return (
-                      <div key={line.id} style={{ display: 'flex', alignItems: 'center', gap: '3%', padding: '1vh 4%' }}>
-                        <div style={{ width: '11%', minWidth: 28, maxWidth: 34, aspectRatio: '34 / 26', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700, borderRadius: 7, flexShrink: 0,
-                          background: b.bg, color: b.fg }}>{b.label}</div>
+                      <div key={line.id} style={{ display: 'flex', alignItems: 'center',
+                        gap: '3%', padding: '1vh 4%' }}>
+                        <div style={{ width: 32, height: 24, display: 'flex', alignItems: 'center',
+                          justifyContent: 'center', fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700,
+                          borderRadius: 7, flexShrink: 0, background: b.bg, color: b.fg }}>{b.label}</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600, color: '#232733' }}>{line.label}</div>
+                          <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600, color: '#232733',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line.label}</div>
                           <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: '#989BA3' }}>Ödeme {idx + 1}</div>
                         </div>
-                        <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)', color: '#232733', fontFamily: 'monospace' }}>
+                        <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)',
+                          color: '#232733', fontFamily: 'monospace' }}>
                           ₺{line.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                         </span>
-                        <button onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
-                          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: '#989BA3', cursor: 'pointer', border: 'none', background: 'transparent', fontSize: 12, borderRadius: 6 }}>✕</button>
+                        <button type="button" onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
+                          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center',
+                            justifyContent: 'center', color: '#989BA3', cursor: 'pointer',
+                            border: 'none', background: 'transparent', fontSize: 12, borderRadius: 6 }}>✕</button>
                       </div>
                     )
                   })}
                 </div>
               </div>
 
-              {/* Sağ kolon */}
-              <div style={{ padding: '2vh 2.2vw', display: 'flex', flexDirection: 'column', gap: '1.5vh', overflow: 'hidden', minHeight: 0 }}>
+              {/* ── SAĞ KOLON: Yöntemler üstte + Numpad altta ── */}
+              <div style={{ display: 'flex', flexDirection: 'column',
+                overflow: 'hidden', minHeight: 0 }}>
 
-                {/* Yöntem butonları — Nakit, Kart + brand'lar inline */}
-                <div style={{ flexShrink: 0, maxHeight: '28%', overflowY: 'auto' }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600, letterSpacing: '0.04em',
-                    textTransform: 'uppercase' as const, color: '#989BA3', marginBottom: '1vh' }}>
+                {/* Yöntem butonları */}
+                <div style={{ padding: '1.8vh 2.5%', borderBottom: '1px solid #E3E5E9', flexShrink: 0, maxHeight: '42%', overflowY: 'auto' }}>
+                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
+                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '1.2vh' }}>
                     Ödeme Yöntemi
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.8vh' }}>
-                    <button
-                      onClick={() => { setActiveMethod('cash'); setSelectedBrand(null); setPendingAmount('') }}
+                  <div style={{
+                    display:             'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
+                    gap:                 '1vh',
+                  }}>
+                    <button type="button" onClick={() => { setActiveMethod('cash'); setSelectedBrand(null) }}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '1vh 1%', borderRadius: 7, cursor: 'pointer',
-                        fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600, textAlign: 'left' as const,
-                        border:      activeMethod === 'cash' ? '1px solid #A8620A' : '1px solid #E3E5E9',
+                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.5vh',
+                        borderRadius: 10, cursor: 'pointer', padding: '8%',
+                        border:      activeMethod === 'cash' ? '1.5px solid #A8620A' : '1.5px solid #E3E5E9',
                         background:  activeMethod === 'cash' ? '#FDF1DE' : 'white',
                         color:       activeMethod === 'cash' ? '#A8620A' : '#232733',
                         boxShadow:   activeMethod === 'cash' ? '0 0 0 1px #A8620A' : 'none',
+                        transition: 'all 0.12s',
                       }}>
-                      <span style={{ width: '12%', minWidth: 24, maxWidth: 28, aspectRatio: '28 / 22', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 'clamp(9px, 1.1vh, 10px)', fontWeight: 700, borderRadius: 5, background: '#FDF1DE', color: '#A8620A', flexShrink: 0 }}>NK</span>
-                      Nakit
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                        background: '#FDF1DE', color: '#A8620A', borderRadius: 5, padding: '2px 5px' }}>NK</span>
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Nakit</span>
                     </button>
 
-                    <button
-                      onClick={() => { setActiveMethod('card'); setSelectedBrand(null); setPendingAmount('') }}
+                    <button type="button" onClick={() => { setActiveMethod('card'); setSelectedBrand(null) }}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '1vh 1%', borderRadius: 7, cursor: 'pointer',
-                        fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600, textAlign: 'left' as const,
-                        border:      activeMethod === 'card' ? '1px solid #3457D5' : '1px solid #E3E5E9',
+                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.5vh',
+                        borderRadius: 10, cursor: 'pointer', padding: '8%',
+                        border:      activeMethod === 'card' ? '1.5px solid #3457D5' : '1.5px solid #E3E5E9',
                         background:  activeMethod === 'card' ? '#ECF0FD' : 'white',
                         color:       activeMethod === 'card' ? '#3457D5' : '#232733',
                         boxShadow:   activeMethod === 'card' ? '0 0 0 1px #3457D5' : 'none',
+                        transition: 'all 0.12s',
                       }}>
-                      <span style={{ width: '12%', minWidth: 24, maxWidth: 28, aspectRatio: '28 / 22', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 'clamp(9px, 1.1vh, 10px)', fontWeight: 700, borderRadius: 5, background: '#ECF0FD', color: '#3457D5', flexShrink: 0 }}>KK</span>
-                      Kart
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                        background: '#ECF0FD', color: '#3457D5', borderRadius: 5, padding: '2px 5px' }}>KK</span>
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Kart</span>
                     </button>
 
                     {visibleBrands.map(brand => {
                       const isTaksit = brand.payment_provider_brand_id === 999
-                      const brandBg = isTaksit ? '#E8F5E9' : '#F3E9FB'
-                      const brandFg = isTaksit ? '#2E7D32' : '#7A3AAB'
-                      const selected = activeMethod === 'other'
+                      const brandBg  = isTaksit ? '#E8F5E9' : '#F3E9FB'
+                      const brandFg  = isTaksit ? '#2E7D32' : '#7A3AAB'
+                      const selected  = activeMethod === 'other'
                         && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                      const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
                       return (
-                      <button
-                        key={brand.payment_provider_brand_id}
-                        onClick={() => {
-                          setActiveMethod('other')
-                          setSelectedBrand(brand)
-                          setPendingAmount('')
-                        }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 8,
-                          padding: '1vh 1%', borderRadius: 7, cursor: 'pointer',
-                          fontSize: 'clamp(10px, 1.3vh, 12px)', fontWeight: 600, textAlign: 'left' as const,
-                          border:     selected ? `1px solid ${brandFg}` : '1px solid #E3E5E9',
-                          background: selected ? brandBg : 'white',
-                          color:      selected ? brandFg : '#232733',
-                          boxShadow:  selected ? `0 0 0 1px ${brandFg}` : 'none',
-                        }}>
-                        <span style={{ width: '12%', minWidth: 24, maxWidth: 28, aspectRatio: '28 / 22', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 'clamp(8px, 1vh, 9px)', fontWeight: 700, borderRadius: 5, background: brandBg, color: brandFg,
-                          flexShrink: 0 }}>
-                          {brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
-                        </span>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {brand.payment_provider_brand_nm}
-                        </span>
-                      </button>
+                        <button key={brand.payment_provider_brand_id} type="button"
+                          onClick={() => { setActiveMethod('other'); setSelectedBrand(brand) }}
+                          style={{
+                            aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center', gap: '0.5vh',
+                            borderRadius: 10, cursor: 'pointer', padding: '8%',
+                            border:     selected ? `1.5px solid ${brandFg}` : '1.5px solid #E3E5E9',
+                            background: selected ? brandBg : 'white',
+                            color:      selected ? brandFg : '#232733',
+                            boxShadow:  selected ? `0 0 0 1px ${brandFg}` : 'none',
+                            transition: 'all 0.12s',
+                          }}>
+                          <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                            background: brandBg, color: brandFg, borderRadius: 5, padding: '2px 5px' }}>
+                            {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', textAlign: 'center' as const,
+                            lineHeight: 1.2, overflow: 'hidden', display: '-webkit-box',
+                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%' }}>
+                            {label}
+                          </span>
+                        </button>
                       )
                     })}
                   </div>
                 </div>
 
-                {/* Numpad — kalan yüksekliği doldurur, taşmaz */}
-                <div style={{
-                  border: '1px solid #E3E5E9', borderRadius: 9, background: 'white',
-                  overflow: 'hidden', flex: 1, minHeight: 0,
-                  display: 'flex', flexDirection: 'column',
-                }}>
+                {/* Numpad alanı */}
+                <div style={{ flex: 1, minHeight: 0, display: 'flex',
+                  flexDirection: 'column', overflow: 'hidden' }}>
 
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '1.2vh 2%', background: '#FAFAFB', borderBottom: '1px solid #E3E5E9', flexShrink: 0, gap: 8 }}>
-                    <div style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600, color: activeMethod ? '#232733' : '#989BA3',
+                    padding: '1.2vh 2.5%', borderBottom: '1px solid #F3F4F6', flexShrink: 0, gap: 8 }}>
+                    <div style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600,
+                      color: activeMethod ? '#232733' : '#989BA3',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                       {activeMethod === 'cash' ? '💵 Nakit'
-                        : activeMethod === 'card' ? '💳 Kredi Kartı'
-                        : activeMethod === 'other' && selectedBrand ? selectedBrand.payment_provider_brand_nm
-                        : 'Yöntem Seçin'}
+                        : activeMethod === 'card' ? '💳 Kart'
+                        : activeMethod === 'other' && selectedBrand
+                          ? (selectedBrand.payment_provider_brand_id === 999
+                            ? 'KK Taksit/Puan'
+                            : selectedBrand.payment_provider_brand_nm)
+                          : 'Yöntem Seçin'}
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <button onClick={() => {
-                        const half = remaining / 2
-                        setPendingAmount(half.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
-                      }}
-                        disabled={!activeMethod || remaining <= 0}
-                        style={{ padding: '0.6vh 0.9vw', borderRadius: 6, border: '1px solid #E3E5E9',
-                          background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                          cursor: activeMethod ? 'pointer' : 'default',
-                          opacity: activeMethod ? 1 : 0.4 }}>Yarısı</button>
-                      <button onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
-                        disabled={!activeMethod || remaining <= 0}
-                        style={{ padding: '0.6vh 0.9vw', borderRadius: 6, border: '1px solid #E3E5E9',
-                          background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                          cursor: activeMethod ? 'pointer' : 'default',
-                          opacity: activeMethod ? 1 : 0.4 }}>Kalanı Ekle</button>
+                      <button type="button" onClick={() => setPendingAmount((remaining / 2).toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
+                        disabled={remaining <= 0}
+                        style={{ padding: '0.6vh 0.8vw', borderRadius: 6, border: '1px solid #E3E5E9',
+                          background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)',
+                          fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default',
+                          opacity: remaining > 0 ? 1 : 0.4 }}>Yarısı</button>
+                      <button type="button" onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
+                        disabled={remaining <= 0}
+                        style={{ padding: '0.6vh 0.8vw', borderRadius: 6, border: '1px solid #E3E5E9',
+                          background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)',
+                          fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default',
+                          opacity: remaining > 0 ? 1 : 0.4 }}>Kalanı</button>
                     </div>
                   </div>
 
-                  <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600, textAlign: 'right' as const,
-                    padding: '1.4vh 3% 0.6vh', color: pendingAmount ? '#232733' : '#989BA3',
-                    fontFamily: 'monospace', flexShrink: 0, lineHeight: 1.1 }}>
-                    <span style={{ fontSize: 'clamp(13px, 2vh, 18px)', color: '#989BA3', fontWeight: 500, marginRight: 4 }}>₺</span>
+                  <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600,
+                    textAlign: 'right' as const, padding: '1.2vh 3% 0.5vh',
+                    color: pendingAmount ? '#232733' : '#989BA3', fontFamily: 'monospace',
+                    flexShrink: 0, lineHeight: 1.1 }}>
+                    <span style={{ fontSize: 'clamp(14px, 2.2vh, 18px)', color: '#989BA3', fontWeight: 500, marginRight: 4 }}>₺</span>
                     {pendingAmount || '0,00'}
                   </div>
 
                   <div style={{
                     display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(4, 1fr)',
-                    gap: '1%', padding: '1% 2.5%', flex: 1, minHeight: 0,
+                    gap: '1%', padding: '0.5% 2.5%', flex: 1, minHeight: 0,
                   }}>
                     {['7','8','9','4','5','6','1','2','3','00','0','⌫'].map(k => (
-                      <button key={k}
+                      <button key={k} type="button"
                         onClick={() => {
                           if (k === '⌫') { setPendingAmount(v => v.slice(0, -1)); return }
                           setPendingAmount(v => {
@@ -6297,25 +6309,27 @@ export default function POSScreen({
                           })
                         }}
                         style={{
-                          minHeight: 0, height: '100%', width: '100%',
-                          borderRadius: 7, border: '1px solid #E3E5E9',
-                          background: k === '⌫' ? '#FBE9EC' : 'white',
-                          color:      k === '⌫' ? '#D1354F' : '#232733',
-                          fontSize: 'clamp(12px, 1.8vh, 15px)', fontWeight: 600, cursor: 'pointer',
-                          fontFamily: 'monospace',
+                          width: '100%', height: '100%', boxSizing: 'border-box' as const,
+                          border:      k === '⌫' ? '1.5px solid #fecdd3' : '1.5px solid #d1d5db',
+                          borderRadius: 9, cursor: 'pointer', fontWeight: 700,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          userSelect: 'none' as const,
+                          background: k === '⌫' ? '#fff5f5' : 'white',
+                          color:      k === '⌫' ? '#dc2626' : '#1f2937',
+                          fontSize:   'clamp(13px, 1.8vh, 22px)',
                         }}>{k}</button>
                     ))}
                   </div>
 
                   <button
+                    type="button"
                     disabled={!activeMethod || !pendingAmount || remaining <= 0}
                     onClick={() => {
                       if (!activeMethod || !pendingAmount) return
                       const raw = pendingAmount.replace(/\./g, '').replace(',', '.')
                       const amt = parseFloat(raw) || 0
                       if (amt <= 0) return
-                      const isTaksit = activeMethod === 'other'
-                        && selectedBrand?.payment_provider_brand_id === 999
+                      const isTaksit = activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === 999
                       setPaymentLines(prev => [...prev, {
                         id:       crypto.randomUUID(),
                         method:   isTaksit ? 'card' : activeMethod,
@@ -6324,11 +6338,9 @@ export default function POSScreen({
                           : activeMethod === 'cash' ? 'Nakit'
                           : activeMethod === 'card' ? 'Kredi Kartı'
                           : selectedBrand?.payment_provider_brand_nm ?? 'Diğer',
-                        mediator: isTaksit ? 2
-                          : activeMethod === 'cash' ? 1
-                          : activeMethod === 'card' ? 2
-                          : selectedBrand?.payment_mediator ?? 14,
-                        brand:    isTaksit ? 999
+                        mediator: isTaksit ? 2 : activeMethod === 'cash' ? 1
+                          : activeMethod === 'card' ? 2 : selectedBrand?.payment_mediator ?? 14,
+                        brand: isTaksit ? 999
                           : activeMethod === 'other' ? selectedBrand?.payment_provider_brand_id : undefined,
                       }])
                       setPendingAmount('')
@@ -6336,13 +6348,12 @@ export default function POSScreen({
                       setSelectedBrand(null)
                     }}
                     style={{
-                      width: '96%', margin: '0 2% 1.4vh',
-                      padding: '1.4vh 0', border: 'none', borderRadius: 8, flexShrink: 0,
+                      margin: '0.8vh 2.5%',
+                      padding: '1.4vh 0', border: 'none', borderRadius: 9, flexShrink: 0,
                       background: (!activeMethod || !pendingAmount || remaining <= 0) ? '#F1F2F4' : '#3457D5',
                       color:      (!activeMethod || !pendingAmount || remaining <= 0) ? '#989BA3' : 'white',
                       fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)', cursor: 'pointer',
-                    }}
-                  >
+                    }}>
                     {activeMethod ? 'Ödemeyi Ekle' : 'Yöntem Seçin'}
                   </button>
                 </div>
@@ -6358,21 +6369,18 @@ export default function POSScreen({
                   : 'Toplam tutarın tamamı karşılanmadan işlem tamamlanamaz.'}
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => {
-                    setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
-                    setPendingAmount(''); setSelectedBrand(null);
-                  }}
-                  style={{ padding: '1vh 1.6vw', borderRadius: 8, fontSize: 'clamp(12px, 1.4vh, 13px)', fontWeight: 600,
-                    cursor: 'pointer', border: '1px solid #E3E5E9', background: 'white', color: '#61656D' }}>
+                <button type="button" onClick={() => {
+                  setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
+                  setPendingAmount(''); setSelectedBrand(null);
+                }}
+                  style={{ padding: '1vh 1.5vw', borderRadius: 8, fontSize: 'clamp(12px, 1.5vh, 13px)',
+                    fontWeight: 600, cursor: 'pointer', border: '1px solid #E3E5E9', background: 'white', color: '#61656D' }}>
                   İptal
                 </button>
-                <button
-                  disabled={!canComplete || saving}
-                  onClick={() => void completeSale()}
+                <button type="button" disabled={!canComplete || saving} onClick={() => void completeSale()}
                   style={{
-                    padding: '1vh 1.6vw', borderRadius: 8, fontSize: 'clamp(12px, 1.4vh, 13px)', fontWeight: 600,
-                    border: 'none', cursor: canComplete && !saving ? 'pointer' : 'default',
+                    padding: '1vh 1.5vw', borderRadius: 8, fontSize: 'clamp(12px, 1.5vh, 13px)',
+                    fontWeight: 600, border: 'none', cursor: canComplete && !saving ? 'pointer' : 'default',
                     background: canComplete && !saving ? '#232733' : '#F1F2F4',
                     color:      canComplete && !saving ? 'white' : '#989BA3',
                   }}>
