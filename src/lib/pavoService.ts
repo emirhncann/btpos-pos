@@ -272,6 +272,7 @@ export async function pavoCompleteSale(
   },
   customer?: CustomerRow | null,
   notify?: PavoSaleNotifyOptions | null,
+  opts?: { showCreditCardMenu?: boolean },
 ): Promise<PaymentDeviceResult> {
   const customerParty = buildCustomerParty(customer, notify)
 
@@ -315,7 +316,7 @@ export async function pavoCompleteSale(
       SendEMailNotification: Boolean(mailTrim),
       ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
       ...pavoDeviceUiFlags(settings, {
-        showCreditCardMenu: payments.some(p => p.Brand === 999),
+        showCreditCardMenu: Boolean(opts?.showCreditCardMenu),
       }),
       AddedSaleItems: saleItems,
       ...(priceEffect ? { PriceEffect: priceEffect } : {}),
@@ -499,7 +500,7 @@ export async function pavoAddPayment(
       ExchangeRate: 1,
       IsVoid:       false,
     }
-    if (payment.brand) paymentInfo.Brand = payment.brand
+    if (payment.brand && payment.brand !== 999) paymentInfo.Brand = payment.brand
 
     const body = {
       TransactionHandle: transactionHandle(settings, seq),

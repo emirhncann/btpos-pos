@@ -1522,9 +1522,15 @@ export default function POSScreen({
     ? parseFloat((vatFromLines * (grandTotal / lineSubtotal)).toFixed(2))
     : 0
   const paidTotal = paymentLines.reduce((s, l) => s + l.amount, 0)
-  const visibleBrands = pavoSettings
-    ? enabledBrands
-    : enabledBrands.filter(b => b.payment_provider_brand_id !== 999)
+  const visibleBrands = (
+    pavoSettings
+      ? enabledBrands
+      : enabledBrands.filter(b => b.payment_provider_brand_id !== 999)
+  ).slice().sort((a, b) => {
+    if (a.payment_provider_brand_id === 999) return -1
+    if (b.payment_provider_brand_id === 999) return 1
+    return 0
+  })
   const remaining = Math.max(0, parseFloat((grandTotal - paidTotal).toFixed(2)))
   const canComplete = remaining === 0 && paymentLines.length > 0
   const commandIconAnimation = commandSyncing
@@ -1826,7 +1832,8 @@ export default function POSScreen({
           ExchangeRate: number
           Brand?: number
         } = { Mediator: l.mediator, Amount: l.amount, CurrencyCode: 'TRY', ExchangeRate: 1 }
-        if (l.brand) p.Brand = l.brand
+        // brand 999 sadece ShowCreditCardMenu için; Pavo PaymentInformations'a Brand yazılmaz
+        if (l.brand && l.brand !== 999) p.Brand = l.brand
         return p
       }).filter(p => p.Amount > 0)
 
@@ -1887,6 +1894,7 @@ export default function POSScreen({
               sendEmail: isValidNotifyEmail(mailAddr),
               mailAddr: mailAddr.trim(),
             },
+            { showCreditCardMenu: lines.some(l => l.brand === 999) },
           )
 
           if (!deviceResult.success) {
@@ -6381,22 +6389,42 @@ export default function POSScreen({
           position: 'fixed', inset: 0, zIndex: 9000,
           background: 'rgba(23,26,32,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '2vh 2vw',
         }}>
           <div style={{
-            background: 'white', borderRadius: 16, padding: 24,
-            width: 'min(420px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14,
+            background: 'white', borderRadius: 16, padding: '2.2vh 2vw',
+            width: 'min(560px, 94vw)', maxHeight: '86vh',
+            display: 'flex', flexDirection: 'column', gap: '1.6vh',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Ödeme Yöntemi Seç</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#232733' }}>Ödeme Yöntemi Seç</div>
+                <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 2 }}>
+                  Tutar: {fmt(grandTotal)}
+                </div>
+              </div>
               <button onClick={() => { setShowOtherPayments(false); setSelectedBrand(null) }}
-                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+                style={{
+                  width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: '#FAFAFB', border: '1px solid #E3E5E9', borderRadius: 8,
+                  color: '#61656D', cursor: 'pointer', fontSize: 13,
+                }}>✕</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+              gap: 12,
+              overflowY: 'auto',
+              minHeight: 0,
+              padding: 2,
+            }}>
               {visibleBrands.map(brand => {
                 const isTaksit = brand.payment_provider_brand_id === 999
                 const brandBg = isTaksit ? '#E8F5E9' : '#F3E9FB'
                 const brandFg = isTaksit ? '#2E7D32' : '#7A3AAB'
+                const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
+                const initials = isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()
                 return (
                 <button
                   key={brand.payment_provider_brand_id}
@@ -6422,29 +6450,63 @@ export default function POSScreen({
                     void completeSale([line])
                   }}
                   style={{
-                    padding: '12px 14px', borderRadius: 9, cursor: 'pointer',
-                    border: '1px solid #E3E5E9', background: 'white',
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    fontSize: 13, fontWeight: 600, color: '#232733', textAlign: 'left' as const,
+                    aspectRatio: '1',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    border: `1.5px solid ${brandBg}`,
+                    background: 'white',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 10,
+                    padding: 12,
+                    transition: 'border-color 0.15s, box-shadow 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = brandFg
+                    e.currentTarget.style.boxShadow = `0 0 0 1px ${brandFg}`
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = brandBg
+                    e.currentTarget.style.boxShadow = 'none'
                   }}
                 >
-                  <span style={{ width: 32, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, fontWeight: 700, borderRadius: 6, background: brandBg, color: brandFg,
-                    flexShrink: 0 }}>
-                    {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
+                  <span style={{
+                    width: '42%',
+                    aspectRatio: '1',
+                    maxWidth: 56,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 14,
+                    fontWeight: 800,
+                    borderRadius: 12,
+                    background: brandBg,
+                    color: brandFg,
+                  }}>
+                    {initials}
                   </span>
-                  <span style={{ flex: 1 }}>
-                    {isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm}
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: '#3457D5', fontFamily: 'monospace' }}>
-                    {fmt(grandTotal)}
+                  <span style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color: '#232733',
+                    textAlign: 'center' as const,
+                    lineHeight: 1.25,
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical' as const,
+                    width: '100%',
+                  }}>
+                    {label}
                   </span>
                 </button>
                 )
               })}
             </div>
 
-            <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center' as const }}>
+            <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center' as const, flexShrink: 0 }}>
               Seçilen yöntemle {fmt(grandTotal)} tahsil edilecektir.
             </div>
           </div>
