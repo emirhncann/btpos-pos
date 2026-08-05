@@ -106,9 +106,9 @@ function buildNotifyMail(notify?: PavoSaleNotifyOptions | null): string {
 }
 
 /** CompleteSale ile aynı cihaz UI bayrakları — puanlı satış / müşteri sorularını atla */
-function pavoDeviceUiFlags(settings: PavoSettings) {
+function pavoDeviceUiFlags(settings: PavoSettings, opts?: { showCreditCardMenu?: boolean }) {
   return {
-    ShowCreditCardMenu: false,
+    ShowCreditCardMenu: Boolean(opts?.showCreditCardMenu),
     SelectedSlots: ['rf', 'icc', 'manual'],
     AllowDismissCardRead: false,
     CardReadTimeout: settings.cardReadTimeout,
@@ -314,7 +314,9 @@ export async function pavoCompleteSale(
       ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
       SendEMailNotification: Boolean(mailTrim),
       ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
-      ...pavoDeviceUiFlags(settings),
+      ...pavoDeviceUiFlags(settings, {
+        showCreditCardMenu: payments.some(p => p.Brand === 999),
+      }),
       AddedSaleItems: saleItems,
       ...(priceEffect ? { PriceEffect: priceEffect } : {}),
       PaymentInformations: payments,
@@ -365,6 +367,7 @@ export async function pavoStartSaleWithItems(
   } | null,
   customer?: CustomerRow | null,
   notify?: PavoSaleNotifyOptions | null,
+  opts?: { showCreditCardMenu?: boolean },
 ): Promise<{
   success: boolean
   message?: string
@@ -415,7 +418,9 @@ export async function pavoStartSaleWithItems(
         ...(phoneNorm ? { NotificationPhone: phoneNorm } : {}),
         SendEMailNotification: Boolean(mailTrim),
         ...(mailTrim ? { NotificationEMail: mailTrim } : {}),
-        ...pavoDeviceUiFlags(settings),
+        ...pavoDeviceUiFlags(settings, {
+          showCreditCardMenu: Boolean(opts?.showCreditCardMenu),
+        }),
         ...(priceEffect ? { PriceEffect: priceEffect } : {}),
         AddedSaleItems:        saleItems,
         ReceiptInformation: {
@@ -505,7 +510,9 @@ export async function pavoAddPayment(
           TotalPrice: saleTotals.totalPrice,
         } : {}),
         PaymentInformations: [paymentInfo],
-        ...pavoDeviceUiFlags(settings),
+        ...pavoDeviceUiFlags(settings, {
+          showCreditCardMenu: payment.brand === 999,
+        }),
         ReceiptInformation: {
           ReceiptImageEnabled: false,
           ReceiptWidth: settings.printWidth,
