@@ -6278,7 +6278,7 @@ export default function POSScreen({
                     display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(4, 1fr)',
                     gap: '1%', padding: '1% 2.5%', flex: 1, minHeight: 0,
                   }}>
-                    {['1','2','3','4','5','6','7','8','9','00','0','⌫'].map(k => (
+                    {['7','8','9','4','5','6','1','2','3','00','0','⌫'].map(k => (
                       <button key={k}
                         onClick={() => {
                           if (k === '⌫') { setPendingAmount(v => v.slice(0, -1)); return }
