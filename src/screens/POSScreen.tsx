@@ -6057,8 +6057,9 @@ export default function POSScreen({
           padding: '2vh 2vw',
         }}>
           <div style={{
-            width: '92%', maxWidth: 1000,
-            height: '90vh', maxHeight: '90vh',
+            width: '96%', maxWidth: 1200,
+            height: 'auto',
+            maxHeight: '80vh',
             background: 'white', border: '1px solid #E3E5E9',
             borderRadius: 16, boxShadow: '0 20px 50px rgba(24,28,38,0.22)',
             overflow: 'hidden', display: 'flex', flexDirection: 'column',
@@ -6090,9 +6091,10 @@ export default function POSScreen({
             {/* Body: 3 kolon — sol özet | orta yöntemler | sağ numpad */}
             <div style={{
               display:             'grid',
-              gridTemplateColumns: 'minmax(200px, 24%) 1fr minmax(180px, 22%)',
+              gridTemplateColumns: 'minmax(200px, 22%) 1fr clamp(200px, 24%, 280px)',
               flex:                1,
-              minHeight:           0,
+              minHeight:           'min(420px, calc(80vh - 12vh))',
+              maxHeight:           'calc(80vh - 12vh)',
               overflow:            'hidden',
             }}>
 
@@ -6180,222 +6182,244 @@ export default function POSScreen({
                 </div>
               </div>
 
-              {/* ── 2. KOLON: Ödeme yöntemleri ── */}
-              <div style={{
-                borderRight:   '1px solid #E3E5E9',
-                display:       'flex',
-                flexDirection: 'column',
-                overflow:      'hidden',
-                minHeight:     0,
-                padding:       '2vh 3%',
-              }}>
-                <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                  textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '1.2vh',
-                  flexShrink: 0 }}>
-                  Ödeme Yöntemi
-                </div>
-                <div style={{
-                  display:             'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
-                  gap:                 '1vh',
-                  overflowY:           'auto',
-                  alignContent:        'start',
-                }}>
-                  <button type="button" onClick={() => { setActiveMethod('cash'); setSelectedBrand(null) }}
-                    style={{
-                      aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                      alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                      borderRadius: 10, cursor: 'pointer', padding: '10%',
-                      border:     activeMethod === 'cash' ? '1.5px solid #A8620A' : '1.5px solid #E3E5E9',
-                      background: activeMethod === 'cash' ? '#FDF1DE' : 'white',
-                      color:      activeMethod === 'cash' ? '#A8620A' : '#232733',
-                      boxShadow:  activeMethod === 'cash' ? '0 0 0 1px #A8620A' : 'none',
-                      transition: 'all 0.12s',
-                    }}>
-                    <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                      background: '#FDF1DE', color: '#A8620A', borderRadius: 5, padding: '2px 6px' }}>NK</span>
-                    <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
-                      fontWeight: activeMethod === 'cash' ? 700 : 500 }}>Nakit</span>
-                  </button>
+              {/* ── 2. KOLON: Seçili yöntem + hızlı butonlar + Yöntemler ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0,
+                borderRight: '1px solid #E3E5E9' }}>
 
-                  <button type="button" onClick={() => { setActiveMethod('card'); setSelectedBrand(null) }}
-                    style={{
-                      aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                      alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                      borderRadius: 10, cursor: 'pointer', padding: '10%',
-                      border:     activeMethod === 'card' ? '1.5px solid #3457D5' : '1.5px solid #E3E5E9',
-                      background: activeMethod === 'card' ? '#ECF0FD' : 'white',
-                      color:      activeMethod === 'card' ? '#3457D5' : '#232733',
-                      boxShadow:  activeMethod === 'card' ? '0 0 0 1px #3457D5' : 'none',
-                      transition: 'all 0.12s',
-                    }}>
-                    <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                      background: '#ECF0FD', color: '#3457D5', borderRadius: 5, padding: '2px 6px' }}>KK</span>
-                    <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
-                      fontWeight: activeMethod === 'card' ? 700 : 500 }}>Kart</span>
-                  </button>
-
-                  {visibleBrands.map(brand => {
-                    const isTaksit = brand.payment_provider_brand_id === 999
-                    const brandBg  = isTaksit ? '#E8F5E9' : '#F3E9FB'
-                    const brandFg  = isTaksit ? '#2E7D32' : '#7A3AAB'
-                    const selected  = activeMethod === 'other'
-                      && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
-                    const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
-                    return (
-                      <button key={brand.payment_provider_brand_id} type="button"
-                        onClick={() => { setActiveMethod('other'); setSelectedBrand(brand) }}
-                        style={{
-                          aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                          alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                          borderRadius: 10, cursor: 'pointer', padding: '10%',
-                          border:     selected ? `1.5px solid ${brandFg}` : '1.5px solid #E3E5E9',
-                          background: selected ? brandBg : 'white',
-                          color:      selected ? brandFg : '#232733',
-                          boxShadow:  selected ? `0 0 0 1px ${brandFg}` : 'none',
-                          transition: 'all 0.12s',
-                        }}>
-                        <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                          background: brandBg, color: brandFg, borderRadius: 5, padding: '2px 6px' }}>
-                          {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
-                        </span>
-                        <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
-                          overflow: 'hidden', display: '-webkit-box',
-                          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%',
-                          fontWeight: selected ? 700 : 500 }}>
-                          {label}
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {/* ── 3. KOLON: Numpad (dar) ── */}
-              <div style={{
-                background:    '#FAFAFB',
-                display:       'flex',
-                flexDirection: 'column',
-                overflow:      'hidden',
-                minHeight:     0,
-              }}>
-                <div style={{ padding: '1.2vh 4%', borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 12px)', fontWeight: 600,
-                    color: activeMethod ? '#232733' : '#989BA3', marginBottom: '0.8vh',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ padding: '1.2vh 3%', borderBottom: '1px solid #E3E5E9', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600,
+                    color: activeMethod ? '#232733' : '#989BA3',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                     {activeMethod === 'cash' ? '💵 Nakit'
                       : activeMethod === 'card' ? '💳 Kart'
                       : activeMethod === 'other' && selectedBrand
                         ? (selectedBrand.payment_provider_brand_id === 999
                           ? 'KK Taksit/Puan'
                           : selectedBrand.payment_provider_brand_nm)
-                        : 'Yöntem Seçin'}
+                        : 'Ödeme yöntemi seçin'}
                   </div>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    <button type="button" onClick={() => setPendingAmount((remaining / 2).toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
+                  <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                    <button type="button"
+                      onClick={() => setPendingAmount((remaining / 2).toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
                       disabled={remaining <= 0}
-                      style={{ flex: 1, padding: '0.5vh 0', borderRadius: 6, border: '1px solid #E3E5E9',
-                        background: 'white', color: '#61656D', fontSize: 'clamp(9px, 1.1vh, 11px)',
-                        fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default', opacity: remaining > 0 ? 1 : 0.4 }}>
+                      style={{ padding: '0.5vh 0.8vw', borderRadius: 6, border: '1px solid #E3E5E9',
+                        background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)',
+                        fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default',
+                        opacity: remaining > 0 ? 1 : 0.4 }}>
                       Yarısı
                     </button>
-                    <button type="button" onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
+                    <button type="button"
+                      onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
                       disabled={remaining <= 0}
-                      style={{ flex: 1, padding: '0.5vh 0', borderRadius: 6, border: '1px solid #E3E5E9',
-                        background: 'white', color: '#61656D', fontSize: 'clamp(9px, 1.1vh, 11px)',
-                        fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default', opacity: remaining > 0 ? 1 : 0.4 }}>
+                      style={{ padding: '0.5vh 0.8vw', borderRadius: 6, border: '1px solid #E3E5E9',
+                        background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)',
+                        fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default',
+                        opacity: remaining > 0 ? 1 : 0.4 }}>
                       Kalanı
                     </button>
                   </div>
                 </div>
 
-                <div style={{ fontSize: 'clamp(18px, 3.2vh, 26px)', fontWeight: 600,
-                  textAlign: 'right' as const, padding: '1vh 4% 0.8vh',
-                  color: pendingAmount ? '#232733' : '#989BA3', fontFamily: 'monospace',
-                  flexShrink: 0, lineHeight: 1.1 }}>
-                  <span style={{ fontSize: 'clamp(12px, 1.8vh, 15px)', color: '#989BA3', fontWeight: 500, marginRight: 3 }}>₺</span>
-                  {pendingAmount || '0,00'}
-                </div>
+                <div style={{ flex: 1, padding: '1.5vh 3%', overflowY: 'auto' }}>
+                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
+                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '1.2vh' }}>
+                    Ödeme Yöntemi
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '1vh' }}>
+                    <button type="button" onClick={() => { setActiveMethod('cash'); setSelectedBrand(null) }}
+                      style={{
+                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
+                        borderRadius: 10, cursor: 'pointer', padding: '10%',
+                        border:     activeMethod === 'cash' ? '1.5px solid #A8620A' : '1.5px solid #E3E5E9',
+                        background: activeMethod === 'cash' ? '#FDF1DE' : 'white',
+                        color:      activeMethod === 'cash' ? '#A8620A' : '#232733',
+                        boxShadow:  activeMethod === 'cash' ? '0 0 0 1px #A8620A' : 'none',
+                        transition: 'all 0.12s',
+                      }}>
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                        background: '#FDF1DE', color: '#A8620A', borderRadius: 5, padding: '2px 6px' }}>NK</span>
+                      <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
+                        fontWeight: activeMethod === 'cash' ? 700 : 500 }}>Nakit</span>
+                    </button>
 
-                <div style={{
-                  display:             'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gridAutoRows:        'clamp(42px, 5.8vh, 52px)',
-                  gap:                 6,
-                  padding:             '0 4%',
-                  flexShrink:          0,
-                }}>
-                  {['7','8','9','4','5','6','1','2','3','00','0','⌫'].map(k => (
-                    <button key={k} type="button"
+                    <button type="button" onClick={() => { setActiveMethod('card'); setSelectedBrand(null) }}
+                      style={{
+                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
+                        borderRadius: 10, cursor: 'pointer', padding: '10%',
+                        border:     activeMethod === 'card' ? '1.5px solid #3457D5' : '1.5px solid #E3E5E9',
+                        background: activeMethod === 'card' ? '#ECF0FD' : 'white',
+                        color:      activeMethod === 'card' ? '#3457D5' : '#232733',
+                        boxShadow:  activeMethod === 'card' ? '0 0 0 1px #3457D5' : 'none',
+                        transition: 'all 0.12s',
+                      }}>
+                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                        background: '#ECF0FD', color: '#3457D5', borderRadius: 5, padding: '2px 6px' }}>KK</span>
+                      <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
+                        fontWeight: activeMethod === 'card' ? 700 : 500 }}>Kart</span>
+                    </button>
+
+                    {visibleBrands.map(brand => {
+                      const isTaksit = brand.payment_provider_brand_id === 999
+                      const brandBg  = isTaksit ? '#E8F5E9' : '#F3E9FB'
+                      const brandFg  = isTaksit ? '#2E7D32' : '#7A3AAB'
+                      const selected  = activeMethod === 'other'
+                        && selectedBrand?.payment_provider_brand_id === brand.payment_provider_brand_id
+                      const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
+                      return (
+                        <button key={brand.payment_provider_brand_id} type="button"
+                          onClick={() => { setActiveMethod('other'); setSelectedBrand(brand) }}
+                          style={{
+                            aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
+                            borderRadius: 10, cursor: 'pointer', padding: '10%',
+                            border:     selected ? `1.5px solid ${brandFg}` : '1.5px solid #E3E5E9',
+                            background: selected ? brandBg : 'white',
+                            color:      selected ? brandFg : '#232733',
+                            boxShadow:  selected ? `0 0 0 1px ${brandFg}` : 'none',
+                            transition: 'all 0.12s',
+                          }}>
+                          <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
+                            background: brandBg, color: brandFg, borderRadius: 5, padding: '2px 6px' }}>
+                            {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
+                            overflow: 'hidden', display: '-webkit-box',
+                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%',
+                            fontWeight: selected ? 700 : 500 }}>
+                            {label}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── 3. KOLON: Numpad — satıştaki birebir ── */}
+              <div style={{
+                background:    '#f8f9fa',
+                display:       'flex',
+                flexDirection: 'column',
+                padding:       '6px 6px 0',
+                gap:           0,
+                borderLeft:    '2px solid #9CA3AF',
+                boxShadow:     'inset 0 0 0 1px rgba(0,0,0,0.04)',
+                overflow:      'hidden',
+              }}>
+                <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+                  gap: 5, padding: '4px', boxSizing: 'border-box' as const, overflow: 'hidden' }}>
+
+                  <div style={{ display: 'flex', gap: 5, flexShrink: 0, height: 44 }}>
+                    <button type="button"
+                      onClick={() => setPendingAmount('')}
+                      style={{
+                        flex: 1, borderRadius: 9,
+                        border: '1.5px solid #fecdd3', background: '#fff5f5', color: '#dc2626',
+                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        userSelect: 'none' as const,
+                      }}>TEMİZLE</button>
+
+                    <button type="button"
+                      onClick={() => setPendingAmount(v => v.slice(0, -1))}
+                      style={{
+                        flex: 1, borderRadius: 9,
+                        border: '1.5px solid #fde68a', background: '#fffbeb', color: '#d97706',
+                        fontSize: 20, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        userSelect: 'none' as const,
+                      }}>⌫</button>
+                  </div>
+
+                  <div style={{
+                    flexShrink: 0, height: 40, borderRadius: 9,
+                    border: `1.5px solid ${pendingAmount ? '#a5d6a7' : '#e5e7eb'}`,
+                    background: pendingAmount ? '#e8f5e9' : '#f9fafb',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 8px', overflow: 'hidden', userSelect: 'none' as const,
+                  }}>
+                    <span style={{
+                      fontSize: pendingAmount.length <= 7 ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                        : pendingAmount.length <= 14 ? 'clamp(12px, 1.1vw + 2px, 18px)'
+                        : 'clamp(10px, 0.95vw + 1px, 16px)',
+                      fontWeight: 700,
+                      color: pendingAmount ? '#2e7d32' : '#9ca3af',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      maxWidth: '100%', lineHeight: 1, textAlign: 'center' as const,
+                    }}>
+                      {pendingAmount || '—'}
+                    </span>
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gridTemplateRows: 'repeat(4, minmax(0, 1fr))',
+                    gap: 5, flex: 1, minHeight: 0,
+                  }}>
+                    {['7','8','9','4','5','6','1','2','3',',','0'].map(k => (
+                      <button key={k} type="button"
+                        onClick={() => {
+                          setPendingAmount(v => {
+                            if (k === ',') return v.includes(',') ? v : (v === '' ? '0,' : v + ',')
+                            if (v.replace(/[,.]/g,'').length >= 9) return v
+                            return v + k
+                          })
+                        }}
+                        style={{
+                          width: '100%', height: '100%', boxSizing: 'border-box' as const,
+                          border: '1.5px solid #d1d5db', borderRadius: 9,
+                          cursor: 'pointer', fontWeight: 700,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          userSelect: 'none' as const,
+                          background: 'white', color: '#1f2937',
+                          fontSize: 'clamp(14px, 1.4vw + 4px, 26px)',
+                        }}>{k}</button>
+                    ))}
+
+                    <button type="button"
+                      disabled={!activeMethod || !pendingAmount || remaining <= 0}
                       onClick={() => {
-                        if (k === '⌫') { setPendingAmount(v => v.slice(0, -1)); return }
-                        setPendingAmount(v => {
-                          if (v.replace(/[,\.]/g,'').length >= 9) return v
-                          if (k === '00') return v.includes(',') ? v : (v + '00')
-                          return v + k
-                        })
+                        if (!activeMethod || !pendingAmount) return
+                        const raw = pendingAmount.replace(/\./g, '').replace(',', '.')
+                        const amt = parseFloat(raw) || 0
+                        if (amt <= 0) return
+                        const isTaksit = activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === 999
+                        setPaymentLines(prev => [...prev, {
+                          id:       crypto.randomUUID(),
+                          method:   isTaksit ? 'card' : activeMethod,
+                          amount:   Math.round(amt * 100) / 100,
+                          label:    isTaksit ? 'KK Taksit/Puan'
+                            : activeMethod === 'cash' ? 'Nakit'
+                            : activeMethod === 'card' ? 'Kredi Kartı'
+                            : selectedBrand?.payment_provider_brand_nm ?? 'Diğer',
+                          mediator: isTaksit ? 2 : activeMethod === 'cash' ? 1
+                            : activeMethod === 'card' ? 2 : selectedBrand?.payment_mediator ?? 14,
+                          brand: isTaksit ? 999
+                            : activeMethod === 'other' ? selectedBrand?.payment_provider_brand_id : undefined,
+                        }])
+                        setPendingAmount('')
+                        setActiveMethod(null)
+                        setSelectedBrand(null)
                       }}
                       style={{
-                        width:          '100%',
-                        height:         '100%',
-                        boxSizing:      'border-box' as const,
-                        border:         k === '⌫' ? '1.5px solid #fecdd3' : '1.5px solid #d1d5db',
-                        borderRadius:   8,
-                        cursor:         'pointer',
-                        fontWeight:     700,
-                        display:        'flex',
-                        alignItems:     'center',
-                        justifyContent: 'center',
-                        userSelect:     'none' as const,
-                        background:     k === '⌫' ? '#fff5f5' : 'white',
-                        color:          k === '⌫' ? '#dc2626' : '#1f2937',
-                        fontSize:       'clamp(13px, 1.5vh, 17px)',
-                      }}>{k}</button>
-                  ))}
+                        width: '100%', height: '100%', boxSizing: 'border-box' as const,
+                        border: (!activeMethod || !pendingAmount || remaining <= 0)
+                          ? '1.5px solid #e5e7eb' : '1.5px solid #BFDBFE',
+                        borderRadius: 9,
+                        cursor: (!activeMethod || !pendingAmount || remaining <= 0) ? 'default' : 'pointer',
+                        fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        userSelect: 'none' as const,
+                        background: (!activeMethod || !pendingAmount || remaining <= 0) ? '#f9fafb' : '#EFF6FF',
+                        color: (!activeMethod || !pendingAmount || remaining <= 0) ? '#9ca3af' : '#1565C0',
+                        fontSize: 'clamp(10px, 0.9vw + 3px, 14px)',
+                      }}>ekle</button>
+                  </div>
                 </div>
-
-                <div style={{ flex: 1, minHeight: 8 }} />
-
-                <button
-                  type="button"
-                  disabled={!activeMethod || !pendingAmount || remaining <= 0}
-                  onClick={() => {
-                    if (!activeMethod || !pendingAmount) return
-                    const raw = pendingAmount.replace(/\./g, '').replace(',', '.')
-                    const amt = parseFloat(raw) || 0
-                    if (amt <= 0) return
-                    const isTaksit = activeMethod === 'other' && selectedBrand?.payment_provider_brand_id === 999
-                    setPaymentLines(prev => [...prev, {
-                      id:       crypto.randomUUID(),
-                      method:   isTaksit ? 'card' : activeMethod,
-                      amount:   Math.round(amt * 100) / 100,
-                      label:    isTaksit ? 'KK Taksit/Puan'
-                        : activeMethod === 'cash' ? 'Nakit'
-                        : activeMethod === 'card' ? 'Kredi Kartı'
-                        : selectedBrand?.payment_provider_brand_nm ?? 'Diğer',
-                      mediator: isTaksit ? 2 : activeMethod === 'cash' ? 1
-                        : activeMethod === 'card' ? 2 : selectedBrand?.payment_mediator ?? 14,
-                      brand: isTaksit ? 999
-                        : activeMethod === 'other' ? selectedBrand?.payment_provider_brand_id : undefined,
-                    }])
-                    setPendingAmount('')
-                    setActiveMethod(null)
-                    setSelectedBrand(null)
-                  }}
-                  style={{
-                    margin:       '0 4% 1.2vh',
-                    padding:      '1.2vh 0',
-                    border:       'none',
-                    borderRadius: 8,
-                    flexShrink:   0,
-                    background:   (!activeMethod || !pendingAmount || remaining <= 0) ? '#F1F2F4' : '#3457D5',
-                    color:        (!activeMethod || !pendingAmount || remaining <= 0) ? '#989BA3' : 'white',
-                    fontWeight:   600,
-                    fontSize:     'clamp(11px, 1.3vh, 13px)',
-                    cursor:       'pointer',
-                  }}>
-                  {activeMethod ? 'Ödemeyi Ekle' : 'Yöntem Seçin'}
-                </button>
               </div>
 
             </div>
