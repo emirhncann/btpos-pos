@@ -6248,39 +6248,39 @@ export default function POSScreen({
                     textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '1.2vh' }}>
                     Ödeme Yöntemi
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '1vh' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: '1.2vh' }}>
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('cash', null, pendingAmount ? undefined : remaining)}
                       style={{
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                        borderRadius: 10, cursor: 'pointer', padding: '10%',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
+                        borderRadius: 12, cursor: 'pointer', padding: '12%',
                         border:     '1.5px solid #E3E5E9',
                         background: 'white',
                         color:      '#232733',
                         transition: 'all 0.12s',
                       }}>
-                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                        background: '#FDF1DE', color: '#A8620A', borderRadius: 5, padding: '2px 6px' }}>NK</span>
-                      <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
-                        fontWeight: 500 }}>Nakit</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
+                        background: '#FDF1DE', color: '#A8620A', borderRadius: 6, padding: '3px 8px' }}>NK</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
+                        fontWeight: 600 }}>Nakit</span>
                     </button>
 
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('card', null, pendingAmount ? undefined : remaining)}
                       style={{
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                        borderRadius: 10, cursor: 'pointer', padding: '10%',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
+                        borderRadius: 12, cursor: 'pointer', padding: '12%',
                         border:     '1.5px solid #E3E5E9',
                         background: 'white',
                         color:      '#232733',
                         transition: 'all 0.12s',
                       }}>
-                      <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                        background: '#ECF0FD', color: '#3457D5', borderRadius: 5, padding: '2px 6px' }}>KK</span>
-                      <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
-                        fontWeight: 500 }}>Kart</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
+                        background: '#ECF0FD', color: '#3457D5', borderRadius: 6, padding: '3px 8px' }}>KK</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
+                        fontWeight: 600 }}>Kart</span>
                     </button>
 
                     {visibleBrands.map(brand => {
@@ -6293,21 +6293,21 @@ export default function POSScreen({
                           onClick={() => addPaymentLineWithMethod('other', brand, pendingAmount ? undefined : remaining)}
                           style={{
                             aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', justifyContent: 'center', gap: '0.6vh',
-                            borderRadius: 10, cursor: 'pointer', padding: '10%',
+                            alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
+                            borderRadius: 12, cursor: 'pointer', padding: '12%',
                             border:     '1.5px solid #E3E5E9',
                             background: 'white',
                             color:      '#232733',
                             transition: 'all 0.12s',
                           }}>
-                          <span style={{ fontSize: 'clamp(9px, 1.1vh, 11px)', fontWeight: 700,
-                            background: brandBg, color: brandFg, borderRadius: 5, padding: '2px 6px' }}>
+                          <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
+                            background: brandBg, color: brandFg, borderRadius: 6, padding: '3px 8px' }}>
                             {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
                           </span>
-                          <span style={{ fontSize: 'clamp(9px, 1.2vh, 12px)', textAlign: 'center' as const, lineHeight: 1.2,
+                          <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
                             overflow: 'hidden', display: '-webkit-box',
                             WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%',
-                            fontWeight: 500 }}>
+                            fontWeight: 600 }}>
                             {label}
                           </span>
                         </button>
