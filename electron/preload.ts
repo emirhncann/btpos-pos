@@ -185,6 +185,10 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:saveEnabledBrands', terminalId, brands),
     getEnabledBrands: (terminalId: string) =>
       ipcRenderer.invoke('db:getEnabledBrands', terminalId),
+    saveBarcodeFormats: (terminalId: string, formats: unknown[]) =>
+      ipcRenderer.invoke('db:saveBarcodeFormats', terminalId, formats),
+    getBarcodeFormats: (terminalId: string) =>
+      ipcRenderer.invoke('db:getBarcodeFormats', terminalId),
   },
   cart: {
     saveDraft: (opts: {

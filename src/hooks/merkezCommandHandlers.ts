@@ -1,4 +1,5 @@
 import { API_URL, api, fetchPluGroupsFromServer } from '../lib/api'
+import { parseBarcodeFormatsResponse } from '../lib/barcodeFormat'
 import { pavoPair } from '../lib/pavoService'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
@@ -64,6 +65,7 @@ export interface MerkezCommandHandlerDeps {
   showToast:            (msg: string) => void
   onPluUpdated:         (groups: PluGroupCacheRow[]) => void
   onEnabledBrandsUpdated?: (brands: PaymentProviderBrand[]) => void
+  onBarcodeFormatsUpdated?: (formats: BarcodeFormatRow[]) => void
 }
 
 function failResult(msg: string): SyncResult {
@@ -220,11 +222,12 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       d.setCommandSyncing(true)
       try {
         const results: Record<string, SyncResult> = {
-          products:      failResult(''),
-          plu:           failResult(''),
-          cashiers:      failResult(''),
-          settings:      failResult(''),
-          paymentBrands: failResult(''),
+          products:       failResult(''),
+          plu:            failResult(''),
+          cashiers:       failResult(''),
+          settings:       failResult(''),
+          paymentBrands:  failResult(''),
+          barcodeFormats: failResult(''),
         }
 
         try {
@@ -292,6 +295,22 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         } catch (e) {
           console.warn('[sync_all] payment brands hatası:', e)
           results.paymentBrands = failResult(String(e))
+        }
+
+        try {
+          const token = await window.electron.store.get('token').catch(() => null) as string | null
+          const r = await fetch(`${API_URL}/barcode-formats/${d.terminalId}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+          if (r.ok) {
+            const list = parseBarcodeFormatsResponse(await r.json())
+            await window.electron.db.saveBarcodeFormats(d.terminalId, list)
+            d.onBarcodeFormatsUpdated?.(list)
+            results.barcodeFormats = { success: true, inserted: list.length, updated: 0, deleted: 0 }
+          }
+        } catch (e) {
+          console.warn('[sync_all] barkod format hatası:', e)
+          results.barcodeFormats = failResult(String(e))
         }
 
         const vals = Object.values(results)

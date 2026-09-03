@@ -43,6 +43,7 @@ export default function App() {
   const [allProducts, setAllProducts]   = useState<ProductRow[]>([])
   const [pluGroups, setPluGroups]       = useState<PluGroupCacheRow[]>([])
   const [syncedEnabledBrands, setSyncedEnabledBrands] = useState<PaymentProviderBrand[] | null>(null)
+  const [syncedBarcodeFormats, setSyncedBarcodeFormats] = useState<BarcodeFormatRow[] | null>(null)
   const [posSettings, setPosSettings]   = useState<PosSettingsRow>({
     showPrice: true, showCode: true, showBarcode: false,
     duplicateItemAction: 'increase_qty',
@@ -170,6 +171,7 @@ export default function App() {
       showToast: showMerkezToast,
       onPluUpdated: setPluGroups,
       onEnabledBrandsUpdated: setSyncedEnabledBrands,
+      onBarcodeFormatsUpdated: setSyncedBarcodeFormats,
     })
   }, [
     companyId,
@@ -394,6 +396,7 @@ export default function App() {
       pluGroups={pluGroups}
       posSettings={posSettings}
       syncedEnabledBrands={syncedEnabledBrands}
+      syncedBarcodeFormats={syncedBarcodeFormats}
       onBack={() => {
         setCartActive(false)
         setState('dashboard')

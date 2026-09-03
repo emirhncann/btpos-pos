@@ -126,7 +126,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getLastSale: () => electron.ipcRenderer.invoke("db:getLastSale"),
     getRecentSales: (opts) => electron.ipcRenderer.invoke("db:getRecentSales", opts),
     saveEnabledBrands: (terminalId, brands) => electron.ipcRenderer.invoke("db:saveEnabledBrands", terminalId, brands),
-    getEnabledBrands: (terminalId) => electron.ipcRenderer.invoke("db:getEnabledBrands", terminalId)
+    getEnabledBrands: (terminalId) => electron.ipcRenderer.invoke("db:getEnabledBrands", terminalId),
+    saveBarcodeFormats: (terminalId, formats) => electron.ipcRenderer.invoke("db:saveBarcodeFormats", terminalId, formats),
+    getBarcodeFormats: (terminalId) => electron.ipcRenderer.invoke("db:getBarcodeFormats", terminalId)
   },
   cart: {
     saveDraft: (opts) => electron.ipcRenderer.invoke("cart:saveDraft", opts),

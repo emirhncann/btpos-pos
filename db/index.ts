@@ -212,6 +212,22 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       received_at TEXT NOT NULL,
       done_at     TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS barcode_formats_cache (
+      id                   TEXT PRIMARY KEY,
+      company_id           TEXT NOT NULL,
+      terminal_id          TEXT NOT NULL,
+      flag_code            INTEGER NOT NULL,
+      type                 TEXT NOT NULL,
+      integer_length       INTEGER NOT NULL,
+      decimal_length       INTEGER NOT NULL,
+      decimal_multiplier   INTEGER NOT NULL DEFAULT 1,
+      minimum_value        INTEGER NOT NULL DEFAULT 1,
+      is_active            INTEGER NOT NULL DEFAULT 1,
+      label                TEXT,
+      synced_at            TEXT NOT NULL,
+      UNIQUE(terminal_id, flag_code)
+    );
   `)
 
   migrateCashiersCompanyId(sqlite)
@@ -624,6 +640,24 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       payment_mediator          INTEGER NOT NULL,
       synced_at                 TEXT    NOT NULL,
       UNIQUE(terminal_id, payment_provider_brand_id)
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS barcode_formats_cache (
+      id                   TEXT PRIMARY KEY,
+      company_id           TEXT NOT NULL,
+      terminal_id          TEXT NOT NULL,
+      flag_code            INTEGER NOT NULL,
+      type                 TEXT NOT NULL,
+      integer_length       INTEGER NOT NULL,
+      decimal_length       INTEGER NOT NULL,
+      decimal_multiplier   INTEGER NOT NULL DEFAULT 1,
+      minimum_value        INTEGER NOT NULL DEFAULT 1,
+      is_active            INTEGER NOT NULL DEFAULT 1,
+      label                TEXT,
+      synced_at            TEXT NOT NULL,
+      UNIQUE(terminal_id, flag_code)
     )
   `)
 }

@@ -1174,6 +1174,17 @@ app.whenReady().then(async () => {
     return getEnabledBrands(terminalId)
   })
 
+  ipcMain.handle('db:saveBarcodeFormats', async (_e, terminalId: string, formats: unknown[]) => {
+    const { saveBarcodeFormats } = await import('../db/operations')
+    saveBarcodeFormats(terminalId, formats as Parameters<typeof saveBarcodeFormats>[1])
+    return { success: true }
+  })
+
+  ipcMain.handle('db:getBarcodeFormats', async (_e, terminalId: string) => {
+    const { getBarcodeFormats } = await import('../db/operations')
+    return getBarcodeFormats(terminalId)
+  })
+
   ipcMain.handle('cart:saveDraft', (_e, opts: {
     companyId:  string
     terminalId: string

@@ -35,6 +35,11 @@ import QuickReturnModal, {
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { playClickSound } from '../lib/clickSound'
+import {
+  matchProductByInternalBarcode,
+  parseBarcodeEAN13 as parseEAN13,
+  parseBarcodeFormatsResponse,
+} from '../lib/barcodeFormat'
 
 const WEIGHED_UNITS = new Set([
   'KG', 'KG.', 'KGS', 'KILO', 'KILOGRAM', 'KILOGRAMS',
@@ -238,6 +243,7 @@ interface Props {
   pluGroups:       PluGroupCacheRow[]
   posSettings:     PosSettingsRow
   syncedEnabledBrands?: PaymentProviderBrand[] | null
+  syncedBarcodeFormats?: BarcodeFormatRow[] | null
   onBack:          () => void
   onLogout:        () => void
   pendingMessage?: { text: string } | null
@@ -374,6 +380,7 @@ export default function POSScreen({
   companyId, cashier, allProducts,
   pluGroups, posSettings,
   syncedEnabledBrands = null,
+  syncedBarcodeFormats = null,
   onBack, onLogout,
   pendingMessage, onMessageClose,
   merkezToast = null,
@@ -400,6 +407,7 @@ export default function POSScreen({
   const [activeMethod, setActiveMethod]   = useState<PaymentMethodKey | null>(null)
   const [pendingAmount, setPendingAmount] = useState('')
   const [enabledBrands, setEnabledBrands] = useState<PaymentProviderBrand[]>([])
+  const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormatRow[]>([])
   const [showOtherPayments, setShowOtherPayments] = useState(false)
   const [selectedBrand, setSelectedBrand] = useState<PaymentProviderBrand | null>(null)
   const [terminalId, setTerminalId] = useState<string | null>(null)
@@ -619,10 +627,39 @@ export default function POSScreen({
   }, [terminalId])
 
   useEffect(() => {
+    if (!terminalId) return
+    void (async () => {
+      try {
+        const token = await window.electron.store.get('token').catch(() => null) as string | null
+        const r = await fetch(`${API_URL}/barcode-formats/${terminalId}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        })
+        if (!r.ok) throw new Error('API başarısız')
+        const list = parseBarcodeFormatsResponse(await r.json())
+        setBarcodeFormats(list)
+        await window.electron.db.saveBarcodeFormats(terminalId, list)
+      } catch {
+        try {
+          const cached = await window.electron.db.getBarcodeFormats(terminalId)
+          setBarcodeFormats(parseBarcodeFormatsResponse(cached))
+        } catch {
+          /* yok say */
+        }
+      }
+    })()
+  }, [terminalId])
+
+  useEffect(() => {
     if (syncedEnabledBrands !== null) {
       setEnabledBrands(syncedEnabledBrands)
     }
   }, [syncedEnabledBrands])
+
+  useEffect(() => {
+    if (syncedBarcodeFormats !== null) {
+      setBarcodeFormats(syncedBarcodeFormats)
+    }
+  }, [syncedBarcodeFormats])
 
   useEffect(() => {
     if (!showCustomer || !companyId) return
@@ -909,6 +946,19 @@ export default function POSScreen({
     }
   }, [menuOpen])
 
+  const parseBarcodeEAN13 = useCallback((barcode: string) => {
+    if (barcode.length === 13) {
+      const digits = barcode.split('').map(Number)
+      const checkSum = digits.slice(0, 12).reduce((sum, d, i) =>
+        sum + d * (i % 2 === 0 ? 1 : 3), 0)
+      const checkDigit = (10 - (checkSum % 10)) % 10
+      if (checkDigit !== digits[12]) {
+        console.warn('[barkod] Check digit hatalı:', barcode)
+      }
+    }
+    return parseEAN13(barcode, barcodeFormats)
+  }, [barcodeFormats])
+
   /* ── POS açılınca Electron penceresine focus — barkod hemen çalışsın ── */
   useEffect(() => {
     void window.electron.window.focusWindow()
@@ -977,6 +1027,40 @@ export default function POSScreen({
         return
       }
 
+      if (searchQ.length === 13) {
+        const flagCode = parseInt(searchQ.slice(0, 2), 10)
+        if (flagCode >= 20 && flagCode <= 29) {
+          const parsed = parseBarcodeEAN13(searchQ)
+          setSearchQ('')
+          setNumBuf('')
+          if (!parsed) {
+            const hasFormat = barcodeFormats.some(f => Number(f.flag_code) === flagCode)
+            if (!hasFormat) {
+              showError(
+                'Barkod Formatı Bulunamadı',
+                `Bayrak kodu ${flagCode} bu kasada tanımlı değil. Yönetim panelinden format ekleyip senkronize edin.`,
+              )
+            } else {
+              showError(
+                'Barkod Okunamadı',
+                `Bayrak ${flagCode} — miktar format kurallarına uymuyor olabilir.`,
+              )
+            }
+            return
+          }
+          const product = matchProductByInternalBarcode(allProducts, parsed.productBarcode)
+          if (!product) {
+            showError(
+              'Ürün Bulunamadı',
+              `Dahili kod: ${parsed.productBarcode} — ürün kartında barkod/kod alanı bu değerle eşleşmiyor.`,
+            )
+            return
+          }
+          addToCartWithQty(product, parsed.quantity)
+          return
+        }
+      }
+
       const byBarcode = allProducts.find(p => p.barcode === searchQ)
       if (!byBarcode) return
 
@@ -1001,7 +1085,7 @@ export default function POSScreen({
       addToCartWithQty(byBarcode, qty)
     }, 300)
     return () => clearTimeout(t)
-  }, [searchQ, numBuf, allProducts, quickReturnModal?.step, scaleEnabled])
+  }, [searchQ, numBuf, allProducts, barcodeFormats, quickReturnModal?.step, scaleEnabled, parseBarcodeEAN13, showError])
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number) {
@@ -1522,7 +1606,12 @@ export default function POSScreen({
     ? parseFloat((vatFromLines * (grandTotal / lineSubtotal)).toFixed(2))
     : 0
   const paidTotal = paymentLines.reduce((s, l) => s + l.amount, 0)
-  const visibleBrands = (
+  // Parçalı ödeme: sadece KK Taksit/Puan (999), Pavo yoksa hiçbiri
+  const karmaVisibleBrands = pavoSettings
+    ? enabledBrands.filter(b => b.payment_provider_brand_id === 999)
+    : []
+  // Diğer (tek ödeme): tüm markalar; Pavo yoksa 999 gizle
+  const otherVisibleBrands = (
     pavoSettings
       ? enabledBrands
       : enabledBrands.filter(b => b.payment_provider_brand_id !== 999)
@@ -6038,7 +6127,7 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
-                    gridColumn: visibleBrands.length > 0 ? undefined : 'span 2',
+                    gridColumn: otherVisibleBrands.length > 0 ? undefined : 'span 2',
                     padding: '11px 4px',
                     borderRadius: 7,
                     border: 'none',
@@ -6052,7 +6141,7 @@ export default function POSScreen({
                   🔀 Parçalı Ödeme
                 </button>
                 )}
-                {!returnMode && visibleBrands.length > 0 && (
+                {!returnMode && otherVisibleBrands.length > 0 && (
                   <button
                     onClick={() => {
                       if (cart.length === 0) return
@@ -6283,7 +6372,7 @@ export default function POSScreen({
                         fontWeight: 600 }}>Kart</span>
                     </button>
 
-                    {visibleBrands.map(brand => {
+                    {karmaVisibleBrands.map(brand => {
                       const isTaksit = brand.payment_provider_brand_id === 999
                       const brandBg  = isTaksit ? '#E8F5E9' : '#F3E9FB'
                       const brandFg  = isTaksit ? '#2E7D32' : '#7A3AAB'
@@ -6487,7 +6576,7 @@ export default function POSScreen({
               minHeight: 0,
               padding: 2,
             }}>
-              {visibleBrands.map(brand => {
+              {otherVisibleBrands.map(brand => {
                 const isTaksit = brand.payment_provider_brand_id === 999
                 const brandBg = isTaksit ? '#E8F5E9' : '#F3E9FB'
                 const brandFg = isTaksit ? '#2E7D32' : '#7A3AAB'

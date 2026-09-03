@@ -2200,3 +2200,48 @@ export function getEnabledBrands(terminalId: string): Array<{
      FROM enabled_payment_brands WHERE terminal_id = ? ORDER BY payment_provider_brand_id ASC`
   ).all(terminalId) as Array<{ payment_provider_brand_id: number; payment_provider_brand_nm: string; payment_mediator: number }>
 }
+
+export interface BarcodeFormatRow {
+  id:                  string
+  company_id:          string
+  terminal_id:         string
+  flag_code:           number
+  type:                'weighted' | 'counted'
+  integer_length:      number
+  decimal_length:      number
+  decimal_multiplier:  number
+  minimum_value:       number
+  is_active:           boolean
+  label:               string | null
+}
+
+export function saveBarcodeFormats(
+  terminalId: string,
+  formats: BarcodeFormatRow[]
+): void {
+  const db = getSqlite()
+  db.prepare(`DELETE FROM barcode_formats_cache WHERE terminal_id = ?`).run(terminalId)
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO barcode_formats_cache
+      (id, company_id, terminal_id, flag_code, type,
+       integer_length, decimal_length, decimal_multiplier,
+       minimum_value, is_active, label, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  for (const f of formats) {
+    stmt.run(
+      f.id, f.company_id, f.terminal_id, f.flag_code, f.type,
+      f.integer_length, f.decimal_length, f.decimal_multiplier,
+      f.minimum_value, f.is_active ? 1 : 0, f.label,
+      new Date().toISOString(),
+    )
+  }
+}
+
+export function getBarcodeFormats(terminalId: string): BarcodeFormatRow[] {
+  return getSqlite().prepare(`
+    SELECT * FROM barcode_formats_cache
+    WHERE terminal_id = ? AND is_active = 1
+    ORDER BY flag_code ASC
+  `).all(terminalId) as BarcodeFormatRow[]
+}

@@ -214,6 +214,8 @@ declare global {
         }) => Promise<RecentSaleRow[]>
         saveEnabledBrands(terminalId: string, brands: PaymentProviderBrand[]): Promise<{ success: boolean }>
         getEnabledBrands(terminalId: string): Promise<PaymentProviderBrand[]>
+        saveBarcodeFormats(terminalId: string, formats: BarcodeFormatRow[]): Promise<{ success: boolean }>
+        getBarcodeFormats(terminalId: string): Promise<BarcodeFormatRow[]>
       }
       cart: {
         saveDraft(opts: {
@@ -440,6 +442,20 @@ declare global {
     payment_provider_brand_id: number
     payment_provider_brand_nm: string
     payment_mediator:          number
+  }
+
+  interface BarcodeFormatRow {
+    id:                  string
+    company_id:          string
+    terminal_id:         string
+    flag_code:           number
+    type:                'weighted' | 'counted'
+    integer_length:      number
+    decimal_length:      number
+    decimal_multiplier:  number
+    minimum_value:       number
+    is_active:           boolean
+    label:               string | null
   }
 
   interface SaleItem {
