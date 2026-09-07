@@ -184,7 +184,15 @@ function pavoRetryHandle(data: Record<string, unknown>): Record<string, unknown>
   return handle
 }
 
-async function pavoRequest(url: string, body: object): Promise<Record<string, unknown>> {
+function pavoCardWaitTimeoutMs(settings: PavoSettings): number {
+  return ((settings.cardReadTimeout || 30) + 30) * 1000
+}
+
+async function pavoRequest(
+  url: string,
+  body: object,
+  timeoutMs: number = 30_000,
+): Promise<Record<string, unknown>> {
   const endpoint = url.split('/').pop() ?? url
 
   void window.electron.pavo.log({
@@ -194,12 +202,25 @@ async function pavoRequest(url: string, body: object): Promise<Record<string, un
   }).catch(() => {})
 
   const postJson = async (payload: object): Promise<Record<string, unknown>> => {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    return res.json() as Promise<Record<string, unknown>>
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      })
+      return res.json() as Promise<Record<string, unknown>>
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') {
+        throw new Error(`Pavo zaman aşımı (${timeoutMs / 1000}sn): ${endpoint}`)
+      }
+      throw e
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   const startTime = Date.now()
@@ -334,7 +355,11 @@ export async function pavoCompleteSale(
   }
 
   try {
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/CompleteSale`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/CompleteSale`,
+      body,
+      pavoCardWaitTimeoutMs(settings),
+    )
     return parsePavoResult(data)
   } catch (e) {
     return { success: false, provider: 'pavo', message: String(e), raw: {} }
@@ -437,7 +462,11 @@ export async function pavoStartSaleWithItems(
 
     console.log('[StartSaleWithItems] body:', JSON.stringify(body, null, 2))
 
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/StartSaleWithItems`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/StartSaleWithItems`,
+      body,
+      30_000,
+    )
 
     console.log('[StartSaleWithItems] response:', JSON.stringify(data, null, 2))
     await syncPavoSequenceFromResponse(data)
@@ -525,7 +554,11 @@ export async function pavoAddPayment(
     }
 
     console.log('[AddPayment] body:', JSON.stringify(body, null, 2))
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AddPayment`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/AddPayment`,
+      body,
+      pavoCardWaitTimeoutMs(settings),
+    )
     console.log('[AddPayment] response:', JSON.stringify(data, null, 2))
     await syncPavoSequenceFromResponse(data)
 
@@ -563,7 +596,11 @@ export async function pavoFinalizeSale(
       Sale: ref,
     }
 
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/FinalizeSale`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/FinalizeSale`,
+      body,
+      30_000,
+    )
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -587,6 +624,7 @@ export async function pavoCheckPendingSale(
   saleId?: number
   saleNumber?: string
   remainingPaymentAmount?: number
+  totalPrice?: number
   data?: unknown
 }> {
   try {
@@ -595,7 +633,11 @@ export async function pavoCheckPendingSale(
       Sale: { OrderNo: orderNo },
     }
 
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/CheckPendingSale`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/CheckPendingSale`,
+      body,
+      15_000,
+    )
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -611,6 +653,7 @@ export async function pavoCheckPendingSale(
       saleId: Number(d?.SaleId ?? d?.Id ?? 0),
       saleNumber: String(d?.SaleNumber ?? '').trim() || undefined,
       remainingPaymentAmount: Number(d?.RemainingPaymentAmount ?? 0),
+      totalPrice: Number(d?.TotalPrice ?? 0),
       data,
     }
   } catch (e) {
@@ -638,7 +681,11 @@ export async function pavoAbandonSuspendedSale(
       Sale: ref,
     }
 
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AbandonSuspendedSale`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/AbandonSuspendedSale`,
+      body,
+      15_000,
+    )
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -659,6 +706,7 @@ export async function pavoGetSaleResult(
   success: boolean
   message?: string
   status?: 'completed' | 'pending' | 'cancelled' | 'failed'
+  statusId?: number
   saleId?: number
   data?: unknown
 }> {
@@ -668,7 +716,11 @@ export async function pavoGetSaleResult(
       Sale: { OrderNo: orderNo },
     }
 
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/GetSaleResult`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/GetSaleResult`,
+      body,
+      15_000,
+    )
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
@@ -685,6 +737,7 @@ export async function pavoGetSaleResult(
     return {
       success: true,
       status,
+      statusId,
       saleId: Number(d?.SaleId ?? d?.Id ?? 0),
       data,
     }
@@ -964,7 +1017,11 @@ export async function pavoAdvanceSale(
     }
 
     console.log('[AdvanceSale] body:', JSON.stringify(body, null, 2))
-    const data = await pavoRequest(`${pavoBaseUrl(settings)}/AdvanceSale`, body)
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/AdvanceSale`,
+      body,
+      pavoCardWaitTimeoutMs(settings),
+    )
     console.log('[AdvanceSale] response:', JSON.stringify(data, null, 2))
 
     await syncPavoSequenceFromResponse(data)
@@ -994,5 +1051,75 @@ export async function pavoAdvanceSale(
     return { success: true, data }
   } catch (e) {
     return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoCompleteUncompletedSale(
+  settings: PavoSettings,
+  seq: number,
+  saleRef: { saleId?: number | null; saleNumber?: string | null; orderNo: string },
+): Promise<{ success: boolean; message?: string; data?: unknown }> {
+  try {
+    const body = {
+      TransactionHandle: transactionHandle(settings, seq),
+      Sale: {
+        SaleNumber: saleRef.saleNumber ?? undefined,
+        Id:         saleRef.saleId    ?? undefined,
+        OrderNo:    saleRef.orderNo,
+      },
+    }
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/CompleteUncompletedSale`,
+      body,
+      15_000,
+    )
+    await syncPavoSequenceFromResponse(data)
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, message: pavoErrorMessage(data, 'Satış tamamlanamadı') }
+    }
+    return { success: true, data }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
+export async function pavoListPendingSales(
+  settings: PavoSettings,
+  seq: number,
+): Promise<{
+  success: boolean
+  sales: Array<{
+    saleId:                 number
+    saleNumber:             string
+    orderNo:                string
+    totalPrice:             number
+    remainingPaymentAmount: number
+  }>
+  message?: string
+}> {
+  try {
+    const body = { TransactionHandle: transactionHandle(settings, seq) }
+    const data = await pavoRequest(
+      `${pavoBaseUrl(settings)}/ListPendingSaleWithDetail`,
+      body,
+      15_000,
+    )
+    await syncPavoSequenceFromResponse(data)
+    if (data.HasError === true || data.IsError === true) {
+      return { success: false, sales: [], message: pavoErrorMessage(data, 'Liste alınamadı') }
+    }
+    const list = (data.Data as Array<Record<string, unknown>> | undefined) ?? []
+    return {
+      success: true,
+      sales: list.map(s => ({
+        saleId:                 Number(s.Id ?? s.SaleId ?? 0),
+        saleNumber:             String(s.SaleNumber ?? ''),
+        orderNo:                String(s.OrderNo ?? ''),
+        totalPrice:             Number(s.TotalPrice ?? 0),
+        remainingPaymentAmount: Number(s.RemainingPaymentAmount ?? 0),
+      })),
+    }
+  } catch (e) {
+    return { success: false, sales: [], message: String(e) }
   }
 }

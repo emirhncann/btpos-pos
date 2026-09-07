@@ -11,6 +11,7 @@ import {
   pavoAbandonSuspendedSale,
   pavoGetSaleResult,
   pavoAdvanceSale,
+  pavoCompleteUncompletedSale,
   type PavoSettings,
 } from '../lib/pavoService'
 import { parsePavoResult, type PaymentDeviceResult } from '../lib/paymentDevice'
@@ -274,6 +275,19 @@ interface PaymentLine {
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
+function isPavoTimeoutMessage(msg: string): boolean {
+  return msg.includes('zaman aşımı') || msg.includes('AbortError')
+}
+
+function deviceResultFromPavoData(data: unknown): PaymentDeviceResult {
+  const raw = (data ?? {}) as Record<string, unknown>
+  return parsePavoResult(
+    raw.Data != null || raw.HasError != null
+      ? raw
+      : { HasError: false, Data: raw },
+  )
+}
+
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
   let net = lineTotal
   if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
@@ -477,6 +491,13 @@ export default function POSScreen({
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
   const [pavoError, setPavoError] = useState<string | null>(null)
+  const [pavoRecoveryState, setPavoRecoveryState] = useState<{
+    ref: { saleId?: number | null; saleNumber?: string | null }
+    orderNo: string
+    totalPrice: number
+    paidAmount: number
+    remainingAmount: number
+  } | null>(null)
   const { dialogProps, showError, showSuccess, showInfo, confirm } = useAlertDialog()
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
@@ -495,6 +516,8 @@ export default function POSScreen({
   const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
   const prevCartLenRef = useRef(0)
+  const pavoBusyCheckRef = useRef(false)
+  const pavoOpIdRef = useRef(0)
   const [swipeState, setSwipeState] = useState<{
     id:       string
     startX:   number
@@ -1700,6 +1723,239 @@ export default function POSScreen({
     }
   }
 
+  async function resolvePavoTimeout(opts: {
+    lines: PaymentLine[]
+    orderNo: string
+    cashAmt: number
+    cardAmt: number
+    paidAmt: number
+    saleRef?: { saleId?: number | null; saleNumber?: string | null }
+  }) {
+    showInfo('Zaman Aşımı', 'Pavo yanıt vermedi. Satış sonucu sorgulanıyor...')
+    try {
+      const resultSeq = await window.electron.db.nextPavoSequence()
+      const saleResult = await pavoGetSaleResult(pavoSettings!, resultSeq, opts.orderNo)
+
+      if (saleResult.success && (saleResult.statusId === 4 || saleResult.status === 'completed')) {
+        await finalizeSaleToSQLite({
+          lines: opts.lines,
+          orderNo: opts.orderNo,
+          deviceResult: deviceResultFromPavoData(saleResult.data),
+          cashAmt: opts.cashAmt,
+          cardAmt: opts.cardAmt,
+          paidAmt: opts.paidAmt,
+        })
+        return
+      }
+
+      await handlePavoRecovery(
+        opts.saleRef ?? { saleId: null, saleNumber: null },
+        opts.orderNo,
+      )
+      showError(
+        'Satış Tamamlanamadı',
+        'Ödeme alınamadı. Aynı ödeme yöntemine tekrar tıklayarak devam edebilirsiniz.',
+      )
+    } catch {
+      showError('Bağlantı Hatası', 'Pavo ile iletişim kurulamadı.')
+    }
+  }
+
+  async function abandonPavoRecovery() {
+    if (!pavoSettings || !pavoRecoveryState) return
+    try {
+      const abanSeq = await window.electron.db.nextPavoSequence()
+      await pavoAbandonSuspendedSale(pavoSettings, abanSeq, {
+        saleId: pavoRecoveryState.ref.saleId,
+        saleNumber: pavoRecoveryState.ref.saleNumber,
+        orderNo: pavoRecoveryState.orderNo,
+      })
+    } catch (e) {
+      console.warn('[pavo] Recovery iptal hatası:', e)
+    }
+    setPavoRecoveryState(null)
+    setSaving(false)
+    setPavoLoading(false)
+  }
+
+  async function payRemainingPavoRecovery() {
+    if (!pavoSettings || !pavoRecoveryState) return
+    setPavoLoading(true)
+    const rec = pavoRecoveryState
+    const lines = paymentLines.length > 0 ? paymentLines : [{
+      id: crypto.randomUUID(),
+      method: 'card' as const,
+      amount: rec.totalPrice,
+      label: 'Kredi Kartı',
+      mediator: 2,
+    }]
+    try {
+      const addSeq = await window.electron.db.nextPavoSequence()
+      const addRes = await pavoAddPayment(
+        pavoSettings,
+        addSeq,
+        { ...rec.ref, orderNo: rec.orderNo },
+        { mediator: 2, amount: rec.remainingAmount },
+        { grossPrice: araToplamBrut, totalPrice: rec.totalPrice },
+      )
+      if (!addRes.success) {
+        if (isPavoTimeoutMessage(addRes.message ?? '')) {
+          setPavoRecoveryState(null)
+          await resolvePavoTimeout({
+            lines,
+            orderNo: rec.orderNo,
+            cashAmt: lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0),
+            cardAmt: lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0),
+            paidAmt: lines.reduce((s, l) => s + l.amount, 0),
+            saleRef: rec.ref,
+          })
+          return
+        }
+        showError('Ödeme Hatası', addRes.message ?? 'Kalan ödeme alınamadı')
+        return
+      }
+      if (!addRes.finalized) {
+        const finalSeq = await window.electron.db.nextPavoSequence()
+        const finalRes = await pavoFinalizeSale(pavoSettings, finalSeq, {
+          ...rec.ref,
+          orderNo: rec.orderNo,
+        })
+        if (!finalRes.success && !isPavoTimeoutMessage(finalRes.message ?? '')) {
+          showError('Finalize Hatası', finalRes.message ?? 'Satış kapatılamadı')
+          return
+        }
+      }
+      const resultSeq = await window.electron.db.nextPavoSequence()
+      const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, rec.orderNo)
+      await finalizeSaleToSQLite({
+        lines,
+        orderNo: rec.orderNo,
+        deviceResult: deviceResultFromPavoData(saleResult.data ?? addRes.data),
+        cashAmt: lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0),
+        cardAmt: lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0),
+        paidAmt: lines.reduce((s, l) => s + l.amount, 0),
+      })
+      setPavoRecoveryState(null)
+    } catch (e) {
+      showError('Ödeme Hatası', e instanceof Error ? e.message : String(e))
+    } finally {
+      setPavoLoading(false)
+    }
+  }
+
+  async function handleDurumSorgula() {
+    if (!pavoSettings || !currentOrderNo) return
+    if (pavoBusyCheckRef.current) return
+    pavoBusyCheckRef.current = true
+
+    const lines = paymentLines.length > 0 ? paymentLines : [{
+      id: crypto.randomUUID(),
+      method: 'card' as const,
+      amount: grandTotal,
+      label: 'Kredi Kartı',
+      mediator: 2,
+    }]
+    const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
+    const cashAmt = lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0)
+    const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
+
+    try {
+      const seq = await window.electron.db.nextPavoSequence()
+      const pending = await pavoCheckPendingSale(pavoSettings, seq, currentOrderNo)
+
+      if (pending.hasPending) {
+        const remaining = pending.remainingPaymentAmount ?? 0
+        const total = (pending.totalPrice && pending.totalPrice > 0)
+          ? pending.totalPrice
+          : grandTotal
+
+        if (remaining <= 0) {
+          pavoOpIdRef.current += 1
+          const compSeq = await window.electron.db.nextPavoSequence()
+          const compRes = await pavoCompleteUncompletedSale(pavoSettings, compSeq, {
+            saleId: pending.saleId,
+            saleNumber: pending.saleNumber,
+            orderNo: currentOrderNo,
+          })
+          if (!compRes.success) {
+            showError('Satış Tamamlanamadı', compRes.message ?? 'Askıdaki satış kapatılamadı.')
+            setSaving(false)
+            setPavoLoading(false)
+            return
+          }
+          const resultSeq = await window.electron.db.nextPavoSequence()
+          const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
+          await finalizeSaleToSQLite({
+            lines,
+            orderNo: currentOrderNo,
+            deviceResult: deviceResultFromPavoData(saleResult.data ?? compRes.data),
+            cashAmt,
+            cardAmt,
+            paidAmt,
+          })
+          setSaving(false)
+          setPavoLoading(false)
+          showInfo('Satış Tamamlandı', 'Askıdaki satış başarıyla kapatıldı.')
+          return
+        }
+
+        if (remaining >= total) {
+          pavoOpIdRef.current += 1
+          const abanSeq = await window.electron.db.nextPavoSequence()
+          await pavoAbandonSuspendedSale(pavoSettings, abanSeq, {
+            saleId: pending.saleId,
+            saleNumber: pending.saleNumber,
+            orderNo: currentOrderNo,
+          })
+          setSaving(false)
+          setPavoLoading(false)
+          showInfo('Ödeme Alınamadı', 'Satış tamamlanamadı, tekrar deneyebilirsiniz.')
+          return
+        }
+
+        pavoOpIdRef.current += 1
+        setPavoRecoveryState({
+          ref: { saleId: pending.saleId, saleNumber: pending.saleNumber },
+          orderNo: currentOrderNo,
+          totalPrice: total,
+          paidAmount: parseFloat((total - remaining).toFixed(2)),
+          remainingAmount: remaining,
+        })
+        setSaving(false)
+        setPavoLoading(false)
+        return
+      }
+
+      const resultSeq = await window.electron.db.nextPavoSequence()
+      const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
+
+      if (saleResult.statusId === 4 || saleResult.status === 'completed') {
+        pavoOpIdRef.current += 1
+        await finalizeSaleToSQLite({
+          lines,
+          orderNo: currentOrderNo,
+          deviceResult: deviceResultFromPavoData(saleResult.data),
+          cashAmt,
+          cardAmt: cardAmt > 0 ? cardAmt : grandTotal,
+          paidAmt: paidAmt > 0 ? paidAmt : grandTotal,
+        })
+        setSaving(false)
+        setPavoLoading(false)
+        return
+      }
+
+      showInfo('Ödeme Alınamadı', 'Satış tamamlanamadı, tekrar deneyebilirsiniz.')
+      setSaving(false)
+      setPavoLoading(false)
+    } catch (e) {
+      showError('Sorgu Hatası', String(e))
+      setSaving(false)
+      setPavoLoading(false)
+    } finally {
+      pavoBusyCheckRef.current = false
+    }
+  }
+
   async function finalizeSaleToSQLite(opts: {
     lines: PaymentLine[]
     orderNo: string
@@ -1910,6 +2166,11 @@ export default function POSScreen({
     const lines = forcedLines ?? paymentLines
     if (!cart.length || lines.length === 0) return
 
+    if (saving || pavoLoading) {
+      await handleDurumSorgula()
+      return
+    }
+
     const isKarma = lines.length > 1
     console.log('[completeSale] paymentLines:', JSON.stringify(lines), 'isKarma:', isKarma)
 
@@ -1921,6 +2182,7 @@ export default function POSScreen({
   }
 
   async function completeSaleSingle(lines: PaymentLine[]) {
+    const opId = ++pavoOpIdRef.current
     setSaving(true)
     setPavoError(null)
     let deviceResult: PaymentDeviceResult | undefined
@@ -2017,7 +2279,16 @@ export default function POSScreen({
             { showCreditCardMenu: lines.some(l => l.brand === 999) },
           )
 
+          if (opId !== pavoOpIdRef.current) return
+
           if (!deviceResult.success) {
+            const msg = deviceResult.message ?? ''
+            if (isPavoTimeoutMessage(msg)) {
+              setSaving(false)
+              setPavoLoading(false)
+              await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt })
+              return
+            }
             setPaymentMode(false)
             setPaymentLines([])
             setActiveMethod(null)
@@ -2030,17 +2301,27 @@ export default function POSScreen({
             return
           }
         } catch (e) {
+          if (opId !== pavoOpIdRef.current) return
+          const msg = String(e)
+          if (isPavoTimeoutMessage(msg)) {
+            setSaving(false)
+            setPavoLoading(false)
+            await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt })
+            return
+          }
           setPaymentMode(false)
           setPaymentLines([])
           setActiveMethod(null)
           setPendingAmount('')
-          showError('Ödeme Hatası', String(e))
+          showError('Ödeme Hatası', msg)
           setPavoError(null)
           return
         } finally {
           setPavoLoading(false)
         }
       }
+
+      if (opId !== pavoOpIdRef.current) return
 
       await finalizeSaleToSQLite({
         lines,
@@ -2051,13 +2332,15 @@ export default function POSScreen({
         paidAmt,
       })
     } catch (e) {
+      if (opId !== pavoOpIdRef.current) return
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
-      setSaving(false)
+      if (opId === pavoOpIdRef.current) setSaving(false)
     }
   }
 
   async function completeSaleKarma(lines: PaymentLine[]) {
+    const opId = ++pavoOpIdRef.current
     setSaving(true)
     setPavoLoading(true)
     setPavoError(null)
@@ -2126,8 +2409,16 @@ export default function POSScreen({
         { showCreditCardMenu: lines.some(l => l.brand === 999) },
       )
 
+      if (opId !== pavoOpIdRef.current) return
+
       // Offline/askı satışta Id:0 olabilir; SaleNumber yeterli
       if (!startRes.success || (!(startRes.saleId && startRes.saleId > 0) && !startRes.saleNumber)) {
+        if (isPavoTimeoutMessage(startRes.message ?? '')) {
+          setSaving(false)
+          setPavoLoading(false)
+          await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt })
+          return
+        }
         setPaymentMode(false)
         setPaymentLines([])
         showError('Pavo Hatası', startRes.message ?? 'Sepet gönderilemedi')
@@ -2151,6 +2442,7 @@ export default function POSScreen({
       let lastAddResult: Awaited<ReturnType<typeof pavoAddPayment>> | null = null
 
       for (const line of orderedLines) {
+        if (opId !== pavoOpIdRef.current) return
         if (line.method !== 'cash') setPavoLoading(true)
 
         let payAmount = round2(line.amount)
@@ -2173,7 +2465,15 @@ export default function POSScreen({
           { grossPrice: round2(araToplamBrut), totalPrice: grandTotal },
         )
 
+        if (opId !== pavoOpIdRef.current) return
+
         if (!addRes.success) {
+          if (isPavoTimeoutMessage(addRes.message ?? '')) {
+            setSaving(false)
+            setPavoLoading(false)
+            await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt, saleRef })
+            return
+          }
           await handlePavoRecovery(saleRef, orderNo)
           setPaymentMode(false)
           setPaymentLines([])
@@ -2184,10 +2484,19 @@ export default function POSScreen({
         lastAddResult = addRes
       }
 
+      if (opId !== pavoOpIdRef.current) return
+
       if (lastAddResult && !lastAddResult.finalized) {
         const finalSeq = await window.electron.db.nextPavoSequence()
         const finalRes = await pavoFinalizeSale(pavoSettings!, finalSeq, saleRef)
+        if (opId !== pavoOpIdRef.current) return
         if (!finalRes.success) {
+          if (isPavoTimeoutMessage(finalRes.message ?? '')) {
+            setSaving(false)
+            setPavoLoading(false)
+            await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt, saleRef })
+            return
+          }
           await handlePavoRecovery(saleRef, orderNo)
           setPaymentMode(false)
           setPaymentLines([])
@@ -2222,6 +2531,8 @@ export default function POSScreen({
       const resultSeq = await window.electron.db.nextPavoSequence()
       const saleResult = await pavoGetSaleResult(pavoSettings!, resultSeq, orderNo)
 
+      if (opId !== pavoOpIdRef.current) return
+
       if (saleResult.status !== 'completed') {
         await handlePavoRecovery(saleRef, orderNo)
         setPaymentMode(false)
@@ -2246,15 +2557,32 @@ export default function POSScreen({
         paidAmt,
       })
     } catch (e) {
+      if (opId !== pavoOpIdRef.current) return
+      const msg = e instanceof Error ? e.message : String(e)
+      if (isPavoTimeoutMessage(msg)) {
+        setSaving(false)
+        setPavoLoading(false)
+        await resolvePavoTimeout({
+          lines,
+          orderNo,
+          cashAmt,
+          cardAmt,
+          paidAmt,
+          saleRef: { saleId: pavoSaleId, saleNumber: pavoSaleNumber },
+        })
+        return
+      }
       if (pavoSaleId || pavoSaleNumber) {
         await handlePavoRecovery({ saleId: pavoSaleId, saleNumber: pavoSaleNumber }, orderNo)
       }
       setPaymentMode(false)
       setPaymentLines([])
-      showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
+      showError('Satış Kaydedilemedi', msg)
     } finally {
-      setSaving(false)
-      setPavoLoading(false)
+      if (opId === pavoOpIdRef.current) {
+        setSaving(false)
+        setPavoLoading(false)
+      }
     }
   }
 
@@ -6741,16 +7069,18 @@ export default function POSScreen({
       )}
 
       {pavoLoading && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9999,
-          background: 'rgba(0,0,0,0.6)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}>
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <div style={{
             background: 'white',
             borderRadius: 16,
@@ -6767,6 +7097,125 @@ export default function POSScreen({
             </div>
             <div style={{ fontSize: 22, fontWeight: 700, color: '#1565C0', marginTop: 12 }}>
               {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleDurumSorgula()}
+              style={{
+                marginTop: 18,
+                padding: '10px 16px',
+                borderRadius: 8,
+                border: '1px solid #BBDEFB',
+                background: '#E3F2FD',
+                color: '#1565C0',
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+            >
+              Durumu Sorgula
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pavoRecoveryState && !pavoLoading && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 10000,
+          background: 'rgba(0,0,0,0.55)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: 420,
+            background: 'white',
+            borderRadius: 16,
+            padding: '24px 28px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#111', marginBottom: 6 }}>
+              Eksik Ödeme
+            </div>
+            <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>
+              Askıdaki satışta kısmi ödeme var. Kalan tutarı tahsil edebilir veya satışı iptal edebilirsiniz.
+            </div>
+            <div style={{
+              display: 'grid',
+              gap: 8,
+              background: '#F8FAFC',
+              border: '1px solid #E5E7EB',
+              borderRadius: 10,
+              padding: '12px 14px',
+              marginBottom: 16,
+              fontSize: 13,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Toplam</span>
+                <span style={{ fontWeight: 700 }}>{fmt(pavoRecoveryState.totalPrice)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Alınan</span>
+                <span style={{ fontWeight: 700, color: '#2E7D32' }}>{fmt(pavoRecoveryState.paidAmount)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Kalan</span>
+                <span style={{ fontWeight: 700, color: '#C62828' }}>{fmt(pavoRecoveryState.remainingAmount)}</span>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => void payRemainingPavoRecovery()}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#1565C0',
+                  color: 'white',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Kalanı Kart ile Al
+              </button>
+              <button
+                type="button"
+                onClick={() => void abandonPavoRecovery()}
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #FECACA',
+                  background: '#FEF2F2',
+                  color: '#C62828',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Satışı İptal Et
+              </button>
+              <button
+                type="button"
+                onClick={() => setPavoRecoveryState(null)}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #E5E7EB',
+                  background: '#F9FAFB',
+                  color: '#6B7280',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Kapat
+              </button>
             </div>
           </div>
         </div>
