@@ -730,7 +730,7 @@ export async function pavoGetSaleResult(
     const d = data.Data as Record<string, unknown> | undefined
     const statusId = Number(d?.StatusId ?? d?.SaleStatusId ?? 0)
     const status: 'completed' | 'pending' | 'cancelled' | 'failed' =
-      statusId === 4 ? 'completed' :
+      (statusId === 4 || statusId === 8) ? 'completed' :
       statusId === 5 ? 'cancelled' :
       statusId === 23 ? 'pending'  : 'failed'
 

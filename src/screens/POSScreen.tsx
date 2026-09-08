@@ -288,6 +288,48 @@ function deviceResultFromPavoData(data: unknown): PaymentDeviceResult {
   )
 }
 
+type PavoAddedPayment = {
+  StatusId?: unknown
+  PaymentMediatorId?: unknown
+  PaymentAmount?: unknown
+  Brand?: unknown
+}
+
+function paymentLinesFromPavoData(data: unknown, fallback: PaymentLine[]): PaymentLine[] {
+  const raw = (data ?? {}) as Record<string, unknown>
+  const inner = (raw.Data && typeof raw.Data === 'object')
+    ? raw.Data as Record<string, unknown>
+    : raw
+  const added = inner.AddedPayments
+  if (!Array.isArray(added)) return fallback
+
+  const realLines: PaymentLine[] = (added as PavoAddedPayment[])
+    .filter(p => Number(p.StatusId) === 2)
+    .map(p => {
+      const mediator = Number(p.PaymentMediatorId ?? 0)
+      const isCash = mediator === 1
+      return {
+        id: crypto.randomUUID(),
+        method: (isCash ? 'cash' : 'card') as PaymentMethodKey,
+        amount: Number(p.PaymentAmount ?? 0),
+        label: isCash ? 'Nakit' : 'Kart',
+        mediator,
+        brand: p.Brand != null ? Number(p.Brand) : undefined,
+      }
+    })
+    .filter(l => l.amount > 0)
+
+  return realLines.length > 0 ? realLines : fallback
+}
+
+function paymentAmountsFromLines(lines: PaymentLine[]) {
+  return {
+    paidAmt: lines.reduce((s, l) => s + l.amount, 0),
+    cashAmt: lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0),
+    cardAmt: lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0),
+  }
+}
+
 function calcLineDiscount(lineTotal: number, rate: number, amount: number): number {
   let net = lineTotal
   if (rate > 0) net = parseFloat((net * (1 - rate / 100)).toFixed(2))
@@ -518,6 +560,7 @@ export default function POSScreen({
   const prevCartLenRef = useRef(0)
   const pavoBusyCheckRef = useRef(false)
   const pavoOpIdRef = useRef(0)
+  const pavoIncompleteRef = useRef(false)
   const [swipeState, setSwipeState] = useState<{
     id:       string
     startX:   number
@@ -1731,12 +1774,13 @@ export default function POSScreen({
     paidAmt: number
     saleRef?: { saleId?: number | null; saleNumber?: string | null }
   }) {
+    pavoIncompleteRef.current = true
     showInfo('Zaman Aşımı', 'Pavo yanıt vermedi. Satış sonucu sorgulanıyor...')
     try {
       const resultSeq = await window.electron.db.nextPavoSequence()
       const saleResult = await pavoGetSaleResult(pavoSettings!, resultSeq, opts.orderNo)
 
-      if (saleResult.success && (saleResult.statusId === 4 || saleResult.status === 'completed')) {
+      if (saleResult.success && (saleResult.statusId === 4 || saleResult.statusId === 8 || saleResult.status === 'completed')) {
         await finalizeSaleToSQLite({
           lines: opts.lines,
           orderNo: opts.orderNo,
@@ -1855,9 +1899,6 @@ export default function POSScreen({
       label: 'Kredi Kartı',
       mediator: 2,
     }]
-    const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
-    const cashAmt = lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0)
-    const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
 
     try {
       const seq = await window.electron.db.nextPavoSequence()
@@ -1885,13 +1926,14 @@ export default function POSScreen({
           }
           const resultSeq = await window.electron.db.nextPavoSequence()
           const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
+          const pavoData = saleResult.data ?? compRes.data
+          const realLines = paymentLinesFromPavoData(pavoData, lines)
+          const amts = paymentAmountsFromLines(realLines)
           await finalizeSaleToSQLite({
-            lines,
+            lines: realLines,
             orderNo: currentOrderNo,
-            deviceResult: deviceResultFromPavoData(saleResult.data ?? compRes.data),
-            cashAmt,
-            cardAmt,
-            paidAmt,
+            deviceResult: deviceResultFromPavoData(pavoData),
+            ...amts,
           })
           setSaving(false)
           setPavoLoading(false)
@@ -1929,15 +1971,15 @@ export default function POSScreen({
       const resultSeq = await window.electron.db.nextPavoSequence()
       const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
 
-      if (saleResult.statusId === 4 || saleResult.status === 'completed') {
+      if (saleResult.statusId === 4 || saleResult.statusId === 8 || saleResult.status === 'completed') {
         pavoOpIdRef.current += 1
+        const realLines = paymentLinesFromPavoData(saleResult.data, lines)
+        const amts = paymentAmountsFromLines(realLines)
         await finalizeSaleToSQLite({
-          lines,
+          lines: realLines,
           orderNo: currentOrderNo,
           deviceResult: deviceResultFromPavoData(saleResult.data),
-          cashAmt,
-          cardAmt: cardAmt > 0 ? cardAmt : grandTotal,
-          paidAmt: paidAmt > 0 ? paidAmt : grandTotal,
+          ...amts,
         })
         setSaving(false)
         setPavoLoading(false)
@@ -2125,6 +2167,8 @@ export default function POSScreen({
     setPaymentLines([])
     setActiveMethod(null)
     setPendingAmount('')
+    pavoIncompleteRef.current = false
+    setCurrentOrderNo(null)
     clearCart()
     if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
     setLastReceipt(printOrderNo)
@@ -2169,6 +2213,85 @@ export default function POSScreen({
     if (saving || pavoLoading) {
       await handleDurumSorgula()
       return
+    }
+
+    if (currentOrderNo && pavoSettings && pavoIncompleteRef.current) {
+      pavoIncompleteRef.current = false
+      try {
+        const seq = await window.electron.db.nextPavoSequence()
+        const pending = await pavoCheckPendingSale(pavoSettings, seq, currentOrderNo)
+
+        if (pending.hasPending) {
+          const remaining = pending.remainingPaymentAmount ?? 0
+          const total = (pending.totalPrice && pending.totalPrice > 0)
+            ? pending.totalPrice
+            : grandTotal
+
+          if (remaining <= 0) {
+            const compSeq = await window.electron.db.nextPavoSequence()
+            const compRes = await pavoCompleteUncompletedSale(pavoSettings, compSeq, {
+              saleId: pending.saleId,
+              saleNumber: pending.saleNumber,
+              orderNo: currentOrderNo,
+            })
+            if (!compRes.success) {
+              pavoIncompleteRef.current = true
+              showError('Satış Tamamlanamadı', compRes.message ?? 'Askıdaki satış kapatılamadı.')
+              return
+            }
+            const resultSeq = await window.electron.db.nextPavoSequence()
+            const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
+            const pavoData = saleResult.data ?? compRes.data
+            const realLines = paymentLinesFromPavoData(pavoData, lines)
+            const amts = paymentAmountsFromLines(realLines)
+            await finalizeSaleToSQLite({
+              lines: realLines,
+              orderNo: currentOrderNo,
+              deviceResult: deviceResultFromPavoData(pavoData),
+              ...amts,
+            })
+            return
+          }
+
+          if (remaining >= total * 0.99) {
+            const abanSeq = await window.electron.db.nextPavoSequence()
+            await pavoAbandonSuspendedSale(pavoSettings, abanSeq, {
+              saleId: pending.saleId,
+              saleNumber: pending.saleNumber,
+              orderNo: currentOrderNo,
+            })
+          } else {
+            setPavoRecoveryState({
+              ref: { saleId: pending.saleId, saleNumber: pending.saleNumber },
+              orderNo: currentOrderNo,
+              totalPrice: total,
+              paidAmount: parseFloat((total - remaining).toFixed(2)),
+              remainingAmount: remaining,
+            })
+            return
+          }
+        } else {
+          const resultSeq = await window.electron.db.nextPavoSequence()
+          const saleResult = await pavoGetSaleResult(pavoSettings, resultSeq, currentOrderNo)
+
+          console.log('[completeSale] GetSaleResult:', JSON.stringify(saleResult))
+
+          if (saleResult.success && (saleResult.statusId === 4 || saleResult.statusId === 8 || saleResult.status === 'completed')) {
+            const realLines = paymentLinesFromPavoData(saleResult.data, lines)
+            const amts = paymentAmountsFromLines(realLines)
+            await finalizeSaleToSQLite({
+              lines: realLines,
+              orderNo: currentOrderNo,
+              deviceResult: deviceResultFromPavoData(saleResult.data),
+              ...amts,
+            })
+            return
+          }
+        }
+      } catch (e) {
+        console.warn('[completeSale] Pavo kontrol hatası:', e)
+        pavoIncompleteRef.current = true
+      }
     }
 
     const isKarma = lines.length > 1
@@ -2284,6 +2407,7 @@ export default function POSScreen({
           if (!deviceResult.success) {
             const msg = deviceResult.message ?? ''
             if (isPavoTimeoutMessage(msg)) {
+              pavoIncompleteRef.current = true
               setSaving(false)
               setPavoLoading(false)
               await resolvePavoTimeout({ lines, orderNo, cashAmt, cardAmt, paidAmt })
@@ -2302,6 +2426,7 @@ export default function POSScreen({
           }
         } catch (e) {
           if (opId !== pavoOpIdRef.current) return
+          pavoIncompleteRef.current = true
           const msg = String(e)
           if (isPavoTimeoutMessage(msg)) {
             setSaving(false)
@@ -2333,6 +2458,7 @@ export default function POSScreen({
       })
     } catch (e) {
       if (opId !== pavoOpIdRef.current) return
+      pavoIncompleteRef.current = true
       showError('Satış Kaydedilemedi', e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       if (opId === pavoOpIdRef.current) setSaving(false)
@@ -2510,7 +2636,7 @@ export default function POSScreen({
       const statusId = Number(lastInner?.StatusId ?? 0)
 
       // StatusId: 4 = tamamlandı, RemainingPaymentAmount: 0
-      if (statusId === 4 || (lastAddResult?.remainingPaymentAmount ?? 1) === 0) {
+      if (statusId === 4 || statusId === 8 || (lastAddResult?.remainingPaymentAmount ?? 1) === 0) {
         const deviceResult: PaymentDeviceResult = parsePavoResult(
           lastData?.Data != null || lastData?.HasError != null
             ? lastData
