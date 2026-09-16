@@ -582,6 +582,8 @@ export default function POSScreen({
     customer: CustomerRow | null
     savedAt:  string
   } | null>(null)
+  /** Taslak okunmadan sepet boş clearDraft çalışmasın (popup kayboluyordu) */
+  const [draftReady, setDraftReady] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const fiyatGorInputRef = useRef<HTMLInputElement>(null)
   const cartListRef = useRef<HTMLDivElement>(null)
@@ -802,7 +804,21 @@ export default function POSScreen({
   useEffect(() => { loadHeld() }, [loadHeld])
 
   useEffect(() => {
-    window.__btpos_exit_check = () => {
+    window.__btpos_exit_check = async () => {
+      // Kapanmadan önce sepeti hemen kaydet (3 sn debounce kaçmasın)
+      if (cart.length > 0) {
+        try {
+          const terminalId = await window.electron.store.get('terminal_id') as string | null
+          await window.electron.cart.saveDraft({
+            companyId,
+            terminalId: terminalId ?? '',
+            cashierId:  cashier.id,
+            cart,
+            customer: selectedCustomer ?? null,
+          })
+        } catch { /* kapanışta kayıt başarısız olsa da çıkış kontrolüne devam */ }
+      }
+
       const allowExit = posSettings?.allowExitWithHeldDocs ?? true
       if (allowExit) return { canExit: true, heldCount: 0 }
 
@@ -816,7 +832,14 @@ export default function POSScreen({
     return () => {
       delete window.__btpos_exit_check
     }
-  }, [posSettings?.allowExitWithHeldDocs, heldDocs.length])
+  }, [
+    posSettings?.allowExitWithHeldDocs,
+    heldDocs.length,
+    cart,
+    companyId,
+    cashier.id,
+    selectedCustomer,
+  ])
 
   useEffect(() => {
     const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
@@ -839,17 +862,24 @@ export default function POSScreen({
   useEffect(() => { searchRef.current?.focus() }, [])
 
   useEffect(() => {
+    let cancelled = false
     void (async () => {
       try {
         const draft = await window.electron.cart.loadDraft()
-        if (!draft || !Array.isArray(draft.cart) || draft.cart.length === 0) return
-        setDraftModal({
-          cart:     draft.cart as CartItem[],
-          customer: draft.customer as CustomerRow | null,
-          savedAt:  new Date(draft.savedAt).toLocaleString('tr-TR'),
-        })
+        if (cancelled) return
+        if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
+          setDraftModal({
+            cart:     draft.cart as CartItem[],
+            customer: draft.customer as CustomerRow | null,
+            savedAt:  new Date(draft.savedAt).toLocaleString('tr-TR'),
+          })
+        }
       } catch { /* taslak yok */ }
+      finally {
+        if (!cancelled) setDraftReady(true)
+      }
     })()
+    return () => { cancelled = true }
   }, [])
 
   useEffect(() => {
@@ -1407,7 +1437,9 @@ export default function POSScreen({
   }
 
   useEffect(() => {
-    if (!companyId) return
+    if (!companyId || !draftReady) return
+    // Popup açıkken boş sepet taslağı silmesin
+    if (draftModal) return
 
     if (cart.length === 0) {
       void window.electron.cart.clearDraft().catch(() => {})
@@ -1425,10 +1457,10 @@ export default function POSScreen({
           customer: selectedCustomer ?? null,
         })
       })()
-    }, 3000)
+    }, 800)
 
     return () => clearTimeout(timer)
-  }, [cart, selectedCustomer, companyId, cashier.id])
+  }, [cart, selectedCustomer, companyId, cashier.id, draftReady, draftModal])
 
   function handleNumKey(k: string) {
     if (paymentMode && activeMethod !== null) {
@@ -2424,6 +2456,7 @@ export default function POSScreen({
             const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
             return {
               name: c.name,
+              code: c.code,
               unitName: c.unit ?? 'Adet',
               vatRate: c.vatRate,
               quantity: c.quantity,
@@ -2548,6 +2581,7 @@ export default function POSScreen({
       const hasLineDiscount = c.discountRate > 0 || c.discountAmount > 0
       return {
         name: c.name,
+        code: c.code,
         unitName: c.unit ?? 'Adet',
         vatRate: c.vatRate,
         quantity: c.quantity,

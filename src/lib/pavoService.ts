@@ -39,6 +39,7 @@ export function notificationPhoneDigitCount(s: string): number {
 
 export interface PavoSaleItem {
   name: string
+  code?: string
   unitName?: string
   vatRate: number
   quantity: number
@@ -308,6 +309,7 @@ export async function pavoCompleteSale(
       UnitPriceAmount:  i.unitPrice,
       GrossPriceAmount: i.grossPrice,
       TotalPriceAmount: i.totalPrice,
+      ...(i.code ? { StockReference: i.code } : {}),
       ...(i.priceEffect ? { PriceEffect: i.priceEffect } : {}),
     }
   }))
@@ -435,6 +437,7 @@ export async function pavoStartSaleWithItems(
         UnitPriceAmount:  i.unitPrice,
         GrossPriceAmount: i.grossPrice,
         TotalPriceAmount: i.totalPrice,
+        ...(i.code ? { StockReference: i.code } : {}),
         ...(i.priceEffect ? { PriceEffect: i.priceEffect } : {}),
       }
     }))
