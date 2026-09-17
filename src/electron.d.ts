@@ -147,6 +147,7 @@ declare global {
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
         getSaleByReceiptNo(receiptNo: string): Promise<{ id: string; receiptNo: string } | null>
+        getSaleByOrderNo(orderNo: string): Promise<{ id: string; orderNo: string } | null>
         saveSalePayments:  (payments: SalePaymentRow[]) => Promise<void>
         getSalePayments:   (saleId: string) => Promise<SalePaymentRow[]>
         getCardTotalsByBank: (saleIds: string[]) => Promise<Record<string, { amount: number; acquirerName: string }>>

@@ -314,6 +314,13 @@ export function getSaleByReceiptNo(receiptNo: string): { id: string; receiptNo: 
   ).get(receiptNo) as { id: string; receiptNo: string } | null
 }
 
+export function getSaleByOrderNo(orderNo: string): { id: string; orderNo: string } | null {
+  const sqlite = getSqlite()
+  return sqlite.prepare(
+    'SELECT id, order_no AS orderNo FROM sales WHERE order_no = ? LIMIT 1',
+  ).get(orderNo) as { id: string; orderNo: string } | null
+}
+
 export function saveSalePayments(
   db: BetterSqlite3.Database,
   payments: SalePaymentRow[],

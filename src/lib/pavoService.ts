@@ -218,6 +218,10 @@ async function pavoRequest(
       if ((e as Error).name === 'AbortError') {
         throw new Error(`Pavo zaman aşımı (${timeoutMs / 1000}sn): ${endpoint}`)
       }
+      const msg = e instanceof Error ? e.message : String(e)
+      if (/failed to fetch|networkerror|load failed|fetch failed/i.test(msg)) {
+        throw new Error(`Failed to fetch (${endpoint})`)
+      }
       throw e
     } finally {
       clearTimeout(timer)
@@ -364,7 +368,8 @@ export async function pavoCompleteSale(
     )
     return parsePavoResult(data)
   } catch (e) {
-    return { success: false, provider: 'pavo', message: String(e), raw: {} }
+    const msg = e instanceof Error ? e.message : String(e)
+    return { success: false, provider: 'pavo', message: msg, raw: {} }
   }
 }
 
@@ -760,6 +765,8 @@ export async function pavoAbandonSuspendedSale(
   }
 }
 
+const COMPLETED_STATUS_IDS = [3, 4, 5, 6, 8, 9, 10, 18, 19, 20, 21, 22, 24]
+
 export async function pavoGetSaleResult(
   settings: PavoSettings,
   seq: number,
@@ -767,9 +774,10 @@ export async function pavoGetSaleResult(
 ): Promise<{
   success: boolean
   message?: string
-  status?: 'completed' | 'pending' | 'cancelled' | 'failed'
+  status?: 'completed' | 'uncompleted' | 'suspended' | 'pending' | 'failed'
   statusId?: number
   saleId?: number
+  saleNumber?: string
   data?: unknown
 }> {
   try {
@@ -791,16 +799,21 @@ export async function pavoGetSaleResult(
 
     const d = data.Data as Record<string, unknown> | undefined
     const statusId = Number(d?.StatusId ?? d?.SaleStatusId ?? 0)
-    const status: 'completed' | 'pending' | 'cancelled' | 'failed' =
-      (statusId === 4 || statusId === 8) ? 'completed' :
-      statusId === 5 ? 'cancelled' :
-      statusId === 23 ? 'pending'  : 'failed'
+    const isOffline = Boolean(d?.IsOffline)
+    const status: 'completed' | 'uncompleted' | 'suspended' | 'pending' | 'failed' =
+      COMPLETED_STATUS_IDS.includes(statusId) ? 'completed' :
+      statusId === 23 && isOffline ? 'uncompleted' :
+      statusId === 23 ? 'uncompleted' :
+      statusId === 1  ? 'suspended'  :
+      statusId === 2  ? 'pending'    :
+      'failed'
 
     return {
       success: true,
       status,
       statusId,
-      saleId: Number(d?.SaleId ?? d?.Id ?? 0),
+      saleId:     Number(d?.SaleId ?? d?.Id ?? 0),
+      saleNumber: String(d?.SaleNumber ?? ''),
       data,
     }
   } catch (e) {
@@ -1186,12 +1199,15 @@ function mapPendingSaleRow(s: Record<string, unknown>): {
   const nested = s.Sale && typeof s.Sale === 'object' ? s.Sale as Record<string, unknown> : null
   const sale = nested ? { ...s, ...nested } : s
   const payments = (sale.AddedPayments ?? s.AddedPayments ?? []) as Array<Record<string, unknown>>
+  const isOffline = sale.IsOffline === true || s.IsOffline === true
   const paidAmount = payments
-    .filter(p => Number(p.StatusId) === 2)
+    .filter(p => {
+      const sid = Number(p.StatusId)
+      return sid === 2 || (isOffline && sid === 1)
+    })
     .reduce((sum, p) => sum + Number(p.PaymentAmount ?? 0), 0)
   const totalPrice = Number(sale.TotalPrice ?? s.TotalPrice ?? 0)
   const remainingPaymentAmount = Math.max(0, totalPrice - paidAmount)
-  const isOffline = sale.IsOffline === true || s.IsOffline === true
   const items = ((sale.AddedSaleItems ?? s.AddedSaleItems ?? []) as Array<Record<string, unknown>>).map(item => {
     const vatDirect = Number(item.VATRate ?? item.VatRate ?? item.TaxRate ?? 0)
     const vatFromCode = Number(String(item.TaxGroupCode ?? '').replace(/\D/g, '') || 0)
@@ -1215,6 +1231,17 @@ function mapPendingSaleRow(s: Record<string, unknown>): {
     paidAmount,
     items,
   }
+}
+
+function isNoPendingSalesError(data: Record<string, unknown>): boolean {
+  const code = Number(data.ErrorCode)
+  if (code === 228) return true
+  const msg = pavoErrorMessage(data, '').toLocaleLowerCase('tr-TR')
+  return (
+    msg.includes('askıda bekleyen satış bulunamadı') ||
+    msg.includes('bekleyen satış bulunamadı') ||
+    (msg.includes('askıda') && msg.includes('bulunamadı'))
+  )
 }
 
 export async function pavoListPendingSales(
@@ -1249,18 +1276,32 @@ export async function pavoListPendingSales(
     await syncPavoSequenceFromResponse(data)
     console.log(`[pavo] ${endpoint} raw:`, JSON.stringify(data))
     if (data.HasError === true || data.IsError === true) {
-      return { success: false as const, sales: [], message: pavoErrorMessage(data, 'Liste alınamadı'), data }
+      if (isNoPendingSalesError(data)) {
+        return { success: true as const, sales: [], empty: true as const, data }
+      }
+      return {
+        success: false as const,
+        sales: [],
+        empty: false as const,
+        message: pavoErrorMessage(data, 'Liste alınamadı'),
+        data,
+      }
     }
-    return { success: true as const, sales: extractPendingSaleList(data).map(mapPendingSaleRow), data }
+    return {
+      success: true as const,
+      sales: extractPendingSaleList(data).map(mapPendingSaleRow),
+      empty: false as const,
+      data,
+    }
   }
 
   try {
     const first = await call('ListPendingSaleWithDetail', seq)
-    if (first.success) return first
+    if (first.success) return { success: true, sales: first.sales }
 
     const seq2 = await window.electron.db.nextPavoSequence()
     const second = await call('ListPendingSale', seq2)
-    if (second.success) return second
+    if (second.success) return { success: true, sales: second.sales }
 
     return { success: false, sales: [], message: first.message ?? second.message }
   } catch (e) {

@@ -1009,6 +1009,11 @@ app.whenReady().then(async () => {
     const { getSaleByReceiptNo } = await import('../db/operations')
     return getSaleByReceiptNo(receiptNo)
   })
+
+  ipcMain.handle('db:getSaleByOrderNo', async (_e, orderNo: string) => {
+    const { getSaleByOrderNo } = await import('../db/operations')
+    return getSaleByOrderNo(orderNo)
+  })
   ipcMain.handle('db:saveSalePayments', async (_e, payments: unknown) => {
     const { saveSalePayments } = await import('../db/operations')
     saveSalePayments(db, payments as import('../db/operations').SalePaymentRow[])
