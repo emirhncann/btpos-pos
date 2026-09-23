@@ -76,6 +76,12 @@ export interface PaymentDeviceResult {
   batchNo?: string
   isOffline?: boolean
   receiptUrl?: string
+  invoiceNo?: string | null
+  documentUuid?: string | null
+  saleUid?: string | null
+  inquiryLink?: string | null
+  saleNumber?: string | null
+  payments?: Array<{ mediator: number; brand?: number; amount: number }>
   raw: Record<string, unknown>
 }
 
@@ -125,16 +131,30 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
   const sqlite = getSqlite()
   const saleId = randomUUID()
   const now = new Date().toISOString()
+  // Pavo belge alanları her zaman yazılır (nakitle kapanan askı satışında da e-belge barkodu için)
   const paymentDeviceData = device ? JSON.stringify({
-    authCode:   device.authCode,
-    cardNo:     device.cardNo,
-    cardBrand:  device.cardBrand,
-    cardType:   device.cardType,
-    acquirer:   device.acquirer,
-    batchNo:    device.batchNo,
-    isOffline:  device.isOffline,
-    receiptUrl: device.receiptUrl,
-    raw:        device.raw,
+    authCode:    device.authCode ?? null,
+    cardNo:      device.cardNo ?? null,
+    cardBrand:   device.cardBrand ?? null,
+    cardType:    device.cardType ?? null,
+    acquirer:    device.acquirer ?? null,
+    batchNo:     device.batchNo ?? null,
+    isOffline:   device.isOffline ?? false,
+    receiptUrl:  device.receiptUrl ?? device.inquiryLink ?? null,
+    invoiceNo:   device.invoiceNo ?? null,
+    documentUuid: device.documentUuid ?? null,
+    saleUid:     device.saleUid ?? null,
+    inquiryLink: device.inquiryLink ?? device.receiptUrl ?? null,
+    saleNumber:  device.saleNumber ?? null,
+    payments:    device.payments ?? null,
+    pavo_invoice_no:   device.invoiceNo ?? null,
+    pavo_sale_uid:     device.saleUid ?? null,
+    pavo_inquiry_link: device.inquiryLink ?? device.receiptUrl ?? null,
+    pavo_sale_number:  device.saleNumber ?? null,
+    pavo_auth_code:    device.authCode ?? null,
+    pavo_card_no:      device.cardNo ?? null,
+    pavo_is_offline:   device.isOffline ?? false,
+    raw:         device.raw,
   }) : null
 
   sqlite.prepare(`
@@ -297,11 +317,12 @@ export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
 
   return rows.map(r => ({
     productId:    r.product_id ?? null,
-    productCode:  r.p_code || r.product_id || '',
+    productCode:  r.p_code || '',
     productName:  r.product_name,
     quantity:     r.quantity,
     price:        r.unit_price,
-    vatRate:      r.vat_rate ?? 0,
+    // Eksik KDV'yi 0 varsayma — ERP doğrulaması Number.isFinite ile yakalar
+    vatRate:      r.vat_rate == null ? Number.NaN : Number(r.vat_rate),
     unit:         r.p_unit?.trim() ? r.p_unit : 'Adet',
     discountRate: r.discount_rate ?? 0,
   }))

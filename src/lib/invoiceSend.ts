@@ -146,7 +146,7 @@ export async function sendPendingInvoices(
           name:         i.productName ?? i.productCode,
           quantity:     i.quantity,
           price:        i.price,
-          vatRate:      i.vatRate ?? 0,
+          vatRate:      i.vatRate,
           unit:         i.unit ?? 'Adet',
           discountRate: i.discountRate ?? 0,
           product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
@@ -157,6 +157,26 @@ export async function sendPendingInvoices(
 
   const allItems = Array.from(groupMap.values())
 
+  // Görev 3 — kodsuz/KDV'siz satır varsa gün sonu ERP'ye gitmesin
+  const badLines = allItems.filter(
+    i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+  )
+  if (badLines.length > 0) {
+    const msg = `Ürün kodu/KDV eksik: ${badLines.map(b => b.name).join(', ')}`
+    for (const sale of pending) {
+      const items = await window.electron.db.getSaleItems(sale.id)
+      const saleBad = items.some(
+        i => !String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+      )
+      if (saleBad) {
+        await window.electron.db.markInvoiceError(sale.id, msg)
+      }
+    }
+    if (!opts?.silent) {
+      window.alert(`✕ Gün sonu oluşturulamadı\n${msg}`)
+    }
+    return { ok: 0, fail: pending.length }
+  }
   const now = new Date()
   const saatStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
   const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -329,7 +349,7 @@ export async function sendInvoiceForSale(
         name:         i.productName ?? i.productCode,
         quantity:     i.quantity,
         price:        i.price,
-        vatRate:      i.vatRate ?? 0,
+        vatRate:      i.vatRate,
         unit:         i.unit ?? 'Adet',
         discountRate: i.discountRate ?? 0,
         product_id:   productId,
@@ -344,6 +364,15 @@ export async function sendInvoiceForSale(
     card_amount:      payment?.cardAmount ?? 0,
     card_acquirer_id: payment?.cardAcquirerId ?? null,
     card_by_bank:     payment?.cardByBank ?? {},
+  }
+
+  const badInvoiceItems = (payload.items as Array<{ product_code?: string; vatRate?: number; name?: string }>).filter(
+    i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+  )
+  if (badInvoiceItems.length > 0) {
+    const msg = `Ürün kodu/KDV eksik: ${badInvoiceItems.map(b => b.name ?? '?').join(', ')}`
+    await window.electron.db.markInvoiceError(saleId, msg)
+    return
   }
 
   await window.electron.db.enqueueOperation({
@@ -523,7 +552,7 @@ export async function sendReturnInvoice(
         name:         i.productName ?? productCode,
         quantity:     Math.abs(i.quantity),
         price:        i.price,
-        vatRate:      i.vatRate ?? 0,
+        vatRate:      i.vatRate,
         unit:         i.unit ?? 'Adet',
         discountRate: i.discountRate ?? 0,
         product_id:   productId,

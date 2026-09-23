@@ -1,5 +1,21 @@
 // Pavo REST API ile iletisim
-import { parsePavoResult, type PaymentDeviceResult } from './paymentDevice'
+import {
+  parsePavoResult,
+  normalizePavoSaleResult,
+  deviceResultFromNormalizedPavo,
+  isSuccessfulPavoPayment,
+  type PaymentDeviceResult,
+  type PavoFinalSale,
+  type PavoFinalPayment,
+} from './paymentDevice'
+
+export {
+  normalizePavoSaleResult,
+  deviceResultFromNormalizedPavo,
+  isSuccessfulPavoPayment,
+  type PavoFinalSale,
+  type PavoFinalPayment,
+}
 
 export interface PavoSettings {
   ipAddress: string
@@ -122,10 +138,10 @@ function pavoDeviceUiFlags(settings: PavoSettings, opts?: { showCreditCardMenu?:
   }
 }
 
-/** Fiş altına OrderNo barkodu — Pavo BottomPrintableItems */
-export function buildOrderNoBottomPrintItems(
+/** Fiş altına OrderNo barkodu — Pavo BottomPrintableItems (tek kaynak) */
+export function buildBottomPrintableItems(
   orderNo: string,
-  printWidth: '58mm' | '80mm',
+  printWidth: '58mm' | '80mm' = '80mm',
 ): Array<{
   type:         string
   barcodeData:  string
@@ -145,11 +161,19 @@ export function buildOrderNoBottomPrintItems(
       alignment:   'center',
       barcodeType: 'Code128',
       showText:    true,
-      fontSize:    25.0,
+      fontSize:    25,
       height,
       width,
     },
   ]
+}
+
+/** @deprecated buildBottomPrintableItems kullan */
+export function buildOrderNoBottomPrintItems(
+  orderNo: string,
+  printWidth: '58mm' | '80mm',
+) {
+  return buildBottomPrintableItems(orderNo, printWidth)
 }
 
 function pavoBaseUrl(settings: PavoSettings): string {
@@ -355,7 +379,7 @@ export async function pavoCompleteSale(
         PrintCustomerReceiptCopy: false,
         PrintMerchantReceipt: true,
       },
-      BottomPrintableItems: buildOrderNoBottomPrintItems(orderNo, settings.printWidth),
+      BottomPrintableItems: buildBottomPrintableItems(orderNo, settings.printWidth),
       ...(customerParty ? { CustomerParty: customerParty } : {}),
     },
   }
@@ -484,7 +508,7 @@ export async function pavoStartSaleWithItems(
           PrintCustomerReceiptCopy: false,
           PrintMerchantReceipt:     true,
         },
-        BottomPrintableItems: buildOrderNoBottomPrintItems(orderNo, settings.printWidth),
+        BottomPrintableItems: buildBottomPrintableItems(orderNo, settings.printWidth),
         ...(customerParty ? { CustomerParty: customerParty } : {}),
       },
     }
@@ -561,6 +585,7 @@ export async function pavoAddPayment(
     }
     if (payment.brand && payment.brand !== 999) paymentInfo.Brand = payment.brand
 
+    const orderNo = cleanPavoRefString(saleRef.orderNo)
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
       Sale: {
@@ -580,6 +605,10 @@ export async function pavoAddPayment(
           PrintCustomerReceiptCopy: false,
           PrintMerchantReceipt: true,
         },
+        // Satış bu istekle kapanabilir — fiş barkodu burada basılmalı
+        ...(orderNo ? {
+          BottomPrintableItems: buildBottomPrintableItems(orderNo, settings.printWidth),
+        } : {}),
       },
     }
 
@@ -621,9 +650,15 @@ export async function pavoFinalizeSale(
       return { success: false, message: 'Finalize için satış referansı yok' }
     }
 
+    const orderNo = cleanPavoRefString(saleRef.orderNo)
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
-      Sale: ref,
+      Sale: {
+        ...ref,
+        ...(orderNo ? {
+          BottomPrintableItems: buildBottomPrintableItems(orderNo, settings.printWidth),
+        } : {}),
+      },
     }
 
     const data = await pavoRequest(
@@ -1135,12 +1170,16 @@ export async function pavoCompleteUncompletedSale(
   saleRef: { saleId?: number | null; saleNumber?: string | null; orderNo: string },
 ): Promise<{ success: boolean; message?: string; data?: unknown }> {
   try {
+    const orderNo = cleanPavoRefString(saleRef.orderNo)
     const body = {
       TransactionHandle: transactionHandle(settings, seq),
       Sale: {
         SaleNumber: saleRef.saleNumber ?? undefined,
         Id:         saleRef.saleId    ?? undefined,
         OrderNo:    saleRef.orderNo,
+        ...(orderNo ? {
+          BottomPrintableItems: buildBottomPrintableItems(orderNo, settings.printWidth),
+        } : {}),
       },
     }
     const data = await pavoRequest(
@@ -1201,10 +1240,7 @@ function mapPendingSaleRow(s: Record<string, unknown>): {
   const payments = (sale.AddedPayments ?? s.AddedPayments ?? []) as Array<Record<string, unknown>>
   const isOffline = sale.IsOffline === true || s.IsOffline === true
   const paidAmount = payments
-    .filter(p => {
-      const sid = Number(p.StatusId)
-      return sid === 2 || (isOffline && sid === 1)
-    })
+    .filter(p => Number(p.StatusId) === 2)
     .reduce((sum, p) => sum + Number(p.PaymentAmount ?? 0), 0)
   const totalPrice = Number(sale.TotalPrice ?? s.TotalPrice ?? 0)
   const remainingPaymentAmount = Math.max(0, totalPrice - paidAmount)
@@ -1215,6 +1251,7 @@ function mapPendingSaleRow(s: Record<string, unknown>): {
     const unitPrice = Number(item.UnitPriceAmount ?? item.UnitPrice ?? 0)
     const total = Number(item.TotalPriceAmount ?? item.TotalPrice ?? (quantity * unitPrice))
     return {
+      code:      String(item.StockReference ?? item.ItemCode ?? item.ProductCode ?? '').trim(),
       name:      String(item.Name ?? item.ProductName ?? ''),
       quantity,
       unitPrice,
@@ -1257,6 +1294,7 @@ export async function pavoListPendingSales(
     remainingPaymentAmount: number
     paidAmount:             number
     items: Array<{
+      code?:     string
       name:      string
       quantity:  number
       unitPrice: number

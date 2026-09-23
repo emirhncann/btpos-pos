@@ -722,6 +722,12 @@ declare global {
     batchNo?:     string
     isOffline?:   boolean
     receiptUrl?:  string
+    invoiceNo?:   string | null
+    documentUuid?: string | null
+    saleUid?:     string | null
+    inquiryLink?: string | null
+    saleNumber?:  string | null
+    payments?:    Array<{ mediator: number; brand?: number; amount: number }>
     raw:          Record<string, unknown>
   }
 }

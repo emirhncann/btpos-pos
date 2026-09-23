@@ -84,17 +84,30 @@ export async function processOperationQueue({
           let error: string | null = null
 
           if (op.type === 'invoice') {
+            const invItems = (payload.items ?? []) as Array<{
+              product_code?: string
+              vatRate?: number
+              name?: string
+            }>
+            const badInv = invItems.filter(
+              i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+            )
+            if (badInv.length > 0) {
+              const errMsg = `Ürün kodu/KDV eksik: ${badInv.map(b => b.name ?? '?').join(', ')}`
+              const sid = payload.sale_id
+              if (typeof sid === 'string' && !sid.startsWith('gunsonu-')) {
+                await window.electron.db.markInvoiceError(sid, errMsg)
+              }
+              await window.electron.db.markOperationFailed(op.id, errMsg)
+              onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
+              continue
+            }
             const res = await api.sendInvoiceToErp(companyId, payload as never)
             success = !!(res.success && res.invoice_id)
             error = res.message ?? null
             const invoiceNumber = pickInvoiceNumber(res as unknown as Record<string, unknown>)
 
             if (success && res.invoice_id) {
-              const cash_amount = Number((payload as { cash_amount?: unknown }).cash_amount ?? 0)
-              const card_amount = Number((payload as { card_amount?: unknown }).card_amount ?? 0)
-              const card_acquirer_id = ((payload as { card_acquirer_id?: unknown }).card_acquirer_id ?? null) as string | null
-              console.log('[worker] invoice success, invoice_id:', res.invoice_id)
-              console.log('[worker] payment payload:', { cash_amount, card_amount, card_acquirer_id })
               const saleData = payload as {
                 sale_id?: string
                 cash_amount?: number
@@ -105,6 +118,41 @@ export async function processOperationQueue({
                 customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
               }
               const saleId = saleData.sale_id
+              // Koruma 5 — tahsilat SQLite ödeme satırlarından (ekran lines değil)
+              let cash_amount = Number(saleData.cash_amount ?? 0)
+              let card_amount = Number(saleData.card_amount ?? 0)
+              let card_acquirer_id = saleData.card_acquirer_id ?? null
+              let card_by_bank = saleData.card_by_bank ?? {}
+              if (typeof saleId === 'string' && !saleId.startsWith('gunsonu-')) {
+                try {
+                  const rows = await window.electron.db.getSalePayments(saleId)
+                  if (rows.length > 0) {
+                    cash_amount = rows
+                      .filter(p => p.method === 'cash')
+                      .reduce((s, p) => s + Number(p.amount ?? 0), 0)
+                    card_amount = rows
+                      .filter(p => p.method !== 'cash')
+                      .reduce((s, p) => s + Number(p.amount ?? 0), 0)
+                    const firstCard = rows.find(p => p.method === 'card')
+                    if (firstCard?.acquirerId != null) {
+                      card_acquirer_id = String(firstCard.acquirerId)
+                    }
+                    const byBank: Record<string, { amount: number; acquirerName: string }> = {}
+                    for (const p of rows.filter(r => r.method === 'card')) {
+                      const key = String(p.acquirerId ?? 'unknown')
+                      if (!byBank[key]) {
+                        byBank[key] = { amount: 0, acquirerName: String(p.acquirerName ?? '') }
+                      }
+                      byBank[key].amount += Number(p.amount ?? 0)
+                    }
+                    if (Object.keys(byBank).length > 0) card_by_bank = byBank
+                  }
+                } catch (e) {
+                  console.warn('[worker] getSalePayments fallback:', e)
+                }
+              }
+              console.log('[worker] invoice success, invoice_id:', res.invoice_id)
+              console.log('[worker] payment from SQLite:', { cash_amount, card_amount, card_acquirer_id })
               if (typeof saleId === 'string' && !saleId.startsWith('gunsonu-')) {
                 const customer = saleData.customer ?? {}
                 await window.electron.db.enqueueOperation({
@@ -123,10 +171,10 @@ export async function processOperationQueue({
                     ),
                     customer_code:    String(customer.code ?? ''),
                     customer_name:    String(customer.name ?? ''),
-                    cash_amount:      Number(saleData.cash_amount ?? 0),
-                    card_amount:      Number(saleData.card_amount ?? 0),
-                    card_acquirer_id: saleData.card_acquirer_id ?? null,
-                    card_by_bank:     saleData.card_by_bank ?? {},
+                    cash_amount,
+                    card_amount,
+                    card_acquirer_id,
+                    card_by_bank,
                   },
                   label: `Tahsilat — ${String(customer.name ?? '')}`,
                 })
@@ -142,6 +190,26 @@ export async function processOperationQueue({
               }
             }
           } else if (op.type === 'day_end_invoice') {
+            const dayItems = (payload.items ?? []) as Array<{
+              product_code?: string
+              vatRate?: number
+              name?: string
+            }>
+            const badDay = dayItems.filter(
+              i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+            )
+            if (badDay.length > 0) {
+              const errMsg = `Ürün kodu/KDV eksik: ${badDay.map(b => b.name ?? '?').join(', ')}`
+              const ids = payload.day_end_sale_ids
+              if (Array.isArray(ids) && ids.every((x): x is string => typeof x === 'string')) {
+                for (const saleId of ids) {
+                  await window.electron.db.markInvoiceError(saleId, errMsg)
+                }
+              }
+              await window.electron.db.markOperationFailed(op.id, errMsg)
+              onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
+              continue
+            }
             const res = await api.sendInvoiceToErp(companyId, payload as never)
             success = !!(res.success && res.invoice_id)
             error = res.message ?? null
