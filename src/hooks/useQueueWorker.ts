@@ -303,6 +303,26 @@ export async function processOperationQueue({
             console.log('[worker] payment result:', JSON.stringify(data))
             success = data.success === true
             error = data.message ?? null
+          } else if (op.type === 'terminal_local_settings' || op.type === 'payment_device') {
+            const endpoint = String(payload.endpoint ?? '')
+            const method = String(payload.method ?? 'POST').toUpperCase()
+            if (!endpoint.startsWith('/')) throw new Error('endpoint eksik')
+            const token = await window.electron.store.get('token').catch(() => null) as string | null
+            const res = await fetch(`${API_URL}${endpoint}`, {
+              method,
+              headers: {
+                'Content-Type': 'application/json',
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              },
+              body: JSON.stringify(payload.body ?? {}),
+            })
+            const text = await res.text()
+            let data: { success?: boolean; message?: string } = {}
+            try { data = text ? JSON.parse(text) as { success?: boolean; message?: string } : {} } catch {
+              data = { message: text.slice(0, 300) }
+            }
+            success = res.ok && data.success !== false
+            error = success ? null : (data.message || `HTTP ${res.status}`)
           }
 
           if (success) {

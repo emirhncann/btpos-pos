@@ -1,6 +1,6 @@
 import { API_URL, api, fetchPluGroupsFromServer } from '../lib/api'
 import { parseBarcodeFormatsResponse } from '../lib/barcodeFormat'
-import { pavoPair } from '../lib/pavoService'
+import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
 async function getWorkplaceId(): Promise<string | null> {
@@ -178,21 +178,41 @@ async function syncSettings(
     onSettingsUpdated(terminalSettings)
   }
 
-  const paymentDevices = await api.getPaymentDeviceSettings(companyId, terminalId)
-  if (paymentDevices && paymentDevices.length > 0) {
-    for (const device of paymentDevices) {
-      await window.electron.db.upsertPaymentDeviceSettings({
-        id:              device.id,
-        companyId:       device.company_id,
-        terminalId:      device.terminal_id,
-        provider:        device.provider,
-        ipAddress:       device.ip_address ?? null,
-        port:            device.port ?? 9100,
-        serialNo:        device.serial_no ?? null,
-        cardReadTimeout: device.card_read_timeout ?? 30,
-        printWidth:      device.print_width ?? '80mm',
-        isActive:        device.is_active ?? true,
-        syncedAt:        new Date().toISOString(),
+  const localPavo = await window.electron.db.hasLocalPaymentDevice('pavo')
+  if (!localPavo) {
+    const paymentDevices = await api.getPaymentDeviceSettings(companyId, terminalId)
+    if (paymentDevices && paymentDevices.length > 0) {
+      for (const device of paymentDevices) {
+        await window.electron.db.upsertPaymentDeviceSettings({
+          id:              device.id,
+          companyId:       device.company_id,
+          terminalId:      device.terminal_id,
+          provider:        device.provider,
+          ipAddress:       device.ip_address ?? null,
+          port:            device.port ?? 9100,
+          serialNo:        device.serial_no ?? null,
+          cardReadTimeout: device.card_read_timeout ?? 30,
+          printWidth:      device.print_width ?? '80mm',
+          isActive:        device.is_active ?? true,
+          syncedAt:        new Date().toISOString(),
+        })
+      }
+    }
+  } else {
+    const local = await window.electron.db.getPaymentDeviceSettings('pavo')
+    const cloud = await api.getPaymentDeviceSettings(companyId, terminalId).catch(() => [])
+    const cloudHas = Array.isArray(cloud) && cloud.some(d => d?.ip_address)
+    if (local?.ipAddress && local.isActive && !cloudHas) {
+      await enqueuePaymentDeviceBackup({
+        provider: 'pavo',
+        ip_address: local.ipAddress,
+        port: local.port,
+        serial_no: local.serialNo,
+        card_read_timeout: local.cardReadTimeout,
+        print_width: local.printWidth,
+        updated_from: 'pos',
+        last_paired_at: local.lastPairedAt ?? null,
+        is_active: true,
       })
     }
   }
@@ -458,33 +478,8 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       }
     },
 
-    onPairPavo: async (payload) => {
-      const p = (payload ?? {}) as {
-        ip?: string
-        port?: number
-        serial_no?: string
-      }
-      if (!p.ip) {
-        console.warn('[pair_pavo] IP adresi eksik')
-        return
-      }
-
-      const settings = {
-        ipAddress: p.ip,
-        port: p.port ?? 9100,
-        serialNo: p.serial_no ?? '',
-        cardReadTimeout: 30,
-        printWidth: '80mm' as const,
-      }
-      const seq = await window.electron.db.nextPavoSequence()
-      const result = await pavoPair(settings, seq)
-      if (result.success) {
-        console.log('[pair_pavo] Eşleştirme başarılı')
-        d.showToast('Pavo eşleştirme başarılı')
-      } else {
-        console.error('[pair_pavo] Eşleştirme başarısız:', result.message)
-        d.showToast(`Pavo eşleştirme hatası: ${result.message ?? 'Bilinmeyen hata'}`)
-      }
+    onPairPavo: async () => {
+      console.log('[pair_pavo] Pavo eşleştirmesi artık kasadan yapılıyor')
     },
   }
 }

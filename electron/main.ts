@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog, screen } fro
 import { exec } from 'child_process'
 import { existsSync, mkdirSync, appendFileSync } from 'fs'
 import { join, dirname } from 'path'
+import os from 'os'
 import type Database from 'better-sqlite3'
 import Store from 'electron-store'
 
@@ -835,6 +836,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('store:set', (_e, key, value) => store.set(key, value))
   ipcMain.handle('device:uid', () => getDeviceUID())
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:hostname', () => os.hostname())
 
   ipcMain.handle('db:saveProducts', async (_e, prods) => {
     const { saveProducts } = await import('../db/operations')
@@ -1135,6 +1137,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:upsertPaymentDeviceSettings', async (_e, row: unknown) => {
     const { upsertPaymentDeviceSettings } = await import('../db/operations')
     upsertPaymentDeviceSettings(row as import('../db/operations').PaymentDeviceRow)
+  })
+  ipcMain.handle('db:getAllPaymentDeviceSettings', async () => {
+    const { getAllPaymentDeviceSettings } = await import('../db/operations')
+    return getAllPaymentDeviceSettings()
+  })
+  ipcMain.handle('db:hasLocalPaymentDevice', async (_e, provider?: string) => {
+    const { hasLocalPaymentDevice } = await import('../db/operations')
+    return hasLocalPaymentDevice(provider ?? 'pavo')
+  })
+  ipcMain.handle('db:deactivatePaymentDevice', async (_e, provider?: string) => {
+    const { deactivatePaymentDevice } = await import('../db/operations')
+    deactivatePaymentDevice(provider ?? 'pavo')
   })
 
   ipcMain.handle('db:nextPavoSequence', async () => {

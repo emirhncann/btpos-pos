@@ -13,6 +13,7 @@ electron.contextBridge.exposeInMainWorld("electron", {
   },
   app: {
     version: () => electron.ipcRenderer.invoke("app:version"),
+    hostname: () => electron.ipcRenderer.invoke("app:hostname"),
     restart: () => electron.ipcRenderer.invoke("app:restart"),
     requestExit: () => electron.ipcRenderer.invoke("app:requestExit"),
     onExitBlocked: (cb) => {
@@ -119,6 +120,9 @@ electron.contextBridge.exposeInMainWorld("electron", {
     getCariPayments: (opts) => electron.ipcRenderer.invoke("db:getCariPayments", opts),
     getPaymentDeviceSettings: (provider) => electron.ipcRenderer.invoke("db:getPaymentDeviceSettings", provider),
     upsertPaymentDeviceSettings: (row) => electron.ipcRenderer.invoke("db:upsertPaymentDeviceSettings", row),
+    getAllPaymentDeviceSettings: () => electron.ipcRenderer.invoke("db:getAllPaymentDeviceSettings"),
+    hasLocalPaymentDevice: (provider) => electron.ipcRenderer.invoke("db:hasLocalPaymentDevice", provider),
+    deactivatePaymentDevice: (provider) => electron.ipcRenderer.invoke("db:deactivatePaymentDevice", provider),
     nextPavoSequence: () => electron.ipcRenderer.invoke("db:nextPavoSequence"),
     updatePavoSequence: (seq) => electron.ipcRenderer.invoke("db:updatePavoSequence", seq),
     getUnitPavoCode: (unitName) => electron.ipcRenderer.invoke("db:getUnitPavoCode", unitName),

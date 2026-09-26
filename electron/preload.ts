@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
   app: {
     version:      () => ipcRenderer.invoke('app:version'),
+    hostname:     () => ipcRenderer.invoke('app:hostname'),
     restart:      () => ipcRenderer.invoke('app:restart'),
     requestExit:  () => ipcRenderer.invoke('app:requestExit'),
     onExitBlocked: (cb: (data: { heldCount: number }) => void) => {
@@ -168,6 +169,12 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:getPaymentDeviceSettings', provider),
     upsertPaymentDeviceSettings: (row: unknown) =>
       ipcRenderer.invoke('db:upsertPaymentDeviceSettings', row),
+    getAllPaymentDeviceSettings: () =>
+      ipcRenderer.invoke('db:getAllPaymentDeviceSettings'),
+    hasLocalPaymentDevice: (provider?: string) =>
+      ipcRenderer.invoke('db:hasLocalPaymentDevice', provider),
+    deactivatePaymentDevice: (provider?: string) =>
+      ipcRenderer.invoke('db:deactivatePaymentDevice', provider),
     nextPavoSequence: () => ipcRenderer.invoke('db:nextPavoSequence'),
     updatePavoSequence: (seq: number) => ipcRenderer.invoke('db:updatePavoSequence', seq),
     getUnitPavoCode: (unitName: string) => ipcRenderer.invoke('db:getUnitPavoCode', unitName),

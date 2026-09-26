@@ -774,6 +774,7 @@ export interface PaymentDeviceRow {
   printWidth:      '58mm' | '80mm'
   isActive:        boolean
   syncedAt:        string | null
+  lastPairedAt?:   string | null
 }
 
 function normalizePrintWidth(width: unknown): '58mm' | '80mm' {
@@ -1254,12 +1255,16 @@ function parsePrintBehaviorField(
 // Odeme cihazi ayarlarini getir
 export function getPaymentDeviceSettings(provider = 'pavo'): PaymentDeviceRow | undefined {
   const db = getSqlite()
-  const row = db.prepare(`
+    const row = db.prepare(`
     SELECT * FROM payment_device_settings
     WHERE provider = ? AND is_active = 1
     LIMIT 1
   `).get(provider) as Record<string, unknown> | undefined
   if (!row) return undefined
+  return mapPaymentDeviceRow(row)
+}
+
+function mapPaymentDeviceRow(row: Record<string, unknown>): PaymentDeviceRow {
   return {
     id:              String(row.id ?? ''),
     companyId:       String(row.company_id ?? ''),
@@ -1272,17 +1277,39 @@ export function getPaymentDeviceSettings(provider = 'pavo'): PaymentDeviceRow | 
     printWidth:      normalizePrintWidth(row.print_width),
     isActive:        Number(row.is_active ?? 1) === 1,
     syncedAt:        row.synced_at != null ? String(row.synced_at) : null,
+    lastPairedAt:    row.last_paired_at != null ? String(row.last_paired_at) : null,
   }
 }
 
-// Odeme cihazi ayarlarini kaydet (upsert)
+export function getAllPaymentDeviceSettings(): PaymentDeviceRow[] {
+  const db = getSqlite()
+  const rows = db.prepare(`SELECT * FROM payment_device_settings`).all() as Record<string, unknown>[]
+  return rows.map(mapPaymentDeviceRow)
+}
+
+export function hasLocalPaymentDevice(provider = 'pavo'): boolean {
+  const db = getSqlite()
+  const row = db.prepare(`
+    SELECT id FROM payment_device_settings WHERE provider = ? LIMIT 1
+  `).get(provider)
+  return row != null
+}
+
+export function deactivatePaymentDevice(provider = 'pavo'): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE payment_device_settings SET is_active = 0 WHERE provider = ?
+  `).run(provider)
+}
+
 export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
   const db = getSqlite()
   const printWidth = normalizePrintWidth(row.printWidth)
   db.prepare(`
     INSERT INTO payment_device_settings
-      (id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, company_id, terminal_id, provider, ip_address, port, serial_no,
+       card_read_timeout, print_width, is_active, synced_at, last_paired_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       company_id=excluded.company_id,
       terminal_id=excluded.terminal_id,
@@ -1293,7 +1320,8 @@ export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
       card_read_timeout=excluded.card_read_timeout,
       print_width=excluded.print_width,
       is_active=excluded.is_active,
-      synced_at=excluded.synced_at
+      synced_at=excluded.synced_at,
+      last_paired_at=COALESCE(excluded.last_paired_at, payment_device_settings.last_paired_at)
   `).run(
     row.id,
     row.companyId,
@@ -1306,6 +1334,7 @@ export function upsertPaymentDeviceSettings(row: PaymentDeviceRow): void {
     printWidth,
     row.isActive ? 1 : 0,
     row.syncedAt,
+    row.lastPairedAt ?? null,
   )
 }
 
@@ -1858,7 +1887,14 @@ export function getCustomers(companyId: string, query?: string): CustomerRow[] {
   return rows.map(mapCustomerRow)
 }
 
-export type OperationQueueType = 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
+export type OperationQueueType =
+  | 'invoice'
+  | 'return_invoice'
+  | 'customer'
+  | 'day_end_invoice'
+  | 'payment'
+  | 'terminal_local_settings'
+  | 'payment_device'
 
 export interface OperationQueueRow {
   id:          string
@@ -1881,9 +1917,10 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
       ? st
       : 'pending'
   const tp = String(r.type ?? '')
-  const type = (['invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment'].includes(tp)
-    ? tp
-    : 'invoice') as OperationQueueType
+  const type = ([
+    'invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment',
+    'terminal_local_settings', 'payment_device',
+  ].includes(tp) ? tp : 'invoice') as OperationQueueType
   return {
     id:          String(r.id ?? ''),
     companyId:   String(r.company_id ?? ''),
@@ -1941,6 +1978,12 @@ export function enqueueOperation(params: {
 }): void {
   const db = getSqlite()
   const status = params.status ?? 'pending'
+  if (params.type === 'terminal_local_settings' || params.type === 'payment_device') {
+    db.prepare(`
+      DELETE FROM operation_queue
+      WHERE company_id = ? AND type = ? AND status = 'pending'
+    `).run(params.companyId, params.type)
+  }
   db.prepare(`
     INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
     VALUES (?, ?, ?, ?, ?, 0, ?, ?)

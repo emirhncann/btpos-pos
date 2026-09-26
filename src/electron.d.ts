@@ -57,6 +57,7 @@ declare global {
       }
       app: {
         version:      () => Promise<string>
+        hostname:     () => Promise<string>
         restart:      () => Promise<void>
         requestExit:  () => Promise<void>
         onExitBlocked: (cb: (data: { heldCount: number }) => void) => () => void
@@ -161,7 +162,7 @@ declare global {
         enqueueOperation:  (params: {
           id: string
           companyId: string
-          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
+          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device'
           payload: Record<string, unknown>
           label?: string
           status?: 'pending' | 'pending_dayend'
@@ -199,6 +200,9 @@ declare global {
         }): Promise<{ success: boolean }>
         getCariPayments(opts: { dateFrom: string; dateTo: string; companyId: string }): Promise<CariPaymentReportRow[]>
         getPaymentDeviceSettings: (provider?: string) => Promise<PaymentDeviceRow | undefined>
+        getAllPaymentDeviceSettings: () => Promise<PaymentDeviceRow[]>
+        hasLocalPaymentDevice: (provider?: string) => Promise<boolean>
+        deactivatePaymentDevice: (provider?: string) => Promise<void>
         upsertPaymentDeviceSettings: (row: PaymentDeviceRow) => Promise<void>
         nextPavoSequence: () => Promise<number>
         updatePavoSequence: (seq: number) => Promise<void>
@@ -707,6 +711,7 @@ declare global {
     printWidth:      '58mm' | '80mm'
     isActive:        boolean
     syncedAt:        string | null
+    lastPairedAt?:   string | null
   }
 
   interface PaymentDeviceResult {

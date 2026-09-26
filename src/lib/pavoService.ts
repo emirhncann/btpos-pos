@@ -301,6 +301,26 @@ export async function pavoPair(settings: PavoSettings, seq: number): Promise<Pay
   }
 }
 
+/** PaymentMediators — bağlantı testi ve sequence senkronu. Hata metnini (ErrorCode dahil) olduğu gibi döner. */
+export async function pavoTestConnection(settings: PavoSettings): Promise<{ success: boolean; message: string }> {
+  try {
+    const seq = await window.electron.db.nextPavoSequence()
+    const data = await pavoRequest(`${pavoBaseUrl(settings)}/PaymentMediators`, {
+      TransactionHandle: transactionHandle(settings, seq),
+    }, 20_000)
+    const hasError = data.HasError === true || data.IsError === true
+    if (!hasError) return { success: true, message: 'Bağlantı başarılı' }
+    const code = data.ErrorCode
+    const base = pavoErrorMessage(data, 'Bağlantı hatası')
+    const message = code != null && String(code) !== '' && Number(code) !== 0
+      ? `${base} (ErrorCode ${code})`
+      : base
+    return { success: false, message }
+  } catch (e) {
+    return { success: false, message: String(e) }
+  }
+}
+
 export async function pavoCompleteSale(
   settings: PavoSettings,
   seq: number,

@@ -1,21 +1,33 @@
 import { useState, useEffect, useRef } from 'react'
 
-export default function ScaleSettings() {
+export interface ScaleDraft {
+  portPath: string
+  baudRate: number
+  enabled: boolean
+}
+
+interface Props {
+  onDraft: (draft: ScaleDraft) => void
+}
+
+export default function ScaleSettings({ onDraft }: Props) {
   const [ports, setPorts] = useState<string[]>([])
   const [portPath, setPortPath] = useState('')
   const [baudRate, setBaudRate] = useState(9600)
   const [enabled, setEnabled] = useState(false)
+  const [ready, setReady] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testValue, setTestValue] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
   const testCleanupRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     void window.electron.scale.getSettings().then(s => {
-      if (!s) return
-      setPortPath(s.port_path ?? '')
-      setBaudRate(s.baud_rate ?? 9600)
-      setEnabled(!!s.enabled)
+      if (s) {
+        setPortPath(s.port_path ?? '')
+        setBaudRate(s.baud_rate ?? 9600)
+        setEnabled(!!s.enabled)
+      }
+      setReady(true)
     })
     void window.electron.scale.listPorts().then(setPorts).catch(() => setPorts([]))
 
@@ -24,6 +36,11 @@ export default function ScaleSettings() {
       testCleanupRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (!ready) return
+    onDraft({ portPath, baudRate, enabled })
+  }, [ready, portPath, baudRate, enabled, onDraft])
 
   async function handleTest() {
     testCleanupRef.current?.()
@@ -74,21 +91,6 @@ export default function ScaleSettings() {
       }
       setTesting(false)
     }, 8000)
-  }
-
-  async function handleSave() {
-    await window.electron.scale.saveSettings({ portPath, baudRate, enabled })
-    if (enabled) {
-      const r = await window.electron.scale.connect({ portPath, baudRate })
-      if (!r.success) {
-        setTestValue(`Bağlantı hatası: ${r.error ?? 'bilinmiyor'}`)
-        return
-      }
-    } else {
-      await window.electron.scale.disconnect()
-    }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
   }
 
   return (
@@ -187,19 +189,6 @@ export default function ScaleSettings() {
           }}
         >
           {testing ? 'Test ediliyor...' : 'Test Et'}
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={!portPath && enabled}
-          style={{
-            flex: 2, padding: '10px', borderRadius: 8,
-            border: 'none', background: '#111827', color: 'white',
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-            opacity: (!portPath && enabled) ? 0.5 : 1,
-          }}
-        >
-          {saved ? 'Kaydedildi' : 'Kaydet'}
         </button>
       </div>
     </div>

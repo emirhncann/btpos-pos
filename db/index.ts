@@ -596,6 +596,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   } catch (e) {
     console.warn('[migration] payment_device_settings invoice_type kaldırma hatası:', e)
   }
+  addColumnIfMissing(sqlite, 'payment_device_settings', 'last_paired_at', 'last_paired_at TEXT')
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS unit_mappings (

@@ -1,12 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import AppLogo from '../components/AppLogo'
 import { sendPendingInvoices } from '../lib/invoiceSend'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
 import { SalesReportScreen } from './SalesReportScreen'
-import PrinterSettingsPanel from '../components/PrinterSettingsPanel'
-import ScaleSettings from '../components/ScaleSettings'
+import PrinterSettingsPanel, { type PrinterDraft } from '../components/PrinterSettingsPanel'
+import ScaleSettings, { type ScaleDraft } from '../components/ScaleSettings'
+import PaymentDeviceSettingsPanel from '../components/PaymentDeviceSettingsPanel'
+import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 
@@ -54,6 +56,7 @@ interface Props {
   cmdPollTick?:           number
   cartSettings:           CartSettings
   onCartSettingsChange?:  (s: CartSettings) => void | Promise<void>
+  cartActive?:            boolean
 }
 
 interface DailySummary {
@@ -64,7 +67,7 @@ interface DailySummary {
 }
 
 export default function DashboardScreen({
-  companyId, cashier,
+  companyId, cashier, terminalId,
   onStartSale, onLogout, onShowMessage,
   onPluUpdated: _onPluUpdated,
   onSettingsUpdated: _onSettingsUpdated,
@@ -73,6 +76,7 @@ export default function DashboardScreen({
   cmdPollTick = 0,
   cartSettings,
   onCartSettingsChange,
+  cartActive = false,
 }: Props) {
   void _onPluUpdated
   void _onSettingsUpdated
@@ -82,7 +86,14 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment'>('screen')
+  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device'>('screen')
+  const [draftCart, setDraftCart] = useState<CartSettings>(cartSettings)
+  const [printerDraft, setPrinterDraft] = useState<PrinterDraft | null>(null)
+  const [scaleDraft, setScaleDraft] = useState<ScaleDraft | null>(null)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const printerSnap = useRef<string | null>(null)
+  const scaleSnap = useRef<string | null>(null)
+  const cartSnap = useRef<string>(JSON.stringify(cartSettings))
   const [pavoDeviceInfo, setPavoDeviceInfo] = useState<{ ip: string; port: number } | null>(null)
   const [showQueue, setShowQueue] = useState(false)
   const [showSalesReport, setShowSalesReport] = useState(false)
@@ -166,6 +177,74 @@ export default function DashboardScreen({
 
   const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+  const onPrinterDraft = useCallback((d: PrinterDraft) => {
+    setPrinterDraft(d)
+    if (printerSnap.current == null) printerSnap.current = JSON.stringify(d)
+  }, [])
+
+  const onScaleDraft = useCallback((d: ScaleDraft) => {
+    setScaleDraft(d)
+    if (scaleSnap.current == null) scaleSnap.current = JSON.stringify(d)
+  }, [])
+
+  const settingsDirty =
+    (printerDraft != null && printerSnap.current != null && JSON.stringify(printerDraft) !== printerSnap.current)
+    || (scaleDraft != null && scaleSnap.current != null && JSON.stringify(scaleDraft) !== scaleSnap.current)
+    || JSON.stringify(draftCart) !== cartSnap.current
+
+  function requestCloseSettings() {
+    if (settingsDirty && !window.confirm('Kaydedilmemiş değişiklikler var. Yine de çıkılsın mı?')) return
+    setShowSettings(false)
+  }
+
+  async function saveKasaSettings() {
+    if (savingSettings) return
+    setSavingSettings(true)
+    try {
+      if (printerDraft) {
+        await window.electron.printer.saveSettings({
+          printer_type: printerDraft.printerType,
+          printer_name: printerDraft.printerName || null,
+          printer_ip:   printerDraft.printerIp || null,
+          printer_port: printerDraft.printerPort,
+          paper_width:  printerDraft.paperWidth,
+          is_active:    printerDraft.enabled,
+        })
+        printerSnap.current = JSON.stringify(printerDraft)
+      }
+      if (scaleDraft) {
+        await window.electron.scale.saveSettings({
+          portPath: scaleDraft.portPath,
+          baudRate: scaleDraft.baudRate,
+          enabled:  scaleDraft.enabled,
+        })
+        if (scaleDraft.enabled && scaleDraft.portPath) {
+          const r = await window.electron.scale.connect({
+            portPath: scaleDraft.portPath,
+            baudRate: scaleDraft.baudRate,
+          })
+          if (!r.success) {
+            setToast(`Terazi bağlanamadı: ${r.error ?? 'bilinmiyor'}`)
+          }
+        } else {
+          await window.electron.scale.disconnect()
+        }
+        scaleSnap.current = JSON.stringify(scaleDraft)
+      }
+      if (JSON.stringify(draftCart) !== cartSnap.current) {
+        await onCartSettingsChange?.(draftCart)
+        cartSnap.current = JSON.stringify(draftCart)
+      }
+      scheduleLocalSettingsBackup()
+      setToast('Ayarlar kaydedildi')
+      window.setTimeout(() => setToast(null), 2500)
+    } catch (e) {
+      setToast(String(e))
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#F0F2F5' }}>
 
@@ -229,7 +308,16 @@ export default function DashboardScreen({
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             type="button"
-            onClick={() => { setSettingsTab('screen'); setShowSettings(true) }}
+            onClick={() => {
+              printerSnap.current = null
+              scaleSnap.current = null
+              cartSnap.current = JSON.stringify(cartSettings)
+              setPrinterDraft(null)
+              setScaleDraft(null)
+              setDraftCart(cartSettings)
+              setSettingsTab('screen')
+              setShowSettings(true)
+            }}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
@@ -420,7 +508,7 @@ export default function DashboardScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 14, width: 520,
+            background: 'white', borderRadius: 14, width: 560,
             maxHeight: '85vh', overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
           }}>
@@ -431,7 +519,7 @@ export default function DashboardScreen({
               <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>Kasa Ayarları</div>
               <button
                 type="button"
-                onClick={() => setShowSettings(false)}
+                onClick={() => requestCloseSettings()}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   fontSize: 20, color: '#9E9E9E', lineHeight: 1,
@@ -444,6 +532,7 @@ export default function DashboardScreen({
             }}>
               {([
                 { id: 'screen' as const, label: 'Ekran' },
+                { id: 'device' as const, label: 'Ödeme Cihazı' },
                 { id: 'payment' as const, label: 'Ödeme & Yazıcı' },
               ]).map(tab => (
                 <button
@@ -463,21 +552,28 @@ export default function DashboardScreen({
               ))}
             </div>
             <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+              {settingsTab === 'device' && (
+                <PaymentDeviceSettingsPanel
+                  companyId={companyId}
+                  terminalId={terminalId}
+                  saleLocked={cartActive || heldCount > 0}
+                />
+              )}
               {settingsTab === 'payment' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <div style={{
-                    padding: '12px 16px', background: '#E3F2FD', borderRadius: 10,
-                    border: '1px solid #90CAF9', fontSize: 12, color: '#1565C0',
-                  }}>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>💳 Pavo Ödeme Cihazı</div>
-                    {pavoDeviceInfo
-                      ? <>Merkezden senkron: {pavoDeviceInfo.ip}:{pavoDeviceInfo.port}</>
-                      : 'Henüz yapılandırılmamış — merkezden sync_settings ile gelir.'}
-                  </div>
-                  <PrinterSettingsPanel />
-                  <ScaleSettings />
+                <div style={{
+                  padding: '12px 16px', background: '#E3F2FD', borderRadius: 10,
+                  border: '1px solid #90CAF9', fontSize: 12, color: '#1565C0', marginBottom: 16,
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Pavo ödeme cihazı</div>
+                  {pavoDeviceInfo
+                    ? <>Yerel kayıt: {pavoDeviceInfo.ip}:{pavoDeviceInfo.port}. Düzenlemek için Ödeme Cihazı sekmesini kullanın.</>
+                    : 'Henüz yok. Ödeme Cihazı sekmesinden IP, port ve seri no girin.'}
                 </div>
               )}
+              <div style={{ display: settingsTab === 'payment' ? 'flex' : 'none', flexDirection: 'column', gap: 16 }}>
+                <PrinterSettingsPanel onDraft={onPrinterDraft} />
+                <ScaleSettings onDraft={onScaleDraft} />
+              </div>
               {settingsTab === 'screen' && (<>
               <div style={{
                 fontSize: 11, fontWeight: 600, color: '#9ca3af',
@@ -496,20 +592,20 @@ export default function DashboardScreen({
                   <button
                     type="button"
                     key={t.key}
-                    onClick={() => onCartSettingsChange?.({
-                      ...cartSettings,
-                      [t.key]: !cartSettings[t.key],
+                    onClick={() => setDraftCart({
+                      ...draftCart,
+                      [t.key]: !draftCart[t.key],
                     })}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5,
                       padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
                       fontSize: 12, fontWeight: 500, border: '1px solid',
-                      background: cartSettings[t.key] ? '#E3F2FD' : 'white',
-                      borderColor: cartSettings[t.key] ? '#90CAF9' : '#E0E0E0',
-                      color: cartSettings[t.key] ? '#1565C0' : '#9ca3af',
+                      background: draftCart[t.key] ? '#E3F2FD' : 'white',
+                      borderColor: draftCart[t.key] ? '#90CAF9' : '#E0E0E0',
+                      color: draftCart[t.key] ? '#1565C0' : '#9ca3af',
                     }}
                   >
-                    <span style={{ fontSize: 11 }}>{cartSettings[t.key] ? '✓' : '○'}</span>
+                    <span style={{ fontSize: 11 }}>{draftCart[t.key] ? '✓' : '○'}</span>
                     {t.label}
                   </button>
                 ))}
@@ -541,39 +637,39 @@ export default function DashboardScreen({
                       <button
                         type="button"
                         onClick={() => {
-                          const v = Math.max(f.min, cartSettings[f.key] - 1)
-                          void onCartSettingsChange?.({ ...cartSettings, [f.key]: v })
+                          const v = Math.max(f.min, draftCart[f.key] - 1)
+                          setDraftCart({ ...draftCart, [f.key]: v })
                         }}
-                        disabled={cartSettings[f.key] <= f.min}
+                        disabled={draftCart[f.key] <= f.min}
                         style={{
                           width: 28, height: 28, borderRadius: 6,
                           border: '1px solid #E0E0E0', background: 'white',
                           cursor: 'pointer', fontSize: 16, fontWeight: 500,
                           color: '#374151', display: 'flex', alignItems: 'center',
                           justifyContent: 'center',
-                          opacity: cartSettings[f.key] <= f.min ? 0.3 : 1,
+                          opacity: draftCart[f.key] <= f.min ? 0.3 : 1,
                         }}
                       >−</button>
                       <span style={{
                         fontSize: 14, fontWeight: 600, color: '#111',
                         minWidth: 36, textAlign: 'center',
                       }}>
-                        {cartSettings[f.key]}px
+                        {draftCart[f.key]}px
                       </span>
                       <button
                         type="button"
                         onClick={() => {
-                          const v = Math.min(f.max, cartSettings[f.key] + 1)
-                          void onCartSettingsChange?.({ ...cartSettings, [f.key]: v })
+                          const v = Math.min(f.max, draftCart[f.key] + 1)
+                          setDraftCart({ ...draftCart, [f.key]: v })
                         }}
-                        disabled={cartSettings[f.key] >= f.max}
+                        disabled={draftCart[f.key] >= f.max}
                         style={{
                           width: 28, height: 28, borderRadius: 6,
                           border: '1px solid #E0E0E0', background: 'white',
                           cursor: 'pointer', fontSize: 16, fontWeight: 500,
                           color: '#374151', display: 'flex', alignItems: 'center',
                           justifyContent: 'center',
-                          opacity: cartSettings[f.key] >= f.max ? 0.3 : 1,
+                          opacity: draftCart[f.key] >= f.max ? 0.3 : 1,
                         }}
                       >+</button>
                     </div>
@@ -582,17 +678,21 @@ export default function DashboardScreen({
               </div>
               </>)}
             </div>
+            {settingsTab !== 'device' && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid #F0F0F0' }}>
               <button
                 type="button"
-                onClick={() => setShowSettings(false)}
+                disabled={savingSettings}
+                onClick={() => void saveKasaSettings()}
                 style={{
                   width: '100%', padding: '11px', borderRadius: 9,
                   background: '#1565C0', color: 'white', border: 'none',
-                  cursor: 'pointer', fontSize: 14, fontWeight: 600,
+                  cursor: savingSettings ? 'wait' : 'pointer', fontSize: 14, fontWeight: 600,
+                  opacity: savingSettings ? 0.7 : 1,
                 }}
-              >Tamam</button>
+              >{savingSettings ? 'Kaydediliyor…' : 'Kaydet'}</button>
             </div>
+            )}
           </div>
         </div>
       )}

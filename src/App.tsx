@@ -13,8 +13,10 @@ import { api } from './lib/api'
 import { sendPendingInvoices } from './lib/invoiceSend'
 import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
 import { useGlobalClickSound } from './hooks/useGlobalClickSound'
+import RestoreScreen from './screens/RestoreScreen'
+import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib/localSettings'
 
-type AppState = 'loading' | 'activation' | 'cashier_login' | 'dashboard' | 'pos'
+type AppState = 'loading' | 'activation' | 'restore' | 'cashier_login' | 'dashboard' | 'pos'
 
 const DEFAULT_CART_SETTINGS: CartSettings = {
   showBarkod: false,
@@ -265,6 +267,9 @@ export default function App() {
       }).catch(() => {})
       window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
       setState('cashier_login')
+      if (storedTerminalId) {
+        void publishLocalPavoIfCloudEmpty(storedCompanyId, storedTerminalId)
+      }
     } else {
       setState('activation')
     }
@@ -292,7 +297,7 @@ export default function App() {
       /* mevcut default değerler kalır */
     }
 
-    setState('cashier_login')
+    setState('restore')
   }
 
   async function handleCashierLogin(c: CashierRow, groups: PluGroupCacheRow[]) {
@@ -343,6 +348,19 @@ export default function App() {
   if (state === 'activation')
     return <ActivationScreen onActivated={handleActivated} />
 
+  if (state === 'restore' && companyId && terminalId)
+    return (
+      <RestoreScreen
+        companyId={companyId}
+        terminalId={terminalId}
+        onSettings={s => {
+          setPosSettings(s)
+          setTerminalSettings(s)
+        }}
+        onDone={() => setState('cashier_login')}
+      />
+    )
+
   if (state === 'cashier_login')
     return (
       <CashierLoginScreen
@@ -384,7 +402,9 @@ export default function App() {
         onCartSettingsChange={async s => {
           setCartSettings(s)
           await window.electron.store.setCartSettings(s)
+          scheduleLocalSettingsBackup()
         }}
+        cartActive={cartActive}
       />
     )
 
