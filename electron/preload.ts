@@ -25,6 +25,23 @@ contextBridge.exposeInMainWorld('electron', {
     selectFolder: () => ipcRenderer.invoke('app:selectFolder'),
     reinitDb:     (p: string) => ipcRenderer.invoke('app:reinitDb', p),
   },
+  update: {
+    getVersion: () => ipcRenderer.invoke('update:getVersion') as Promise<string>,
+    prepare: (baseUrl: string, targetVersion: string) =>
+      ipcRenderer.invoke('update:prepare', baseUrl, targetVersion) as Promise<{ version: string }>,
+    download: () => ipcRenderer.invoke('update:download') as Promise<void>,
+    install: () => ipcRenderer.invoke('update:install') as Promise<void>,
+    onProgress: (cb: (percent: number) => void) => {
+      const handler = (_: IpcRendererEvent, percent: number) => cb(percent)
+      ipcRenderer.on('update:progress', handler)
+      return () => { ipcRenderer.removeListener('update:progress', handler) }
+    },
+    onRunScheduled: (cb: () => void) => {
+      const handler = () => cb()
+      ipcRenderer.on('update:run-scheduled', handler)
+      return () => { ipcRenderer.removeListener('update:run-scheduled', handler) }
+    },
+  },
   window: {
     isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
     toggleFullscreen: () => ipcRenderer.invoke('window:toggleFullscreen'),
@@ -75,6 +92,17 @@ contextBridge.exposeInMainWorld('electron', {
     },
   },
   db: {
+    selectFolder: () => ipcRenderer.invoke('db:selectFolder') as Promise<string | null>,
+    setLocation: (dir: string, opts?: { moveExisting?: boolean }) =>
+      ipcRenderer.invoke('db:setLocation', dir, opts) as Promise<{
+        success: boolean
+        path?: string
+        existed?: boolean
+        message?: string
+      }>,
+    getLocation: () => ipcRenderer.invoke('db:getLocation') as Promise<string>,
+    userVersion: () => ipcRenderer.invoke('db:userVersion') as Promise<number>,
+    backupNow: (label: string) => ipcRenderer.invoke('db:backupNow', label) as Promise<string>,
     saveProducts:       (products: unknown[])                => ipcRenderer.invoke('db:saveProducts', products),
     getProducts:        ()                                   => ipcRenderer.invoke('db:getProducts'),
     saveSale:           (sale: unknown, items: unknown[], device?: unknown) =>

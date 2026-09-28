@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import AppLogo from '../components/AppLogo'
+import DbLocationPanel from '../components/DbLocationPanel'
 import { api } from '../lib/api'
 
 interface Props {
@@ -11,34 +12,6 @@ export default function ActivationScreen({ onActivated }: Props) {
   const [licenseKey, setLicenseKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  const [dbPath, setDbPath] = useState('')
-  const [dbPathSaved, setDbPathSaved] = useState(false)
-  const [dbPathLoading, setDbPathLoading] = useState(false)
-
-  useEffect(() => {
-    window.electron.store.get('db_path').then(p => {
-      if (p) setDbPath(p as string)
-    })
-  }, [])
-
-  async function saveDbPath() {
-    if (dbPathLoading) return
-    setDbPathLoading(true)
-    setError('')
-    try {
-      await window.electron.store.set('db_path', dbPath.trim())
-      const r = await window.electron.app.reinitDb(dbPath.trim())
-      if (!r.success) {
-        setError(r.error ?? 'Veritabanı yeniden başlatılamadı.')
-        return
-      }
-      setDbPathSaved(true)
-      setTimeout(() => setDbPathSaved(false), 3000)
-    } finally {
-      setDbPathLoading(false)
-    }
-  }
 
   async function handleActivate() {
     if (!email.trim() || !email.includes('@')) {
@@ -91,50 +64,7 @@ export default function ActivationScreen({ onActivated }: Props) {
           background: 'white', borderRadius: 12, padding: '16px 20px',
           border: '1px solid #E5E7EB', marginBottom: 16, width: '100%',
         }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
-            Veritabanı Konumu
-          </div>
-          <div style={{ fontSize: 11, color: '#9E9E9E', marginBottom: 10 }}>
-            Boş bırakılırsa uygulama varsayılan konumu kullanır.
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <input
-              value={dbPath}
-              onChange={e => { setDbPath(e.target.value); setDbPathSaved(false) }}
-              placeholder="Varsayılan konum"
-              style={{
-                flex: 1, minWidth: 120, border: '1px solid #E0E0E0', borderRadius: 7,
-                padding: '8px 10px', fontSize: 12, outline: 'none',
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                void window.electron.app.selectFolder().then(p => {
-                  if (p) { setDbPath(p); setDbPathSaved(false) }
-                })
-              }}
-              style={{
-                background: '#F3F4F6', border: '1px solid #E0E0E0', borderRadius: 7,
-                padding: '8px 12px', cursor: 'pointer', fontSize: 11,
-                color: '#374151', whiteSpace: 'nowrap',
-              }}
-            >Gözat</button>
-            <button
-              type="button"
-              onClick={() => void saveDbPath()}
-              disabled={dbPathLoading}
-              style={{
-                background: dbPathSaved ? '#E8F5E9' : '#1565C0',
-                border: 'none', borderRadius: 7, padding: '8px 12px',
-                cursor: 'pointer', fontSize: 11,
-                color: dbPathSaved ? '#2E7D32' : 'white',
-                whiteSpace: 'nowrap', opacity: dbPathLoading ? 0.6 : 1,
-              }}
-            >
-              {dbPathLoading ? '...' : dbPathSaved ? 'Kaydedildi ✓' : 'Kaydet'}
-            </button>
-          </div>
+          <DbLocationPanel />
         </div>
 
         <div className="w-full max-w-md bg-gray-900 rounded-2xl p-8 shadow-2xl border border-gray-800">

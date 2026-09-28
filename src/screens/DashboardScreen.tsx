@@ -8,6 +8,8 @@ import { SalesReportScreen } from './SalesReportScreen'
 import PrinterSettingsPanel, { type PrinterDraft } from '../components/PrinterSettingsPanel'
 import ScaleSettings, { type ScaleDraft } from '../components/ScaleSettings'
 import PaymentDeviceSettingsPanel from '../components/PaymentDeviceSettingsPanel'
+import DbLocationPanel from '../components/DbLocationPanel'
+import UpdateSettingsPanel from '../components/UpdateSettingsPanel'
 import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
@@ -86,7 +88,7 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device'>('screen')
+  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device' | 'general' | 'update'>('screen')
   const [draftCart, setDraftCart] = useState<CartSettings>(cartSettings)
   const [printerDraft, setPrinterDraft] = useState<PrinterDraft | null>(null)
   const [scaleDraft, setScaleDraft] = useState<ScaleDraft | null>(null)
@@ -168,6 +170,7 @@ export default function DashboardScreen({
       await sendPendingInvoices(companyId, { silent: false })
       scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
       await loadDailySummary()
+      window.dispatchEvent(new Event('btpos-day-end-done'))
     } catch {
       showError('Hata', 'Fatura gönderimi başlatılamadı.')
     } finally {
@@ -508,7 +511,7 @@ export default function DashboardScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 14, width: 560,
+            background: 'white', borderRadius: 14, width: 720,
             maxHeight: '85vh', overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
           }}>
@@ -531,9 +534,11 @@ export default function DashboardScreen({
               borderBottom: '1px solid #F0F0F0',
             }}>
               {([
+                { id: 'general' as const, label: 'Genel' },
                 { id: 'screen' as const, label: 'Ekran' },
                 { id: 'device' as const, label: 'Ödeme Cihazı' },
                 { id: 'payment' as const, label: 'Ödeme & Yazıcı' },
+                { id: 'update' as const, label: 'Güncelleme' },
               ]).map(tab => (
                 <button
                   key={tab.id}
@@ -552,6 +557,17 @@ export default function DashboardScreen({
               ))}
             </div>
             <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+              {settingsTab === 'general' && (
+                <DbLocationPanel
+                  disabled={cartActive || heldCount > 0}
+                  disabledReason={cartActive || heldCount > 0
+                    ? 'Sepet dolu veya askıda belge varken veritabanı konumu değiştirilemez.'
+                    : undefined}
+                />
+              )}
+              {settingsTab === 'update' && (
+                <UpdateSettingsPanel companyId={companyId} cartActive={cartActive} />
+              )}
               {settingsTab === 'device' && (
                 <PaymentDeviceSettingsPanel
                   companyId={companyId}
@@ -678,7 +694,7 @@ export default function DashboardScreen({
               </div>
               </>)}
             </div>
-            {settingsTab !== 'device' && (
+            {settingsTab !== 'device' && settingsTab !== 'general' && settingsTab !== 'update' && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid #F0F0F0' }}>
               <button
                 type="button"

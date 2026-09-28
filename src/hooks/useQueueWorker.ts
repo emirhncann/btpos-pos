@@ -303,7 +303,7 @@ export async function processOperationQueue({
             console.log('[worker] payment result:', JSON.stringify(data))
             success = data.success === true
             error = data.message ?? null
-          } else if (op.type === 'terminal_local_settings' || op.type === 'payment_device') {
+          } else if (op.type === 'terminal_local_settings' || op.type === 'payment_device' || op.type === 'app_report') {
             const endpoint = String(payload.endpoint ?? '')
             const method = String(payload.method ?? 'POST').toUpperCase()
             if (!endpoint.startsWith('/')) throw new Error('endpoint eksik')
@@ -327,10 +327,14 @@ export async function processOperationQueue({
 
           if (success) {
             await window.electron.db.markOperationSuccess(op.id)
-            onToast({ id: op.id, type: op.type, label: op.label, status: 'success' })
+            if (op.type !== 'app_report') {
+              onToast({ id: op.id, type: op.type, label: op.label, status: 'success' })
+            }
           } else {
             await window.electron.db.markOperationFailed(op.id, error ?? 'Hata')
-            onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error })
+            if (op.type !== 'app_report') {
+              onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error })
+            }
           }
         } catch (e) {
           const errMsg = String(e)

@@ -27,6 +27,7 @@ export const noopCommandHandlers: CommandHandlers = {
   onMessage:            () => {},
   onRestart:            () => {},
   onLock:               () => {},
+  onUpdateApp:          async () => {},
 }
 
 export function pluGroupsToCacheRows(
@@ -66,6 +67,7 @@ export interface MerkezCommandHandlerDeps {
   onPluUpdated:         (groups: PluGroupCacheRow[]) => void
   onEnabledBrandsUpdated?: (brands: PaymentProviderBrand[]) => void
   onBarcodeFormatsUpdated?: (formats: BarcodeFormatRow[]) => void
+  onAdminUpdate?:       () => void
 }
 
 function failResult(msg: string): SyncResult {
@@ -480,6 +482,26 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
 
     onPairPavo: async () => {
       console.log('[pair_pavo] Pavo eşleştirmesi artık kasadan yapılıyor')
+    },
+
+    onUpdateApp: async (payload) => {
+      const version = String(payload.version ?? '')
+      const baseUrl = String(payload.base_url ?? '')
+      const releaseId = String(payload.release_id ?? '')
+      if (!version || !baseUrl || !releaseId) throw new Error('Güncelleme komutu eksik')
+      const current = await window.electron.update.getVersion()
+      if (version === current) return
+      const mode = payload.mode === 'on_close' ? 'on_close' : 'prompt'
+      await window.electron.store.set('pendingAdminUpdate', {
+        release_id: releaseId,
+        version,
+        base_url: baseUrl,
+        schema_version: payload.schema_version != null ? Number(payload.schema_version) : undefined,
+        mode,
+        is_mandatory: payload.is_mandatory === true || payload.is_mandatory === 1 || payload.is_mandatory === '1',
+      })
+      d.onAdminUpdate?.()
+      window.dispatchEvent(new Event('btpos-admin-update'))
     },
   }
 }

@@ -14,7 +14,9 @@ import { sendPendingInvoices } from './lib/invoiceSend'
 import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
 import { useGlobalClickSound } from './hooks/useGlobalClickSound'
 import RestoreScreen from './screens/RestoreScreen'
+import UpdateBanner from './components/UpdateBanner'
 import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib/localSettings'
+import { maybeRunScheduledUpdate, reportAppVersion } from './lib/appUpdate'
 
 type AppState = 'loading' | 'activation' | 'restore' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -174,6 +176,7 @@ export default function App() {
       onPluUpdated: setPluGroups,
       onEnabledBrandsUpdated: setSyncedEnabledBrands,
       onBarcodeFormatsUpdated: setSyncedBarcodeFormats,
+      onAdminUpdate: () => window.dispatchEvent(new Event('btpos-admin-update')),
     })
   }, [
     companyId,
@@ -199,6 +202,26 @@ export default function App() {
   })
 
   useEffect(() => { checkActivation() }, [])
+
+  useEffect(() => {
+    if (!companyId || !terminalId) return
+    void reportAppVersion()
+  }, [companyId, terminalId])
+
+  useEffect(() => {
+    if (!companyId || !terminalId) return
+    const off = window.electron.update.onRunScheduled(() => {
+      void maybeRunScheduledUpdate({ cartActive }).catch(() => {})
+    })
+    const onDayEnd = () => {
+      void maybeRunScheduledUpdate({ cartActive }).catch(() => {})
+    }
+    window.addEventListener('btpos-day-end-done', onDayEnd)
+    return () => {
+      off()
+      window.removeEventListener('btpos-day-end-done', onDayEnd)
+    }
+  }, [companyId, terminalId, cartActive])
 
   useEffect(() => {
     if (!isOnline || !companyId) return
@@ -386,6 +409,7 @@ export default function App() {
 
   if (state === 'dashboard')
     return (
+      <>
       <DashboardScreen
         companyId={companyId!}
         cashier={cashier!}
@@ -406,9 +430,12 @@ export default function App() {
         }}
         cartActive={cartActive}
       />
+      <UpdateBanner cartActive={cartActive} />
+      </>
     )
 
   return (
+    <>
     <POSScreen
       companyId={companyId!}
       cashier={cashier!}
@@ -433,5 +460,7 @@ export default function App() {
       commandDeferred={hasDeferredCommand}
       customerDisplay={terminalSettings.customerDisplay !== false}
     />
+    <UpdateBanner cartActive={cartActive} />
+    </>
   )
 }

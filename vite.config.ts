@@ -19,6 +19,7 @@ export default defineConfig({
               external: [
                 'better-sqlite3',
                 'electron-store',
+                'electron-updater',
                 '@thiagoelg/node-printer',
                 'serialport',
                 '@serialport/bindings-cpp',

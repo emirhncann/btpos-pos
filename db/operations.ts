@@ -1895,6 +1895,7 @@ export type OperationQueueType =
   | 'payment'
   | 'terminal_local_settings'
   | 'payment_device'
+  | 'app_report'
 
 export interface OperationQueueRow {
   id:          string
@@ -1919,7 +1920,7 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
   const tp = String(r.type ?? '')
   const type = ([
     'invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment',
-    'terminal_local_settings', 'payment_device',
+    'terminal_local_settings', 'payment_device', 'app_report',
   ].includes(tp) ? tp : 'invoice') as OperationQueueType
   return {
     id:          String(r.id ?? ''),
@@ -1978,7 +1979,7 @@ export function enqueueOperation(params: {
 }): void {
   const db = getSqlite()
   const status = params.status ?? 'pending'
-  if (params.type === 'terminal_local_settings' || params.type === 'payment_device') {
+  if (params.type === 'terminal_local_settings' || params.type === 'payment_device' || params.type === 'app_report') {
     db.prepare(`
       DELETE FROM operation_queue
       WHERE company_id = ? AND type = ? AND status = 'pending'

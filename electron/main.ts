@@ -1,12 +1,19 @@
 import { app, BrowserWindow, ipcMain, globalShortcut, Menu, dialog, screen } from 'electron'
 import { exec } from 'child_process'
-import { existsSync, mkdirSync, appendFileSync } from 'fs'
-import { join, dirname } from 'path'
+import { existsSync, mkdirSync, appendFileSync, copyFileSync, writeFileSync, unlinkSync } from 'fs'
+import { join, dirname, resolve } from 'path'
 import os from 'os'
 import type Database from 'better-sqlite3'
 import Store from 'electron-store'
 
 import { getDeviceUID, getDeviceInfo } from './device'
+import {
+  DB_FILE_NAME,
+  getDbDir,
+  getDbFilePath,
+  resolveDbFile,
+  setDbDir,
+} from './dbLocation'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
 import {
@@ -289,6 +296,7 @@ let mainWindow: BrowserWindow | null = null
 let customerWindow: BrowserWindow | null = null
 let latestSecondScreenPayload: unknown = null
 let isAppQuitting = false
+let skipScheduledUpdate = false
 
 type ExitCheckResult = { canExit: boolean; heldCount: number } | null
 
@@ -311,6 +319,17 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
       const result = await runExitCheck(win)
       if (result && !result.canExit) {
         notifyExitBlocked(win, result.heldCount)
+        return
+      }
+      const pending = store.get('pendingAdminUpdate') as { mode?: string; is_mandatory?: boolean } | undefined
+      if (
+        !skipScheduledUpdate
+        && pending
+        && typeof pending === 'object'
+        && (pending.mode === 'on_close' || pending.is_mandatory)
+      ) {
+        skipScheduledUpdate = true
+        win.webContents.send('update:run-scheduled')
         return
       }
       isAppQuitting = true
@@ -533,16 +552,36 @@ function pushSecondScreenPayload(payload: unknown) {
   }
 }
 
+function liveSqlite(getSqlite: () => Database.Database): Database.Database {
+  return new Proxy({} as Database.Database, {
+    get(_target, prop) {
+      const real = getSqlite() as unknown as Record<PropertyKey, unknown>
+      const value = real[prop]
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(real)
+        : value
+    },
+  })
+}
+
 if (process.platform === 'win32') {
   app.setAppUserModelId('tr.bolutekno.btpos')
 }
 
 app.whenReady().then(async () => {
-  const savedDbDir = (store.get('db_path') as string | undefined)?.trim()
-  const dbDir = savedDbDir && savedDbDir.length > 0 ? savedDbDir : app.getPath('userData')
-  const { initDatabase, getSqlite } = await import('../db/index')
-  initDatabase(join(dbDir, 'btpos.db'))
-  const db = getSqlite()
+  const legacyDir = (store.get('db_path') as string | undefined)?.trim() || null
+  const located = resolveDbFile(legacyDir)
+  if (located.migrated) store.delete('db_path')
+  console.log(`[db] konum: ${located.file} (kaynak: ${located.source})`)
+  const { openDb, getSqlite } = await import('../db/index')
+  try {
+    openDb(located.file)
+  } catch (e) {
+    dialog.showErrorBox('BTPOS', e instanceof Error ? e.message : String(e))
+    app.quit()
+    return
+  }
+  const db = liveSqlite(getSqlite)
   db.exec(`
     CREATE TABLE IF NOT EXISTS payment_device_settings (
       id                TEXT PRIMARY KEY,
@@ -759,6 +798,57 @@ app.whenReady().then(async () => {
     return result.canceled ? null : result.filePaths[0]
   })
 
+  ipcMain.handle('db:selectFolder', async () => {
+    const r = await dialog.showOpenDialog({
+      title: 'Veritabanı klasörünü seçin',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: getDbDir(),
+    })
+    return r.canceled ? null : r.filePaths[0]
+  })
+
+  ipcMain.handle('db:setLocation', async (_e, dir: string, opts?: { moveExisting?: boolean }) => {
+    const folder = String(dir ?? '').trim()
+    if (!folder) return { success: false, message: 'Klasör boş' }
+    try {
+      mkdirSync(folder, { recursive: true })
+      const probe = join(folder, '.btpos-write-test')
+      writeFileSync(probe, 'ok')
+      unlinkSync(probe)
+    } catch {
+      return { success: false, message: `Bu klasöre yazılamıyor: ${folder}` }
+    }
+
+    const { openDb, getSqlite } = await import('../db/index')
+    const oldFile = getDbFilePath()
+    const newFile = join(folder, DB_FILE_NAME)
+    if (resolve(oldFile) === resolve(newFile)) return { success: true, path: newFile }
+
+    const targetExists = existsSync(newFile)
+    const prevDir = getDbDir()
+    try {
+      if (opts?.moveExisting && !targetExists && existsSync(oldFile)) {
+        getSqlite().pragma('wal_checkpoint(TRUNCATE)')
+        getSqlite().close()
+        copyFileSync(oldFile, newFile)
+      }
+      setDbDir(folder)
+      openDb(newFile)
+      console.log(`[db] konum: ${newFile} (kaynak: db-location.json)`)
+      return { success: true, path: newFile, existed: targetExists }
+    } catch (e) {
+      try {
+        setDbDir(prevDir)
+        openDb(getDbFilePath())
+      } catch (restoreErr) {
+        console.error('[db] eski konum geri açılamadı:', restoreErr)
+      }
+      return { success: false, message: String(e) }
+    }
+  })
+
+  ipcMain.handle('db:getLocation', () => getDbFilePath())
+
   ipcMain.handle('app:reinitDb', async (_e, newPath: string) => {
     try {
       const { reinitDatabase } = await import('../db/index')
@@ -836,6 +926,32 @@ app.whenReady().then(async () => {
   ipcMain.handle('store:set', (_e, key, value) => store.set(key, value))
   ipcMain.handle('device:uid', () => getDeviceUID())
   ipcMain.handle('app:version', () => app.getVersion())
+
+  ipcMain.handle('update:getVersion', () => app.getVersion())
+  ipcMain.handle('update:prepare', async (_e, baseUrl: string, targetVersion: string) => {
+    const { prepareUpdate } = await import('./updater')
+    const info = await prepareUpdate(baseUrl, targetVersion)
+    return { version: info.version }
+  })
+  ipcMain.handle('update:download', async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (!win) throw new Error('pencere yok')
+    const { downloadUpdate } = await import('./updater')
+    await downloadUpdate(win)
+  })
+  ipcMain.handle('update:install', async () => {
+    const { installNow } = await import('./updater')
+    installNow()
+  })
+
+  ipcMain.handle('db:userVersion', async () => {
+    const { getDbUserVersion } = await import('../db/index')
+    return getDbUserVersion()
+  })
+  ipcMain.handle('db:backupNow', async (_e, label: string) => {
+    const { backupDatabase } = await import('../db/index')
+    return backupDatabase(String(label ?? 'manual'))
+  })
   ipcMain.handle('app:hostname', () => os.hostname())
 
   ipcMain.handle('db:saveProducts', async (_e, prods) => {

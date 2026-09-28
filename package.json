@@ -1,6 +1,6 @@
 {
   "name": "btpos-pos",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "BTPOS POS Kasa Yazılımı",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -48,6 +48,7 @@
     "clsx": "^2.1.0",
     "drizzle-orm": "^0.29.4",
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
     "jimp": "^1.6.1",
     "lucide-react": "^0.321.0",
     "pdfjs-dist": "^3.11.174",
@@ -87,11 +88,21 @@
     "win": {
       "target": "nsis",
       "icon": "src/assets/logo_bt.png",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "artifactName": "BTPOS-Setup-${version}.${ext}"
     },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://example.invalid/btpos"
+      }
+    ],
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
     }
   }
 }

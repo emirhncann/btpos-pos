@@ -30,6 +30,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
   const [loginStage, setLoginStage] = useState<LoginStage>('idle')
   const [showNumpad, setShowNumpad] = useState(false)
   const [numpadTarget, setNumpadTarget] = useState<'code' | 'password'>('password')
+  const [appVersion, setAppVersion] = useState('')
   const { dialogProps, showError } = useAlertDialog()
 
   const barcodeBuffer   = useRef('')
@@ -39,6 +40,10 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
 
   useEffect(() => {
     codeRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    void window.electron.app.version().then(setAppVersion).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -536,6 +541,21 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
         </svg>
         <span>Programı Kapat</span>
       </button>
+
+      {appVersion && (
+        <div style={{
+          position: 'fixed',
+          bottom: 18,
+          left: 0,
+          right: 0,
+          textAlign: 'center',
+          fontSize: 12,
+          color: '#6B7280',
+          pointerEvents: 'none',
+        }}>
+          v{appVersion}
+        </div>
+      )}
 
       <AlertDialog {...dialogProps} />
     </div>

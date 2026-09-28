@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as schema from './schema'
@@ -9,13 +9,47 @@ import { migrateSalesReceiptNo } from './migrations'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
+export const SCHEMA_VERSION = 1
+
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
   return rawSqlite
 }
 
+export function getDbUserVersion(): number {
+  return Number(getSqlite().pragma('user_version', { simple: true }))
+}
+
+/** Açık veritabanının anlık kopyası. Son 5 yedek tutulur. */
+export function backupDatabase(label: string): string {
+  const sqlite = getSqlite()
+  sqlite.pragma('wal_checkpoint(TRUNCATE)')
+  const src = sqlite.name
+  const dir = join(dirname(src), 'backups')
+  fs.mkdirSync(dir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const safe = label.replace(/[^a-zA-Z0-9._-]+/g, '-')
+  const dest = join(dir, `btpos-${stamp}-${safe}.db`)
+  fs.copyFileSync(src, dest)
+  const old = fs.readdirSync(dir)
+    .filter(n => n.startsWith('btpos-') && n.endsWith('.db'))
+    .sort()
+  while (old.length > 5) {
+    const name = old.shift()
+    if (name) fs.unlinkSync(join(dir, name))
+  }
+  return dest
+}
+
 export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
   const sqlite = new Database(dbFile)
+  const userVersion = Number(sqlite.pragma('user_version', { simple: true }))
+  if (userVersion > SCHEMA_VERSION) {
+    sqlite.close()
+    throw new Error(
+      `Bu veritabanı daha yeni bir sürüme ait. Lütfen şema ${userVersion} ile gelen sürümü veya üzerini kurun.`,
+    )
+  }
   rawSqlite = sqlite
 
   sqlite.pragma('journal_mode = WAL')
@@ -266,15 +300,13 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
     );
   `)
 
+  sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
+
   return db
 }
 
-/** @deprecated Ana süreçte doğrudan {@link initDatabase} kullanın. */
-export function initDB(): ReturnType<typeof drizzle> {
-  return initDatabase(join(app.getPath('userData'), 'btpos.db'))
-}
-
-export function reinitDatabase(customPath?: string): void {
+/** Bağlantıyı kapatıp dosyayı açar. Modül yüklenirken çağrılmaz. */
+export function openDb(filePath: string): ReturnType<typeof drizzle> {
   try {
     rawSqlite?.close()
   } catch {
@@ -282,13 +314,25 @@ export function reinitDatabase(customPath?: string): void {
   }
   rawSqlite = null
   db = undefined
+  const dir = join(filePath, '..')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  const opened = initDatabase(filePath)
+  console.log('[db] açıldı:', filePath)
+  return opened
+}
 
+/** @deprecated Ana süreçte doğrudan {@link openDb} kullanın. */
+export function initDB(): ReturnType<typeof drizzle> {
+  return openDb(join(app.getPath('userData'), 'btpos.db'))
+}
+
+export function reinitDatabase(customPath?: string): void {
   const dbDir = customPath?.trim() ? customPath.trim() : app.getPath('userData')
-  const dbFile = join(dbDir, 'btpos.db')
-  if (!fs.existsSync(dbDir)) {
-    fs.mkdirSync(dbDir, { recursive: true })
-  }
-  initDatabase(dbFile)
+  openDb(join(dbDir, 'btpos.db'))
+}
+
+export function getDb(): Database.Database {
+  return getSqlite()
 }
 
 function migrateCashiersCompanyId(sqlite: Database.Database) {
@@ -641,6 +685,42 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       payment_mediator          INTEGER NOT NULL,
       synced_at                 TEXT    NOT NULL,
       UNIQUE(terminal_id, payment_provider_brand_id)
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS scale_settings (
+      id        INTEGER PRIMARY KEY DEFAULT 1,
+      port_path TEXT,
+      baud_rate INTEGER DEFAULT 9600,
+      enabled   INTEGER DEFAULT 0
+    )
+  `)
+  sqlite.prepare('INSERT OR IGNORE INTO scale_settings (id) VALUES (1)').run()
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cart_draft (
+      id          TEXT PRIMARY KEY DEFAULT 'current',
+      company_id  TEXT,
+      terminal_id TEXT,
+      cashier_id  TEXT,
+      cart        TEXT NOT NULL DEFAULT '[]',
+      customer    TEXT,
+      saved_at    TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS printer_settings (
+      id           TEXT PRIMARY KEY,
+      terminal_id  TEXT,
+      printer_type TEXT DEFAULT 'usb',
+      printer_name TEXT,
+      printer_ip   TEXT,
+      printer_port INTEGER DEFAULT 9100,
+      paper_width  INTEGER DEFAULT 80,
+      is_active    INTEGER DEFAULT 1,
+      updated_at   TEXT
     )
   `)
 

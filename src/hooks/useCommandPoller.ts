@@ -23,6 +23,7 @@ export interface CommandHandlers {
   onMessage:            (text: string, duration?: number) => void
   onRestart:            () => void
   onLock:               (reason?: string) => void
+  onUpdateApp:          (payload: Record<string, unknown>) => Promise<void>
 }
 
 const SYNC_KINDS = new Set([
@@ -192,6 +193,10 @@ export function useCommandPoller(
 
             case 'lock':
               h.onLock(cmd.payload.reason ? String(cmd.payload.reason) : undefined)
+              break
+
+            case 'update_app':
+              await h.onUpdateApp(cmd.payload ?? {})
               break
 
             default:

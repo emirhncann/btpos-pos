@@ -65,6 +65,14 @@ declare global {
         selectFolder: () => Promise<string | null>
         reinitDb:     (path: string) => Promise<{ success: boolean; error?: string }>
       }
+      update: {
+        getVersion: () => Promise<string>
+        prepare: (baseUrl: string, targetVersion: string) => Promise<{ version: string }>
+        download: () => Promise<void>
+        install: () => Promise<void>
+        onProgress: (cb: (percent: number) => void) => () => void
+        onRunScheduled: (cb: () => void) => () => void
+      }
       window: {
         isFullscreen:     () => Promise<boolean>
         toggleFullscreen: () => Promise<void>
@@ -112,6 +120,16 @@ declare global {
         onData: (listener: (payload: SecondScreenPayload) => void) => () => void
       }
       db: {
+        selectFolder: () => Promise<string | null>
+        setLocation: (dir: string, opts?: { moveExisting?: boolean }) => Promise<{
+          success: boolean
+          path?: string
+          existed?: boolean
+          message?: string
+        }>
+        getLocation: () => Promise<string>
+        userVersion: () => Promise<number>
+        backupNow: (label: string) => Promise<string>
         saveProducts:       (products: unknown[]) => Promise<number>
         getProducts:        () => Promise<ProductRow[]>
         saveSale:           (sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult) => Promise<SaveSaleResult>
@@ -162,7 +180,7 @@ declare global {
         enqueueOperation:  (params: {
           id: string
           companyId: string
-          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device'
+          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report'
           payload: Record<string, unknown>
           label?: string
           status?: 'pending' | 'pending_dayend'
@@ -374,7 +392,7 @@ declare global {
   interface OperationQueueRow {
     id:          string
     companyId:   string
-    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
+    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report'
     payload:     string
     status:      'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
     attempts:    number
