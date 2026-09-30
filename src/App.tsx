@@ -192,7 +192,7 @@ export default function App() {
   const pollTerminalId =
     (state === 'dashboard' || state === 'pos') && terminalId && companyId ? terminalId : null
 
-  useCommandPoller(pollTerminalId, merkezHandlers, {
+  const { pollNow, isPolling: commandPolling } = useCommandPoller(pollTerminalId, merkezHandlers, {
     onCommandPersisted: () => {
       setCmdPollTick(t => t + 1)
       setHasDeferredCommand(false)
@@ -452,6 +452,8 @@ export default function App() {
       cartSettings={cartSettings}
       commandListenerActive={commandListenerActive}
       commandSyncing={commandSyncing}
+      commandPolling={commandPolling}
+      onPollCommands={pollNow}
       commandRecentlyReceived={showCommandIndicator}
       commandDeferred={hasDeferredCommand}
       customerDisplay={terminalSettings.customerDisplay !== false}

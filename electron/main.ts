@@ -580,9 +580,11 @@ if (process.platform === 'win32') {
 app.whenReady().then(async () => {
   pruneOldLogs()
   hookAppLog()
-  const legacyDir = (store.get('db_path') as string | undefined)?.trim() || null
-  const located = resolveDbFile(legacyDir)
-  if (located.migrated) store.delete('db_path')
+  const legacyDirs = ['db_path', 'dbPath'].map(key => {
+    const value = store.get(key)
+    return typeof value === 'string' ? value.trim() : ''
+  })
+  const located = await resolveDbFile(legacyDirs)
   console.log(`[db] konum: ${located.file} (kaynak: ${located.source})`)
   const { openDb, getSqlite } = await import('../db/index')
   try {

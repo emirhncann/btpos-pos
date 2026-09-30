@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { api } from '../lib/api'
 
 export type SyncMode = 'full' | 'diff'
@@ -59,6 +59,10 @@ interface UseCommandPollerOptions {
   isCartActive?: () => boolean
 }
 
+export type PollNowResult =
+  | { skipped: 'busy' | 'cooldown' }
+  | { count: number }
+
 export function useCommandPoller(
   terminalId: string | null,
   handlers: CommandHandlers,
@@ -67,6 +71,9 @@ export function useCommandPoller(
   const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const intervalRef = useRef<number>(30)
   const activeRef   = useRef(true)
+  const pollingRef  = useRef(false)
+  const lastManualRef = useRef(0)
+  const [isPolling, setIsPolling] = useState(false)
   const handlersRef = useRef(handlers)
   handlersRef.current = handlers
   const onPersistedRef = useRef(options?.onCommandPersisted)
@@ -75,182 +82,208 @@ export function useCommandPoller(
   onDeferredRef.current = options?.onCommandDeferred
   const isCartActiveRef = useRef(options?.isCartActive)
   isCartActiveRef.current = options?.isCartActive
+  const pollOnceRef = useRef<(source: 'timer' | 'manual') => Promise<PollNowResult>>(async () => ({ count: 0 }))
 
-  const poll = useCallback(async () => {
-    if (!terminalId || !activeRef.current) return
+  const scheduleNext = useCallback(() => {
+    if (!activeRef.current) return
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => { void pollOnceRef.current('timer').catch(() => {}) }, intervalRef.current * 1000)
+  }, [])
+
+  const doPoll = useCallback(async (): Promise<number> => {
+    if (!terminalId || !activeRef.current) return 0
 
     console.log('[POLL] çalışıyor', new Date().toLocaleTimeString())
 
-    try {
-      const res = await api.pollCommands(terminalId)
-      console.log('[POLL] komut sayısı:', res.commands?.length ?? 0)
+    const res = await api.pollCommands(terminalId)
+    console.log('[POLL] komut sayısı:', res.commands?.length ?? 0)
 
-      intervalRef.current = res.poll_interval ?? 30
+    intervalRef.current = res.poll_interval ?? 30
 
-      const h = handlersRef.current
-      if (res.is_locked) {
-        h.onLock(res.lock_reason ?? undefined)
+    const h = handlersRef.current
+    if (res.is_locked) {
+      h.onLock(res.lock_reason ?? undefined)
+    }
+
+    let processed = 0
+    for (const cmd of res.commands ?? []) {
+      const kind = normalizeCommandKind(cmd.command ?? '')
+      const mode = syncModeFromPayload(cmd.payload)
+      console.log('[POLL] komut:', kind, '| raw:', cmd.command, '| target:', cmd.target_id)
+
+      if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
+        console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
+        onDeferredRef.current?.(kind)
+        continue
       }
 
-      for (const cmd of res.commands ?? []) {
-        const kind = normalizeCommandKind(cmd.command ?? '')
-        const mode = syncModeFromPayload(cmd.payload)
-        console.log('[POLL] komut:', kind, '| raw:', cmd.command, '| target:', cmd.target_id)
+      processed += 1
+      try {
+        switch (kind) {
+          case 'sync_all':
+            await h.onSyncAll(mode)
+            break
 
-        if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
-          console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
-          onDeferredRef.current?.(kind)
-          continue
-        }
+          case 'sync_prices':
+            await h.onSyncPrices()
+            break
 
-        try {
-          switch (kind) {
-            case 'sync_all':
-              await h.onSyncAll(mode)
-              break
+          case 'sync_cashiers':
+            await h.onSyncCashiers(mode)
+            break
 
-            case 'sync_prices':
-              await h.onSyncPrices()
-              break
+          case 'sync_plu':
+            await h.onSyncPlu(mode)
+            break
 
-            case 'sync_cashiers':
-              await h.onSyncCashiers(mode)
-              break
+          case 'sync_customers':
+            await h.onSyncCustomers(mode)
+            break
 
-            case 'sync_plu':
-              await h.onSyncPlu(mode)
-              break
+          case 'sync_products':
+            await h.onSyncProducts(mode)
+            break
 
-            case 'sync_customers':
-              await h.onSyncCustomers(mode)
-              break
-
-            case 'sync_products':
-              await h.onSyncProducts(mode)
-              break
-
-            case 'sync_templates': {
-              console.log('[POLL][sync_templates] komut alındı:', {
-                targetId: cmd.target_id,
-                createdAt: cmd.created_at,
-                hasHandler: typeof h.onSyncTemplates === 'function',
-              })
-              if (typeof h.onSyncTemplates !== 'function') {
-                throw new Error('onSyncTemplates handler tanımlı değil — uygulamayı yeniden başlatın')
-              }
-              await h.onSyncTemplates()
-              console.log('[POLL][sync_templates] handler tamamlandı')
-              break
+          case 'sync_templates': {
+            console.log('[POLL][sync_templates] komut alındı:', {
+              targetId: cmd.target_id,
+              createdAt: cmd.created_at,
+              hasHandler: typeof h.onSyncTemplates === 'function',
+            })
+            if (typeof h.onSyncTemplates !== 'function') {
+              throw new Error('onSyncTemplates handler tanımlı değil — uygulamayı yeniden başlatın')
             }
-
-            case 'sync_settings':
-              console.log('[POLL][sync_settings] komut alındı:', {
-                targetId: cmd.target_id,
-                createdAt: cmd.created_at,
-              })
-              await h.onSyncSettings()
-              console.log('[POLL][sync_settings] handler tamamlandı')
-              setTimeout(async () => {
-                try {
-                  const s = await window.electron.db.getPosSettings()
-                  console.log('[POLL][sync_settings] 500ms sonra showPrice:', s.showPrice)
-                } catch (e) {
-                  console.warn('[POLL][sync_settings] 500ms kontrol hatası:', e)
-                }
-              }, 500)
-              setTimeout(async () => {
-                try {
-                  const s = await window.electron.db.getPosSettings()
-                  console.log('[POLL][sync_settings] 3000ms sonra showPrice:', s.showPrice)
-                } catch (e) {
-                  console.warn('[POLL][sync_settings] 3000ms kontrol hatası:', e)
-                }
-              }, 3000)
-              break
-
-            case 'sync_payment_brands':
-              await h.onSyncPaymentBrands()
-              break
-
-            case 'pair_pavo':
-              await h.onPairPavo(cmd.payload)
-              break
-
-            case 'logout':
-              h.onLogout()
-              break
-
-            case 'message':
-              h.onMessage(
-                String(cmd.payload.text ?? ''),
-                cmd.payload.duration ? Number(cmd.payload.duration) : undefined
-              )
-              break
-
-            case 'restart':
-              h.onRestart()
-              break
-
-            case 'lock':
-              h.onLock(cmd.payload.reason ? String(cmd.payload.reason) : undefined)
-              break
-
-            case 'update_app':
-              await h.onUpdateApp(cmd.payload ?? {})
-              break
-
-            default:
-              console.warn('Bilinmeyen komut:', cmd.command)
+            await h.onSyncTemplates()
+            console.log('[POLL][sync_templates] handler tamamlandı')
+            break
           }
 
-          await window.electron.db.saveCommandHistory({
-            id:         cmd.target_id,
-            command:    kind || cmd.command,
-            payload:    cmd.payload ?? {},
-            status:     'done',
-            receivedAt: cmd.created_at,
-            doneAt:     new Date().toISOString(),
-          }).catch(() => {})
+          case 'sync_settings':
+            console.log('[POLL][sync_settings] komut alındı:', {
+              targetId: cmd.target_id,
+              createdAt: cmd.created_at,
+            })
+            await h.onSyncSettings()
+            console.log('[POLL][sync_settings] handler tamamlandı')
+            setTimeout(async () => {
+              try {
+                const s = await window.electron.db.getPosSettings()
+                console.log('[POLL][sync_settings] 500ms sonra showPrice:', s.showPrice)
+              } catch (e) {
+                console.warn('[POLL][sync_settings] 500ms kontrol hatası:', e)
+              }
+            }, 500)
+            setTimeout(async () => {
+              try {
+                const s = await window.electron.db.getPosSettings()
+                console.log('[POLL][sync_settings] 3000ms sonra showPrice:', s.showPrice)
+              } catch (e) {
+                console.warn('[POLL][sync_settings] 3000ms kontrol hatası:', e)
+              }
+            }, 3000)
+            break
 
-          onPersistedRef.current?.()
+          case 'sync_payment_brands':
+            await h.onSyncPaymentBrands()
+            break
 
-          await api.ackCommand(cmd.target_id, 'done')
+          case 'pair_pavo':
+            await h.onPairPavo(cmd.payload)
+            break
 
-        } catch (cmdErr) {
-          const errMsg = cmdErr instanceof Error ? cmdErr.message : 'Bilinmeyen hata'
-          console.error('Komut işleme hatası:', cmd.command, errMsg)
-          await window.electron.db.saveCommandHistory({
-            id:         cmd.target_id,
-            command:    kind || cmd.command,
-            payload:    cmd.payload ?? {},
-            status:     'failed',
-            receivedAt: cmd.created_at,
-            doneAt:     new Date().toISOString(),
-          }).catch(() => {})
+          case 'logout':
+            h.onLogout()
+            break
 
-          onPersistedRef.current?.()
+          case 'message':
+            h.onMessage(
+              String(cmd.payload.text ?? ''),
+              cmd.payload.duration ? Number(cmd.payload.duration) : undefined
+            )
+            break
 
-          await api.ackCommand(cmd.target_id, 'failed', errMsg).catch(() => {})
+          case 'restart':
+            h.onRestart()
+            break
+
+          case 'lock':
+            h.onLock(cmd.payload.reason ? String(cmd.payload.reason) : undefined)
+            break
+
+          case 'update_app':
+            await h.onUpdateApp(cmd.payload ?? {})
+            break
+
+          default:
+            console.warn('Bilinmeyen komut:', cmd.command)
         }
-      }
 
-    } catch {
-      // API'ye ulaşılamazsa sessizce geç
-    } finally {
-      if (activeRef.current) {
-        timerRef.current = setTimeout(poll, intervalRef.current * 1000)
+        await window.electron.db.saveCommandHistory({
+          id:         cmd.target_id,
+          command:    kind || cmd.command,
+          payload:    cmd.payload ?? {},
+          status:     'done',
+          receivedAt: cmd.created_at,
+          doneAt:     new Date().toISOString(),
+        }).catch(() => {})
+
+        onPersistedRef.current?.()
+
+        await api.ackCommand(cmd.target_id, 'done')
+
+      } catch (cmdErr) {
+        const errMsg = cmdErr instanceof Error ? cmdErr.message : 'Bilinmeyen hata'
+        console.error('Komut işleme hatası:', cmd.command, errMsg)
+        await window.electron.db.saveCommandHistory({
+          id:         cmd.target_id,
+          command:    kind || cmd.command,
+          payload:    cmd.payload ?? {},
+          status:     'failed',
+          receivedAt: cmd.created_at,
+          doneAt:     new Date().toISOString(),
+        }).catch(() => {})
+
+        onPersistedRef.current?.()
+
+        await api.ackCommand(cmd.target_id, 'failed', errMsg).catch(() => {})
       }
     }
+
+    return processed
   }, [terminalId])
+
+  const pollOnce = useCallback(async (source: 'timer' | 'manual'): Promise<PollNowResult> => {
+    if (pollingRef.current) return { skipped: 'busy' }
+    pollingRef.current = true
+    setIsPolling(true)
+    try {
+      const count = await doPoll()
+      return { count }
+    } finally {
+      pollingRef.current = false
+      setIsPolling(false)
+      if (source === 'timer' || source === 'manual') scheduleNext()
+    }
+  }, [doPoll, scheduleNext])
+  pollOnceRef.current = pollOnce
+
+  const pollNow = useCallback(async (): Promise<PollNowResult> => {
+    const now = Date.now()
+    if (now - lastManualRef.current < 10_000) return { skipped: 'cooldown' }
+    lastManualRef.current = now
+    return pollOnce('manual')
+  }, [pollOnce])
 
   useEffect(() => {
     if (!terminalId) return
     activeRef.current = true
-    poll()
+    void pollOnce('timer').catch(() => {})
 
     return () => {
       activeRef.current = false
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [terminalId, poll])
+  }, [terminalId, pollOnce])
+
+  return { pollNow, isPolling }
 }

@@ -5,4 +5,4 @@ require("fs");
 require("path");
 require("os");
 require("electron-store");
-require("./main-DJCEBuQ7.js");
+require("./main-YfCm8N7j.js");

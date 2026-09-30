@@ -258,6 +258,8 @@ interface Props {
   cartSettings:    CartSettings
   commandListenerActive?: boolean
   commandSyncing?: boolean
+  commandPolling?: boolean
+  onPollCommands?: () => Promise<{ skipped: 'busy' | 'cooldown' } | { count: number }>
   commandRecentlyReceived?: boolean
   commandDeferred?: boolean
   customerDisplay?: boolean
@@ -651,6 +653,8 @@ export default function POSScreen({
   cartSettings,
   commandListenerActive = false,
   commandSyncing = false,
+  commandPolling = false,
+  onPollCommands,
   commandRecentlyReceived = false,
   commandDeferred = false,
   customerDisplay = true,
@@ -2119,13 +2123,49 @@ export default function POSScreen({
     : grandTotal
   const remaining = Math.max(0, parseFloat((dueTotal - paidTotal).toFixed(2)))
   const canComplete = remaining === 0 && paymentLines.length > 0
-  const commandIconAnimation = commandSyncing
+  const commandIconAnimation = commandPolling
+    ? 'merkezMailSpin 0.8s linear infinite'
+    : commandSyncing
     ? 'merkezMailPulse 0.9s ease-in-out infinite, merkezMailShake 1.4s ease-in-out infinite'
     : commandDeferred
       ? 'merkezMailWaitPulse 1s ease-in-out infinite, merkezMailShake 2s ease-in-out infinite'
       : commandRecentlyReceived
       ? 'merkezMailPulse 1.2s ease-in-out infinite'
       : 'merkezMailIdle 2.6s ease-in-out infinite'
+  const envelopeTapRef = useRef(0)
+  const [envelopeToast, setEnvelopeToast] = useState<string | null>(null)
+
+  async function handleManualPoll() {
+    if (!onPollCommands) return
+    try {
+      const result = await onPollCommands()
+      if ('skipped' in result) {
+        if (result.skipped === 'cooldown') {
+          setEnvelopeToast('Az önce kontrol edildi, lütfen birkaç saniye bekleyin')
+        }
+        return
+      }
+      setEnvelopeToast(result.count > 0 ? `${result.count} yeni komut alındı` : 'Yeni komut yok')
+    } catch {
+      setEnvelopeToast('Merkeze bağlanılamadı')
+    }
+  }
+
+  function onEnvelopeTap() {
+    const now = Date.now()
+    if (now - envelopeTapRef.current < 350) {
+      envelopeTapRef.current = 0
+      void handleManualPoll()
+      return
+    }
+    envelopeTapRef.current = now
+  }
+
+  useEffect(() => {
+    if (!envelopeToast) return
+    const timer = setTimeout(() => setEnvelopeToast(null), 2800)
+    return () => clearTimeout(timer)
+  }, [envelopeToast])
 
   useEffect(() => {
     if (!customerDisplay) return
@@ -4069,6 +4109,10 @@ export default function POSScreen({
           70%  { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
           100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
         }
+        @keyframes merkezMailSpin {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
         @keyframes pulse-yellow {
           0%, 100% { opacity: 1; }
           50%       { opacity: 0.7; }
@@ -4199,7 +4243,9 @@ export default function POSScreen({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <ConnectionDot status={conn} />
           {commandListenerActive && (
-            <span
+            <button
+              type="button"
+              onClick={onEnvelopeTap}
               title={
                 commandSyncing
                   ? 'Merkez komutu işleniyor'
@@ -4207,7 +4253,7 @@ export default function POSScreen({
                     ? 'Satış aktif: merkez komutu sırada bekliyor'
                     : (commandRecentlyReceived
                       ? 'Merkezden yeni komut alındı'
-                      : 'Merkez komutları dinleniyor'))
+                      : 'Komutları kontrol etmek için iki kez dokunun'))
               }
               style={{
                 display: 'inline-flex',
@@ -4217,14 +4263,18 @@ export default function POSScreen({
                 height: 22,
                 borderRadius: '50%',
                 fontSize: 12,
-                border: commandSyncing
+                border: commandPolling
+                  ? '1px solid #93C5FD'
+                  : commandSyncing
                   ? '1px solid #93C5FD'
                   : commandDeferred
                     ? '1px solid #FCD34D'
                   : commandRecentlyReceived
                     ? '1px solid #BFDBFE'
                     : '1px solid #4B5563',
-                background: commandSyncing
+                background: commandPolling
+                  ? '#1D4ED8'
+                  : commandSyncing
                   ? '#1D4ED8'
                   : commandDeferred
                     ? '#B45309'
@@ -4232,13 +4282,15 @@ export default function POSScreen({
                     ? '#2563EB'
                     : '#111827',
                 color: '#fff',
-                boxShadow: commandSyncing
+                boxShadow: commandPolling || commandSyncing
                   ? '0 0 0 4px rgba(37, 99, 235, 0.22)'
                   : commandDeferred
                     ? '0 0 0 4px rgba(245, 158, 11, 0.18)'
                   : 'none',
                 animation: commandIconAnimation,
                 position: 'relative',
+                padding: 0,
+                cursor: 'pointer',
               }}
             >
               ✉️
@@ -4256,7 +4308,7 @@ export default function POSScreen({
                   }}
                 />
               )}
-            </span>
+            </button>
           )}
           <div style={{
             fontSize:      13,
@@ -6583,7 +6635,45 @@ export default function POSScreen({
             overflow:       'hidden',
           }}>
 
-            {/* Satır 1: TEMİZLE + ⌫ */}
+            {/* Satır 1: numBuf göstergesi */}
+            <div style={{
+              flexShrink:     0,
+              height:         40,
+              borderRadius:   9,
+              border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#e5e7eb'}`,
+              background:     numBuf ? '#e8f5e9' : '#f9fafb',
+              display:        'flex',
+              alignItems:     'center',
+              justifyContent: 'center',
+              padding:        '0 8px',
+              overflow:       'hidden',
+              userSelect:     'none' as const,
+            }}>
+              <span style={{
+                fontSize: numBuf.length === 0
+                  ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                  : numBuf.length <= 7
+                    ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                    : numBuf.length <= 14
+                      ? 'clamp(12px, 1.1vw + 2px, 18px)'
+                      : numBuf.length <= 17
+                        ? 'clamp(10px, 0.95vw + 1px, 16px)'
+                        : 'clamp(8px, 0.8vw, 14px)',
+                fontWeight:    700,
+                color:         numBuf ? '#2e7d32' : '#9ca3af',
+                letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
+                whiteSpace:    'nowrap',
+                overflow:      'hidden',
+                textOverflow:  'ellipsis',
+                maxWidth:      '100%',
+                lineHeight:    1,
+                textAlign:     'center',
+              }}>
+                {numBuf || '—'}
+              </span>
+            </div>
+
+            {/* Satır 2: TEMİZLE + ⌫ */}
             <div style={{ display: 'flex', gap: 5, flexShrink: 0, height: 44 }}>
               <button
                 type="button"
@@ -6623,44 +6713,6 @@ export default function POSScreen({
                   gap:            6,
                 }}
               >⌫</button>
-            </div>
-
-            {/* Satır 2: numBuf göstergesi */}
-            <div style={{
-              flexShrink:     0,
-              height:         40,
-              borderRadius:   9,
-              border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#e5e7eb'}`,
-              background:     numBuf ? '#e8f5e9' : '#f9fafb',
-              display:        'flex',
-              alignItems:     'center',
-              justifyContent: 'center',
-              padding:        '0 8px',
-              overflow:       'hidden',
-              userSelect:     'none' as const,
-            }}>
-              <span style={{
-                fontSize: numBuf.length === 0
-                  ? 'clamp(15px, 1.5vw + 4px, 24px)'
-                  : numBuf.length <= 7
-                    ? 'clamp(15px, 1.5vw + 4px, 24px)'
-                    : numBuf.length <= 14
-                      ? 'clamp(12px, 1.1vw + 2px, 18px)'
-                      : numBuf.length <= 17
-                        ? 'clamp(10px, 0.95vw + 1px, 16px)'
-                        : 'clamp(8px, 0.8vw, 14px)',
-                fontWeight:    700,
-                color:         numBuf ? '#2e7d32' : '#9ca3af',
-                letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
-                whiteSpace:    'nowrap',
-                overflow:      'hidden',
-                textOverflow:  'ellipsis',
-                maxWidth:      '100%',
-                lineHeight:    1,
-                textAlign:     'center',
-              }}>
-                {numBuf || '—'}
-              </span>
             </div>
 
             {/* Numpad grid */}
@@ -7984,6 +8036,26 @@ export default function POSScreen({
                 <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
                   gap: 5, padding: '4px', boxSizing: 'border-box' as const, overflow: 'hidden' }}>
 
+                  <div style={{
+                    flexShrink: 0, height: 40, borderRadius: 9,
+                    border: `1.5px solid ${pendingAmount ? '#a5d6a7' : '#e5e7eb'}`,
+                    background: pendingAmount ? '#e8f5e9' : '#f9fafb',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 8px', overflow: 'hidden', userSelect: 'none' as const,
+                  }}>
+                    <span style={{
+                      fontSize: pendingAmount.length <= 7 ? 'clamp(15px, 1.5vw + 4px, 24px)'
+                        : pendingAmount.length <= 14 ? 'clamp(12px, 1.1vw + 2px, 18px)'
+                        : 'clamp(10px, 0.95vw + 1px, 16px)',
+                      fontWeight: 700,
+                      color: pendingAmount ? '#2e7d32' : '#9ca3af',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      maxWidth: '100%', lineHeight: 1, textAlign: 'center' as const,
+                    }}>
+                      {pendingAmount || '—'}
+                    </span>
+                  </div>
+
                   <div style={{ display: 'flex', gap: 5, flexShrink: 0, height: 44 }}>
                     <button type="button"
                       onClick={() => setPendingAmount('')}
@@ -8004,26 +8076,6 @@ export default function POSScreen({
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
                       }}>⌫</button>
-                  </div>
-
-                  <div style={{
-                    flexShrink: 0, height: 40, borderRadius: 9,
-                    border: `1.5px solid ${pendingAmount ? '#a5d6a7' : '#e5e7eb'}`,
-                    background: pendingAmount ? '#e8f5e9' : '#f9fafb',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: '0 8px', overflow: 'hidden', userSelect: 'none' as const,
-                  }}>
-                    <span style={{
-                      fontSize: pendingAmount.length <= 7 ? 'clamp(15px, 1.5vw + 4px, 24px)'
-                        : pendingAmount.length <= 14 ? 'clamp(12px, 1.1vw + 2px, 18px)'
-                        : 'clamp(10px, 0.95vw + 1px, 16px)',
-                      fontWeight: 700,
-                      color: pendingAmount ? '#2e7d32' : '#9ca3af',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                      maxWidth: '100%', lineHeight: 1, textAlign: 'center' as const,
-                    }}>
-                      {pendingAmount || '—'}
-                    </span>
                   </div>
 
                   <div style={{
@@ -8473,6 +8525,24 @@ export default function POSScreen({
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
         }}>
           Pavo: {pavoError}
+        </div>
+      )}
+
+      {envelopeToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: merkezToast || heldToast ? 72 : 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#1E3A8A',
+          color: 'white',
+          padding: '10px 20px',
+          borderRadius: 8,
+          fontSize: 13,
+          zIndex: 10002,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        }}>
+          {envelopeToast}
         </div>
       )}
 
