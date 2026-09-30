@@ -88,6 +88,7 @@
     "win": {
       "target": "nsis",
       "icon": "src/assets/logo_bt.png",
+      "executableName": "BTPOS",
       "signAndEditExecutable": false,
       "artifactName": "BTPOS-Setup-${version}.${ext}"
     },
@@ -98,11 +99,16 @@
       }
     ],
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowElevation": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "runAfterFinish": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "BTPOS",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     }
   }
 }

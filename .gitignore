@@ -12,6 +12,7 @@ release/
 .env.*
 
 # Loglar / geçici
+.btpos-dev/
 *.log
 .DS_Store
 Thumbs.db

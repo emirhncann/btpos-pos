@@ -20,7 +20,7 @@ export function getDeviceInfo() {
   return {
     device_name: os.hostname(),
     mac_address: getPrimaryMac(),
-    os_info:     `${os.type()} ${os.release()} (${os.arch()})`,
+    os_info:     `${os.type()} ${os.release()}`,
     device_uid:  getDeviceUID(),
   }
 }

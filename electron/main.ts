@@ -14,6 +14,7 @@ import {
   resolveDbFile,
   setDbDir,
 } from './dbLocation'
+import { appendDailyLog, dailyLogPath, pruneOldLogs } from './paths'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
 import {
@@ -36,17 +37,25 @@ function pavoLocalISOString(): string {
 }
 
 function getPavoLogPath(): string {
-  const exeDir  = dirname(process.execPath)
-  const logsDir = join(exeDir, 'logs')
-
-  if (!existsSync(logsDir)) {
-    mkdirSync(logsDir, { recursive: true })
-  }
-
-  const date = new Date().toISOString().slice(0, 10)
-  const logPath = join(logsDir, `pavo_${date}.txt`)
+  const logPath = dailyLogPath('pavo')
   logToDevTools('[pavo:log] Log dosyası:', logPath)
   return logPath
+}
+
+function hookAppLog() {
+  const write = (level: string, args: unknown[]) => {
+    try {
+      const text = args.map(a => {
+        if (typeof a === 'string') return a
+        try { return JSON.stringify(a) } catch { return String(a) }
+      }).join(' ')
+      appendDailyLog('btpos', `${new Date().toISOString()} ${level} ${text}`)
+    } catch { /* log yazılamazsa uygulamayı durdurma */ }
+  }
+  const orig = { log: console.log, warn: console.warn, error: console.error }
+  console.log = (...args: unknown[]) => { orig.log(...args); write('INFO', args) }
+  console.warn = (...args: unknown[]) => { orig.warn(...args); write('WARN', args) }
+  console.error = (...args: unknown[]) => { orig.error(...args); write('ERROR', args) }
 }
 
 function pavoTransactionHandle(serialNo: string, seq: number) {
@@ -569,6 +578,8 @@ if (process.platform === 'win32') {
 }
 
 app.whenReady().then(async () => {
+  pruneOldLogs()
+  hookAppLog()
   const legacyDir = (store.get('db_path') as string | undefined)?.trim() || null
   const located = resolveDbFile(legacyDir)
   if (located.migrated) store.delete('db_path')

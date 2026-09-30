@@ -24,7 +24,7 @@ function parseApiDefaultTemplateIds(raw: unknown): Record<string, string> | unde
 
 export const api = {
 
-  async activate(licenseKey: string, deviceUid: string, email: string, deviceInfo: DeviceInfo) {
+  async activate(licenseKey: string, deviceUid: string, email: string, deviceInfo: DeviceInfo, appVersion: string) {
     const res = await fetch(`${API_URL}/management/licenses/terminals/activate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -35,6 +35,7 @@ export const api = {
         device_name: deviceInfo.device_name,
         mac_address: deviceInfo.mac_address,
         os_info:     deviceInfo.os_info,
+        app_version: appVersion,
       }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)

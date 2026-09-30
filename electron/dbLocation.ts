@@ -1,14 +1,16 @@
 import { app } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import Database from 'better-sqlite3'
+import { getDefaultDbDir } from './paths'
 
 const CONFIG = () => path.join(app.getPath('userData'), 'db-location.json')
 export const DB_FILE_NAME = 'btpos.db'
 
-export type DbLocationSource = 'db-location.json' | 'varsayılan'
+export type DbLocationSource = 'db-location.json' | 'kurulum klasörü' | 'eski konumdan taşındı'
 
 export function defaultDbDir() {
-  return app.getPath('userData')
+  return getDefaultDbDir()
 }
 
 export function getDbDir(): string {
@@ -32,16 +34,45 @@ export function setDbDir(dir: string) {
   )
 }
 
-/** electron-store `db_path` bir kez json'a taşınır. */
+function copySqliteDb(src: string, dest: string) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  try {
+    const sqlite = new Database(src)
+    sqlite.pragma('wal_checkpoint(TRUNCATE)')
+    sqlite.close()
+  } catch (e) {
+    console.warn('[db] eski dosya checkpoint edilemedi, kopyalanıyor:', e)
+  }
+  fs.copyFileSync(src, dest)
+}
+
+/** db-location.json yoksa kurulum kökünü, yoksa eski AppData kaydını kullanır. Eski dosya silinmez. */
 export function resolveDbFile(legacyDir?: string | null): { file: string; source: DbLocationSource; migrated: boolean } {
   if (fs.existsSync(CONFIG())) {
     return { file: getDbFilePath(), source: 'db-location.json', migrated: false }
   }
-  const legacy = legacyDir?.trim()
-  if (legacy && fs.existsSync(legacy)) {
-    setDbDir(legacy)
-    console.log('[db] eski db_path taşındı:', legacy)
-    return { file: path.join(legacy, DB_FILE_NAME), source: 'db-location.json', migrated: true }
+
+  const rootFile = path.join(getDefaultDbDir(), DB_FILE_NAME)
+  if (fs.existsSync(rootFile)) {
+    return { file: rootFile, source: 'kurulum klasörü', migrated: false }
   }
-  return { file: path.join(defaultDbDir(), DB_FILE_NAME), source: 'varsayılan', migrated: false }
+
+  const candidates = [
+    legacyDir?.trim() ? path.join(legacyDir.trim(), DB_FILE_NAME) : '',
+    path.join(app.getPath('userData'), DB_FILE_NAME),
+  ].filter(Boolean)
+
+  for (const src of candidates) {
+    if (path.resolve(src) === path.resolve(rootFile)) continue
+    if (!fs.existsSync(src)) continue
+    try {
+      copySqliteDb(src, rootFile)
+      return { file: rootFile, source: 'eski konumdan taşındı', migrated: true }
+    } catch (e) {
+      console.error('[db] eski konum kopyalanamadı, eski dosya açılacak:', e)
+      return { file: src, source: 'eski konumdan taşındı', migrated: false }
+    }
+  }
+
+  return { file: rootFile, source: 'kurulum klasörü', migrated: false }
 }

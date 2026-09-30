@@ -4,7 +4,7 @@ import DbLocationPanel from '../components/DbLocationPanel'
 import { api } from '../lib/api'
 
 interface Props {
-  onActivated: (companyId: string) => void
+  onActivated: (companyId: string, hasHistory: boolean) => void
 }
 
 export default function ActivationScreen({ onActivated }: Props) {
@@ -28,7 +28,8 @@ export default function ActivationScreen({ onActivated }: Props) {
 
     try {
       const deviceInfo = await window.electron.device.info()
-      const result = await api.activate(licenseKey.trim(), deviceInfo.device_uid, email.trim(), deviceInfo)
+      const appVersion = await window.electron.app.version()
+      const result = await api.activate(licenseKey.trim(), deviceInfo.device_uid, email.trim(), deviceInfo, appVersion)
 
       if (!result.success) {
         setError(result.message || 'Aktivasyon başarısız.')
@@ -36,10 +37,13 @@ export default function ActivationScreen({ onActivated }: Props) {
       }
 
       const companyId = result.company_id
+      const terminalId = String(result.terminal_id ?? licenseKey.trim())
+      const hasHistory = result.has_history === true
 
       await window.electron.store.set('activated', true)
       await window.electron.store.set('company_id', companyId)
-      await window.electron.store.set('terminal_id', licenseKey.trim())
+      await window.electron.store.set('terminal_id', terminalId)
+      await window.electron.store.set('has_history', hasHistory)
       await window.electron.store.set('workplace_id', result.workplace_id ?? null)
       await window.electron.store.set('device_uid', deviceInfo.device_uid)
       await window.electron.store.set('device_name', deviceInfo.device_name)
@@ -48,7 +52,7 @@ export default function ActivationScreen({ onActivated }: Props) {
         await window.electron.store.set('expiry_date', result.expiry_date)
       }
 
-      onActivated(companyId)
+      onActivated(companyId, hasHistory)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Bağlantı hatası.'
       setError('Sunucuya ulaşılamadı: ' + msg)

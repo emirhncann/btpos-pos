@@ -1,10 +1,10 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import Database from 'better-sqlite3'
 import { dirname, join } from 'path'
-import { app } from 'electron'
 import * as fs from 'fs'
 import * as schema from './schema'
 import { migrateSalesReceiptNo } from './migrations'
+import { getDefaultDbDir } from '../electron/paths'
 
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
@@ -323,11 +323,11 @@ export function openDb(filePath: string): ReturnType<typeof drizzle> {
 
 /** @deprecated Ana süreçte doğrudan {@link openDb} kullanın. */
 export function initDB(): ReturnType<typeof drizzle> {
-  return openDb(join(app.getPath('userData'), 'btpos.db'))
+  return openDb(join(getDefaultDbDir(), 'btpos.db'))
 }
 
 export function reinitDatabase(customPath?: string): void {
-  const dbDir = customPath?.trim() ? customPath.trim() : app.getPath('userData')
+  const dbDir = customPath?.trim() ? customPath.trim() : getDefaultDbDir()
   openDb(join(dbDir, 'btpos.db'))
 }
 

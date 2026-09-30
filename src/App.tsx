@@ -9,16 +9,16 @@ import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
 import { useConnectionStatus } from './hooks/useConnectionStatus'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
-import { api } from './lib/api'
 import { sendPendingInvoices } from './lib/invoiceSend'
 import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
 import { useGlobalClickSound } from './hooks/useGlobalClickSound'
 import RestoreScreen from './screens/RestoreScreen'
+import InitialSyncScreen from './components/InitialSyncScreen'
 import UpdateBanner from './components/UpdateBanner'
 import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib/localSettings'
 import { maybeRunScheduledUpdate, reportAppVersion } from './lib/appUpdate'
 
-type AppState = 'loading' | 'activation' | 'restore' | 'cashier_login' | 'dashboard' | 'pos'
+type AppState = 'loading' | 'activation' | 'restore' | 'initial_sync' | 'cashier_login' | 'dashboard' | 'pos'
 
 const DEFAULT_CART_SETTINGS: CartSettings = {
   showBarkod: false,
@@ -298,29 +298,12 @@ export default function App() {
     }
   }
 
-  async function handleActivated(cId: string) {
+  async function handleActivated(cId: string, hasHistory: boolean) {
     setCompanyId(cId)
     const tid = await window.electron.store.get('terminal_id') as string | null
     setTerminalId(tid)
     window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
-
-    // Aktivasyon sonrası tek seferlik kasiyer çekimi
-    try {
-      const cashiers = await api.getCashiers(cId)
-      await window.electron.db.syncCashiersAcid(cashiers, cId, 'full')
-    } catch {
-      // Başarısız olursa sorun değil — sync_cashiers komutuyla gelecek
-    }
-
-    try {
-      const s = await window.electron.db.getPosSettings()
-      setPosSettings(s)
-      setTerminalSettings(s)
-    } catch {
-      /* mevcut default değerler kalır */
-    }
-
-    setState('restore')
+    setState(hasHistory ? 'restore' : 'initial_sync')
   }
 
   async function handleCashierLogin(c: CashierRow, groups: PluGroupCacheRow[]) {
@@ -370,6 +353,19 @@ export default function App() {
 
   if (state === 'activation')
     return <ActivationScreen onActivated={handleActivated} />
+
+  if (state === 'initial_sync' && companyId && terminalId)
+    return (
+      <InitialSyncScreen
+        companyId={companyId}
+        terminalId={terminalId}
+        onSettings={s => {
+          setPosSettings(s)
+          setTerminalSettings(s)
+        }}
+        onDone={() => setState('cashier_login')}
+      />
+    )
 
   if (state === 'restore' && companyId && terminalId)
     return (
