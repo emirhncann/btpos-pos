@@ -167,16 +167,16 @@ export function useCommandPoller(
             console.log('[POLL][sync_settings] handler tamamlandı')
             setTimeout(async () => {
               try {
-                const s = await window.electron.db.getPosSettings()
-                console.log('[POLL][sync_settings] 500ms sonra showPrice:', s.showPrice)
+                const s = await window.electron.db.getTerminalSettings()
+                console.log('[POLL][sync_settings] 500ms sonra invoiceType:', s.invoiceType)
               } catch (e) {
                 console.warn('[POLL][sync_settings] 500ms kontrol hatası:', e)
               }
             }, 500)
             setTimeout(async () => {
               try {
-                const s = await window.electron.db.getPosSettings()
-                console.log('[POLL][sync_settings] 3000ms sonra showPrice:', s.showPrice)
+                const s = await window.electron.db.getTerminalSettings()
+                console.log('[POLL][sync_settings] 3000ms sonra invoiceType:', s.invoiceType)
               } catch (e) {
                 console.warn('[POLL][sync_settings] 3000ms kontrol hatası:', e)
               }

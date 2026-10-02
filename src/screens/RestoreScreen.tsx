@@ -9,7 +9,7 @@ interface Props {
   companyId: string
   terminalId: string
   onDone: () => void
-  onSettings: (s: PosSettingsRow) => void
+  onSettings: () => void
 }
 
 type StepState = 'wait' | 'run' | 'ok' | 'warn' | 'fail'
@@ -76,15 +76,11 @@ export default function RestoreScreen({ companyId, terminalId, onDone, onSetting
     if (mode === 'replace') {
       patch('pos', 'run')
       try {
-        const raw = bundle.pos_settings
-        if (raw && typeof raw === 'object') {
-          const workplaceId = await window.electron.store.get('workplace_id').catch(() => null) as string | null
-          const mapped = raw && 'show_price' in (raw as object)
-            ? await api.getPosSettings(companyId, workplaceId, terminalId, null)
-            : raw as PosSettingsRow
-          await window.electron.db.savePosSettings(mapped)
-          onSettings(mapped)
-        }
+        const bundleSettings = await api.getSettingsBundle(terminalId)
+        const saved = await window.electron.db.syncSettingsBundle(bundleSettings, terminalId)
+        if (!saved.success) throw new Error(saved.error ?? 'Ayarlar yazılamadı')
+        await window.electron.devtools.refresh()
+        onSettings()
         patch('pos', 'ok')
       } catch (e) {
         patch('pos', 'fail', String(e))

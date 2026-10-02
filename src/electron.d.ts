@@ -110,7 +110,15 @@ declare global {
           triggerType: string
           data:        Record<string, Record<string, unknown>>
           templateId?: string
+          cashierId?:  string | null
         }) => Promise<TemplatePrintResult>
+      }
+      display: {
+        apply: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
+      }
+      devtools: {
+        refresh: () => Promise<{ enabled: boolean; expiresAt: string | null }>
+        open: () => Promise<{ success: boolean }>
       }
       secondScreen: {
         open: () => Promise<{ success: boolean; error?: string }>
@@ -145,13 +153,43 @@ declare global {
         updateHeldDocumentLabel(id: string, label: string): Promise<{ success: boolean }>
         savePluGroups:      (groups: unknown[]) => Promise<void>
         getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) => Promise<PluGroupCacheRow[]>
-        savePosSettings:    (settings: PosSettingsRow, cashierId?: string) => Promise<SyncResult>
-        getPosSettings:     (cashierId?: string) => Promise<PosSettingsRow>
-        updatePosWorkplaceTerminal: (data: Pick<
-          PosSettingsRow,
-          | 'terminalNumber' | 'workplaceName' | 'workplaceAddress' | 'workplacePhone'
-          | 'workplaceCity' | 'workplaceDistrict' | 'workplaceTaxOffice' | 'workplaceTaxNo'
-        >) => Promise<void>
+        getTerminalSettings: () => Promise<import('./lib/settingsModel').TerminalSettings>
+        getCashierSettings: (cashierId?: string | null) => Promise<import('./lib/settingsModel').CashierSettings>
+        syncSettingsBundle: (
+          bundle: import('./lib/settingsModel').SettingsBundle,
+          terminalId: string,
+        ) => Promise<SyncResult>
+        matchPaymentAccounts: (opts: {
+          cashAmount?: number
+          cardAmount?: number
+          cardAcquirerId?: string | null
+          cardByBank?: Record<string, { amount?: number; acquirerName?: string }>
+        }) => Promise<{
+          cash: {
+            id: string
+            payment_type: string
+            pavo_acquirer_id: string | null
+            isbasi_account_code: string
+            isbasi_account_name: string
+            isbasi_account_type: number
+            isbasi_account_id: string | null
+            is_default: boolean
+          } | null
+          cards: Array<{
+            acquirer_id: string
+            amount: number
+            account: {
+              id: string
+              payment_type: string
+              pavo_acquirer_id: string | null
+              isbasi_account_code: string
+              isbasi_account_name: string
+              isbasi_account_type: number
+              isbasi_account_id: string | null
+              is_default: boolean
+            } | null
+          }>
+        }>
         saveCommandHistory: (row: CommandHistoryRow) => Promise<void>
         getCommandHistory:  (limit?: number) => Promise<CommandHistoryRow[]>
         syncProductsAcid:   (items: ProductRow[], mode?: 'full' | 'diff') => Promise<SyncResult>
@@ -659,44 +697,6 @@ declare global {
     paper_width?:   number
     is_active?:     number | boolean
     updated_at?:    string
-  }
-
-  interface PosSettingsRow {
-    showPrice:            boolean
-    showCode:             boolean
-    showBarcode:          boolean
-    duplicateItemAction:  'increase_qty' | 'add_new'
-    minQtyPerLine:        number
-    allowLineDiscount:    boolean
-    allowDocDiscount:     boolean
-    maxLineDiscountPct:   number
-    maxDocDiscountPct:    number
-    pluCols:              number
-    pluRows:              number
-    fontSizeName:         number
-    fontSizePrice:        number
-    fontSizeCode:         number
-    source:               string
-    loginWithCode:        boolean
-    loginWithCard:        boolean
-    torbaCariId:          string | null
-    torbaCariName:        string | null
-    invoiceType:          'e_archive' | 'paper'
-    touchKeyboard?:       boolean
-    customerDisplay?:     boolean
-    printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
-    defaultTemplateIds?:  Record<string, string>
-    allowExitWithHeldDocs?: boolean
-    /** true = cari tahsilat/ödemede Pavo AdvanceSale kullan */
-    cariPaymentUsePavo?:  boolean
-    terminalNumber?:      string | null
-    workplaceName?:       string | null
-    workplaceAddress?:    string | null
-    workplacePhone?:      string | null
-    workplaceCity?:       string | null
-    workplaceDistrict?:   string | null
-    workplaceTaxOffice?:  string | null
-    workplaceTaxNo?:      string | null
   }
 
   type PrintBehavior = 'default' | 'ask' | 'none'

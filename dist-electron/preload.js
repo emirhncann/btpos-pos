@@ -71,6 +71,13 @@ electron.contextBridge.exposeInMainWorld("electron", {
     printPdf: (opts) => electron.ipcRenderer.invoke("templates:printPdf", opts),
     printWithBehavior: (opts) => electron.ipcRenderer.invoke("templates:printWithBehavior", opts)
   },
+  display: {
+    apply: (enabled) => electron.ipcRenderer.invoke("display:apply", enabled)
+  },
+  devtools: {
+    refresh: () => electron.ipcRenderer.invoke("devtools:refresh"),
+    open: () => electron.ipcRenderer.invoke("devtools:open")
+  },
   secondScreen: {
     open: () => electron.ipcRenderer.invoke("secondScreen:open"),
     update: (payload) => electron.ipcRenderer.invoke("secondScreen:update", payload),
@@ -103,9 +110,10 @@ electron.contextBridge.exposeInMainWorld("electron", {
     updateHeldDocumentLabel: (id, label) => electron.ipcRenderer.invoke("db:updateHeldDocumentLabel", id, label),
     savePluGroups: (groups) => electron.ipcRenderer.invoke("db:savePluGroups", groups),
     getPluGroups: (companyId, wpId, cashierId) => electron.ipcRenderer.invoke("db:getPluGroups", companyId, wpId, cashierId),
-    savePosSettings: (settings, cashierId) => electron.ipcRenderer.invoke("db:savePosSettings", settings, cashierId),
-    getPosSettings: (cashierId) => electron.ipcRenderer.invoke("db:getPosSettings", cashierId),
-    updatePosWorkplaceTerminal: (data) => electron.ipcRenderer.invoke("db:updatePosWorkplaceTerminal", data),
+    getTerminalSettings: () => electron.ipcRenderer.invoke("db:getTerminalSettings"),
+    getCashierSettings: (cashierId) => electron.ipcRenderer.invoke("db:getCashierSettings", cashierId),
+    syncSettingsBundle: (bundle, terminalId) => electron.ipcRenderer.invoke("db:syncSettingsBundle", bundle, terminalId),
+    matchPaymentAccounts: (opts) => electron.ipcRenderer.invoke("db:matchPaymentAccounts", opts),
     saveCommandHistory: (row) => electron.ipcRenderer.invoke("db:saveCommandHistory", row),
     getCommandHistory: (limit) => electron.ipcRenderer.invoke("db:getCommandHistory", limit),
     syncProductsAcid: (items, mode) => electron.ipcRenderer.invoke("db:syncProductsAcid", items, mode ?? "full"),

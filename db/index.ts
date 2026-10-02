@@ -4,12 +4,13 @@ import { dirname, join } from 'path'
 import * as fs from 'fs'
 import * as schema from './schema'
 import { migrateSalesReceiptNo } from './migrations'
+import { migrateLegacySettings } from './settingsCache'
 import { getDefaultDbDir } from '../electron/paths'
 
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -229,7 +230,6 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       font_size_price       INTEGER DEFAULT 13,
       font_size_code        INTEGER DEFAULT 9,
       source                TEXT DEFAULT 'default',
-      plu_mode              TEXT DEFAULT 'terminal',
       login_with_code       INTEGER DEFAULT 1,
       login_with_card       INTEGER DEFAULT 1,
       synced_at             TEXT,
@@ -269,9 +269,6 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
   migrateHeldDocuments(sqlite)
 
   sqlite.exec(`
-    INSERT OR IGNORE INTO pos_settings_cache (id, show_price, show_code, show_barcode, duplicate_item_action, min_qty_per_line, allow_line_discount, allow_doc_discount, max_line_discount_pct, max_doc_discount_pct, plu_cols, plu_rows, font_size_name, font_size_price, font_size_code, source)
-    VALUES ('local', 1, 1, 0, 'increase_qty', 1, 1, 1, 100, 100, 4, 3, 12, 13, 9, 'default');
-
     CREATE TABLE IF NOT EXISTS pos_settings_temp (
       id                    TEXT PRIMARY KEY,
       cashier_id            TEXT,
@@ -290,7 +287,6 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       font_size_price       INTEGER DEFAULT 13,
       font_size_code        INTEGER DEFAULT 9,
       source                TEXT DEFAULT 'default',
-      plu_mode              TEXT DEFAULT 'terminal',
       login_with_code       INTEGER DEFAULT 1,
       login_with_card       INTEGER DEFAULT 0,
       synced_at             TEXT,
@@ -300,6 +296,7 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
     );
   `)
 
+  migrateLegacySettings(sqlite)
   sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
 
   return db
@@ -372,7 +369,6 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_name', 'font_size_name INTEGER DEFAULT 12')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_price', 'font_size_price INTEGER DEFAULT 13')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_code', 'font_size_code INTEGER DEFAULT 9')
-  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_mode', `plu_mode TEXT DEFAULT 'terminal'`)
   addColumnIfMissing(sqlite, 'plu_groups_cache', 'terminal_id', 'terminal_id TEXT')
   addColumnIfMissing(sqlite, 'plu_groups_cache', 'cashier_id', 'cashier_id TEXT')
   addColumnIfMissing(sqlite, 'plu_groups_temp', 'terminal_id', 'terminal_id TEXT')
@@ -506,6 +502,10 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
 
   migrateSalesReceiptNo(sqlite)
 
+  // Kolon sırası düzeltmesi tabloyu yeniden kurup işyeri kolonlarını düşürebilir.
+  // Kopya, o silmeden önce alınır; tablolar doluysa tekrar kopyalanmaz.
+  migrateLegacySettings(sqlite)
+
   // Sprint 24 — pos_settings_cache kolon sırası düzeltmesi
   // cashier_id migration ile sona eklenmişti, fiziksel sıra yanlıştı.
   // Tabloyu yeniden oluşturarak kolon sırasını düzelt.
@@ -513,8 +513,13 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
     const cols = sqlite.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string; cid: number }[]
     const cashierCol = cols.find(c => c.name === 'cashier_id')
 
-    // cashier_id 2. sırada değilse (cid=1) tablo yeniden oluşturulmalı
-    if (cashierCol && cashierCol.cid !== 1) {
+    const settingsCopied = sqlite.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'terminal_settings_cache'`,
+    ).get() as { name?: string } | undefined
+    const keepLegacyBackup = Boolean(settingsCopied?.name)
+    // cashier_id 2. sırada değilse (cid=1) tablo yeniden oluşturulmalı.
+    // Yeni tablolara kopya alındıysa eski tablo yedek kalsın; yeniden kurma onu siler.
+    if (cashierCol && cashierCol.cid !== 1 && !keepLegacyBackup) {
       sqlite.exec(`
         -- Mevcut veriyi yedekle
         CREATE TABLE IF NOT EXISTS pos_settings_cache_backup AS
@@ -542,7 +547,6 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           font_size_price       INTEGER DEFAULT 13,
           font_size_code        INTEGER DEFAULT 9,
           source                TEXT DEFAULT 'default',
-          plu_mode              TEXT DEFAULT 'terminal',
           login_with_code       INTEGER DEFAULT 1,
           login_with_card       INTEGER DEFAULT 0,
           synced_at             TEXT,
@@ -558,7 +562,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           allow_line_discount, allow_doc_discount,
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-          source, plu_mode, login_with_code, login_with_card, synced_at,
+          source, login_with_code, login_with_card, synced_at,
           torba_cari_id, torba_cari_name, invoice_type
         )
         SELECT
@@ -567,7 +571,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
           allow_line_discount, allow_doc_discount,
           max_line_discount_pct, max_doc_discount_pct,
           plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-          source, plu_mode, login_with_code, login_with_card, synced_at,
+          source, login_with_code, login_with_card, synced_at,
           torba_cari_id, torba_cari_name, 'e_archive'
         FROM pos_settings_cache_backup;
 

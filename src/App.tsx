@@ -17,6 +17,7 @@ import InitialSyncScreen from './components/InitialSyncScreen'
 import UpdateBanner from './components/UpdateBanner'
 import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib/localSettings'
 import { maybeRunScheduledUpdate, reportAppVersion } from './lib/appUpdate'
+import { reloadSettings, setActiveCashierId, useSettings } from './hooks/useSettings'
 
 type AppState = 'loading' | 'activation' | 'restore' | 'initial_sync' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -48,46 +49,7 @@ export default function App() {
   const [pluGroups, setPluGroups]       = useState<PluGroupCacheRow[]>([])
   const [syncedEnabledBrands, setSyncedEnabledBrands] = useState<PaymentProviderBrand[] | null>(null)
   const [syncedBarcodeFormats, setSyncedBarcodeFormats] = useState<BarcodeFormatRow[] | null>(null)
-  const [posSettings, setPosSettings]   = useState<PosSettingsRow>({
-    showPrice: true, showCode: true, showBarcode: false,
-    duplicateItemAction: 'increase_qty',
-    minQtyPerLine: 1,
-    allowLineDiscount: true,
-    allowDocDiscount: true,
-    maxLineDiscountPct: 100,
-    maxDocDiscountPct: 100,
-    pluCols: 4,
-    pluRows: 3,
-    fontSizeName: 12,
-    fontSizePrice: 13,
-    fontSizeCode: 9,
-    source: 'default',
-    loginWithCode: true,
-    loginWithCard: false,
-    allowExitWithHeldDocs: true,
-    cariPaymentUsePavo: false,
-    customerDisplay: true,
-  })
-  const [terminalSettings, setTerminalSettings] = useState<PosSettingsRow>({
-    showPrice: true, showCode: true, showBarcode: false,
-    duplicateItemAction: 'increase_qty',
-    minQtyPerLine: 1,
-    allowLineDiscount: true,
-    allowDocDiscount: true,
-    maxLineDiscountPct: 100,
-    maxDocDiscountPct: 100,
-    pluCols: 4,
-    pluRows: 3,
-    fontSizeName: 12,
-    fontSizePrice: 13,
-    fontSizeCode: 9,
-    source: 'default',
-    loginWithCode: true,
-    loginWithCard: false,
-    allowExitWithHeldDocs: true,
-    cariPaymentUsePavo: false,
-    customerDisplay: true,
-  })
+  const settings = useSettings()
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
   const [terminalLocked, setTerminalLocked] = useState(false)
   const [terminalLockReason, setTerminalLockReason] = useState<string | null>(null)
@@ -121,8 +83,7 @@ export default function App() {
     if (state === 'pos' || state === 'cashier_login') return
 
     window.__btpos_exit_check = async () => {
-      const settings = posSettings
-      const allowExit = settings?.allowExitWithHeldDocs ?? true
+      const allowExit = settings.cashier.allowExitWithHeldDocs
       if (allowExit) return { canExit: true, heldCount: 0 }
       if (!companyId) return { canExit: true, heldCount: 0 }
 
@@ -136,7 +97,7 @@ export default function App() {
     return () => {
       delete window.__btpos_exit_check
     }
-  }, [state, posSettings?.allowExitWithHeldDocs, companyId])
+  }, [state, settings.cashier.allowExitWithHeldDocs, companyId])
 
   const handleLogout = useCallback(() => {
     setCashier(null)
@@ -148,10 +109,7 @@ export default function App() {
     setMerkezToast(null)
     setCommandSyncing(false)
     setHasDeferredCommand(false)
-    // posSettings'i kasa default'una sıfırla — stale settings bir sonraki kasiyeri etkilemesin
-    window.electron.db.getPosSettings().then(s => {
-      setPosSettings(s)
-    }).catch(() => {})
+    setActiveCashierId(null)
     setState('cashier_login')
   }, [])
 
@@ -164,10 +122,7 @@ export default function App() {
       setCommandSyncing,
       onLogout: handleLogout,
       onShowMessage: showPopupMessage,
-      onSettingsUpdated: (s) => {
-        setPosSettings(s)
-        void window.electron.db.getPosSettings().then(setTerminalSettings).catch(() => {})
-      },
+      onSettingsUpdated: () => { void reloadSettings() },
       onLock: (reason) => {
         setTerminalLocked(true)
         setTerminalLockReason(reason ?? null)
@@ -186,7 +141,6 @@ export default function App() {
     showMerkezToast,
     showPopupMessage,
     setPluGroups,
-    setPosSettings,
   ])
 
   const pollTerminalId =
@@ -253,28 +207,18 @@ export default function App() {
 
   useEffect(() => {
     if (showSplash) return
-    const shouldKeepSecondScreen =
-      (state === 'dashboard' || state === 'pos') && terminalSettings.customerDisplay !== false
-    if (!shouldKeepSecondScreen) {
-      void window.electron.secondScreen.close().catch(() => {})
-      return
+    void window.electron.display.apply(settings.terminal.customerDisplay).catch(() => {})
+    if (!settings.terminal.customerDisplay || state !== 'dashboard') return
+    const payload: SecondScreenPayload = {
+      mode: 'cart_and_btpos_gif',
+      items: [],
+      discounts: [],
+      totals: { subtotal: 0, discountTotal: 0, grandTotal: 0, totalQty: 0 },
+      branding: { btposGif: 'logo.gif' },
+      updatedAt: new Date().toISOString(),
     }
-
-    void window.electron.secondScreen.open()
-      .then(() => {
-        if (state !== 'dashboard') return
-        const payload: SecondScreenPayload = {
-          mode: 'cart_and_btpos_gif',
-          items: [],
-          discounts: [],
-          totals: { subtotal: 0, discountTotal: 0, grandTotal: 0, totalQty: 0 },
-          branding: { btposGif: 'logo.gif' },
-          updatedAt: new Date().toISOString(),
-        }
-        return window.electron.secondScreen.update(payload)
-      })
-      .catch(() => {})
-  }, [state, showSplash, terminalSettings.customerDisplay])
+    void window.electron.secondScreen.update(payload).catch(() => {})
+  }, [state, showSplash, settings.terminal.customerDisplay])
 
   async function checkActivation() {
     const activated        = await window.electron.store.get('activated')
@@ -284,10 +228,7 @@ export default function App() {
     if (activated && storedCompanyId) {
       setCompanyId(storedCompanyId)
       setTerminalId(storedTerminalId)
-      window.electron.db.getPosSettings().then(s => {
-        setPosSettings(s)
-        setTerminalSettings(s)
-      }).catch(() => {})
+      void reloadSettings()
       window.electron.store.getCartSettings().then(setCartSettings).catch(() => {})
       setState('cashier_login')
       if (storedTerminalId) {
@@ -309,26 +250,14 @@ export default function App() {
   async function handleCashierLogin(c: CashierRow, groups: PluGroupCacheRow[]) {
     setCashier(c)
     setPluGroups(groups)
-    if (companyId) {
-      try {
-        const cached = await window.electron.db.getPosSettings(c.id)
-        setPosSettings(cached)
-      } catch { /* mevcut state kalır */ }
-    }
+    setActiveCashierId(c.id)
     setState('dashboard')
   }
 
   function handleStartSale() {
     window.electron.db.getProducts().then(async p => {
       setAllProducts(p)
-      let fresh: PosSettingsRow | undefined
-      try {
-        // Kasiyer bazlı settings oku
-        fresh = await window.electron.db.getPosSettings(cashier?.id)
-        setPosSettings(fresh)
-      } catch {
-        /* SQLite okunamazsa mevcut state kalır */
-      }
+      if (cashier?.id) setActiveCashierId(cashier.id)
       // PLU'yu da cashierId ile tazele
       if (companyId && cashier) {
         const wpRaw = await window.electron.store.get('workplace_id').catch(() => null)
@@ -359,10 +288,7 @@ export default function App() {
       <InitialSyncScreen
         companyId={companyId}
         terminalId={terminalId}
-        onSettings={s => {
-          setPosSettings(s)
-          setTerminalSettings(s)
-        }}
+        onSettings={() => { void reloadSettings() }}
         onDone={() => setState('cashier_login')}
       />
     )
@@ -372,10 +298,7 @@ export default function App() {
       <RestoreScreen
         companyId={companyId}
         terminalId={terminalId}
-        onSettings={s => {
-          setPosSettings(s)
-          setTerminalSettings(s)
-        }}
+        onSettings={() => { void reloadSettings() }}
         onDone={() => setState('cashier_login')}
       />
     )
@@ -385,7 +308,6 @@ export default function App() {
       <CashierLoginScreen
         companyId={companyId!}
         terminalId={terminalId!}
-        posSettings={terminalSettings}
         onLogin={handleCashierLogin}
       />
     )
@@ -414,7 +336,7 @@ export default function App() {
         onLogout={handleLogout}
         onShowMessage={showPopupMessage}
         onPluUpdated={setPluGroups}
-        onSettingsUpdated={setPosSettings}
+        onSettingsUpdated={() => { void reloadSettings() }}
         commandSyncing={commandSyncing}
         merkezToast={merkezToast}
         cmdPollTick={cmdPollTick}
@@ -437,7 +359,6 @@ export default function App() {
       cashier={cashier!}
       allProducts={allProducts}
       pluGroups={pluGroups}
-      posSettings={posSettings}
       syncedEnabledBrands={syncedEnabledBrands}
       syncedBarcodeFormats={syncedBarcodeFormats}
       onBack={() => {
@@ -456,7 +377,6 @@ export default function App() {
       onPollCommands={pollNow}
       commandRecentlyReceived={showCommandIndicator}
       commandDeferred={hasDeferredCommand}
-      customerDisplay={terminalSettings.customerDisplay !== false}
     />
     <UpdateBanner cartActive={cartActive} />
     </>

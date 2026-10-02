@@ -1,5 +1,6 @@
 import { API_URL, api, fetchPluGroupsFromServer } from '../lib/api'
 import { parseBarcodeFormatsResponse } from '../lib/barcodeFormat'
+import { parseSettingsBundle } from '../lib/settingsModel'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
@@ -61,7 +62,7 @@ export interface MerkezCommandHandlerDeps {
   setCommandSyncing:    (v: boolean) => void
   onLogout:             () => void
   onShowMessage:        (text: string) => void
-  onSettingsUpdated:    (s: PosSettingsRow) => void
+  onSettingsUpdated:    () => void
   onLock:               (reason?: string) => void
   showToast:            (msg: string) => void
   onPluUpdated:         (groups: PluGroupCacheRow[]) => void
@@ -152,32 +153,38 @@ export async function syncCashierPluOnLogin(
 
 async function syncSettings(
   companyId: string,
-  workplaceId: string | null,
+  _workplaceId: string | null,
   terminalId: string,
-  cashierId: string | null,
-  onSettingsUpdated: (s: PosSettingsRow) => void,
+  _cashierId: string | null,
+  onSettingsUpdated: () => void,
+  onBarcodeFormatsUpdated?: (formats: BarcodeFormatRow[]) => void,
 ): Promise<SyncResult> {
-  const terminalSettings = await api.getPosSettings(companyId, workplaceId, terminalId, null)
-  const tResult = await window.electron.db.savePosSettings(terminalSettings, undefined)
-  if (!tResult.success) return tResult
-
-  await window.electron.db.updatePosWorkplaceTerminal({
-    terminalNumber:    terminalSettings.terminalNumber ?? null,
-    workplaceName:      terminalSettings.workplaceName ?? null,
-    workplaceAddress:   terminalSettings.workplaceAddress ?? null,
-    workplacePhone:     terminalSettings.workplacePhone ?? null,
-    workplaceCity:      terminalSettings.workplaceCity ?? null,
-    workplaceDistrict:  terminalSettings.workplaceDistrict ?? null,
-    workplaceTaxOffice: terminalSettings.workplaceTaxOffice ?? null,
-    workplaceTaxNo:     terminalSettings.workplaceTaxNo ?? null,
-  })
-
-  if (cashierId) {
-    const cashierSettings = await api.getPosSettings(companyId, workplaceId, terminalId, cashierId)
-    await window.electron.db.savePosSettings(cashierSettings, cashierId)
-    onSettingsUpdated(cashierSettings)
-  } else {
-    onSettingsUpdated(terminalSettings)
+  const url = `${API_URL}/pos/settings/${terminalId}`
+  console.log('[sync_settings] url:', url)
+  const http = await fetch(url)
+  if (!http.ok) {
+    const body = await http.text().catch(() => '')
+    throw new Error(`Ayar sync HTTP ${http.status}: ${body.slice(0, 200)}`)
+  }
+  const res = await http.json() as Record<string, unknown>
+  const payload = res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+    && ((res.data as Record<string, unknown>).terminal || (res.data as Record<string, unknown>).terminal_info)
+    ? res.data as Record<string, unknown>
+    : res
+  console.log(
+    '[sync_settings] terminal:', JSON.stringify(payload.terminal),
+    'info:', JSON.stringify(payload.terminal_info),
+  )
+  const bundle = parseSettingsBundle(res)
+  const tResult = await window.electron.db.syncSettingsBundle(bundle, terminalId)
+  if (!tResult.success) throw new Error(tResult.error || 'Ayarlar terminal_settings_cache tablosuna yazılamadı')
+  const saved = await window.electron.db.getTerminalSettings()
+  console.log('[sync_settings] SQLite:', saved)
+  await window.electron.display.apply(Boolean(saved.customerDisplay))
+  await window.electron.devtools.refresh()
+  onSettingsUpdated()
+  if (bundle.barcodeFormats) {
+    onBarcodeFormatsUpdated?.(parseBarcodeFormatsResponse(bundle.barcodeFormats))
   }
 
   const localPavo = await window.electron.db.hasLocalPaymentDevice('pavo')
@@ -295,7 +302,8 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
           const workplaceId = await getWorkplaceId()
           const cashierId   = d.getCashierId()
           results.settings = await syncSettings(
-            d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated
+            d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated,
+            d.onBarcodeFormatsUpdated,
           )
         } catch (e) {
           console.warn('[sync_all] settings hatası:', e)
@@ -438,10 +446,10 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
     onSyncSettings: async () => {
       const workplaceId = await getWorkplaceId()
       const cashierId   = d.getCashierId()
-      const result = await syncSettings(
-        d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated
+      await syncSettings(
+        d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated,
+        d.onBarcodeFormatsUpdated,
       )
-      if (!result.success) throw new Error(result.error)
       d.showToast('Ayarlar güncellendi')
     },
 

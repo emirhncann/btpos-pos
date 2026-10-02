@@ -18,9 +18,23 @@ function customerRowToInvoicePayload(c: CustomerRow) {
   }
 }
 
-/** Cari seçilmediğinde fatura/iade için torba cari (POS ayarlarından) */
+async function withTerminalPayment(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const terminalId = String(await window.electron.store.get('terminal_id').catch(() => '') ?? '')
+  const cardByBank = payload.card_by_bank && typeof payload.card_by_bank === 'object'
+    ? payload.card_by_bank as Record<string, { amount?: number; acquirerName?: string }>
+    : {}
+  const paymentAccounts = await window.electron.db.matchPaymentAccounts({
+    cashAmount: Number(payload.cash_amount ?? 0),
+    cardAmount: Number(payload.card_amount ?? 0),
+    cardAcquirerId: payload.card_acquirer_id != null ? String(payload.card_acquirer_id) : null,
+    cardByBank,
+  })
+  return { ...payload, terminal_id: terminalId, payment_accounts: paymentAccounts }
+}
+
+/** Cari seçilmediğinde fatura/iade için torba cari (kasa ayarından) */
 export async function resolveTorbaCustomer(companyId: string): Promise<CustomerRow> {
-  const settings = await window.electron.db.getPosSettings()
+  const settings = await window.electron.db.getTerminalSettings()
   const torbaKey = settings.torbaCariId?.trim()
 
   if (torbaKey) {
@@ -72,7 +86,7 @@ export async function sendPendingInvoices(
   const pending = await window.electron.db.getPendingInvoices(true)
   if (pending.length === 0) return { ok: 0, fail: 0 }
 
-  const settings = await window.electron.db.getPosSettings()
+  const settings = await window.electron.db.getTerminalSettings()
   const invoiceType: 'e_archive' | 'paper' = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
   let torbaCari: {
     code?: string
@@ -234,7 +248,7 @@ export async function sendPendingInvoices(
         id:        crypto.randomUUID(),
         companyId,
         type:      'return_invoice',
-        payload: {
+        payload: await withTerminalPayment({
           sale_id:         returnSaleId,
           customer:        torbaCari,
           customer_erp_id: Number(torbaCari.erp_id ?? 0),
@@ -244,7 +258,7 @@ export async function sendPendingInvoices(
           invoice_type:    invoiceType,
           cash_amount:     returnCashAmt,
           card_amount:     returnCardAmt,
-        },
+        }),
         label: returnLabel,
       })
 
@@ -297,7 +311,7 @@ export async function sendPendingInvoices(
     id:        crypto.randomUUID(),
     companyId,
     type:      'day_end_invoice',
-    payload,
+    payload:   await withTerminalPayment(payload),
     label:     `Gün Sonu ${tarihStr} (${invoiceType === 'paper' ? 'Kağıt' : 'E-Arşiv'})`,
   })
 
@@ -379,7 +393,7 @@ export async function sendInvoiceForSale(
     id:        crypto.randomUUID(),
     companyId,
     type:      'invoice',
-    payload,
+    payload:   await withTerminalPayment(payload),
     label:     `${customer.name} faturası`,
   })
 }
@@ -451,7 +465,7 @@ export async function enqueueQuickReturnInvoice(
     companyId,
     type:      'return_invoice',
     status:    'pending_dayend',
-    payload,
+    payload:   await withTerminalPayment(payload),
     label:     `İade — ${opts.orderNo ?? opts.receiptNo}`,
   })
 }
@@ -493,7 +507,7 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
   if (!allItems.length) return
 
   const torbaCari   = await resolveTorbaCustomer(companyId)
-  const settings    = await window.electron.db.getPosSettings()
+  const settings    = await window.electron.db.getTerminalSettings()
   const invoiceType: 'e_archive' | 'paper' =
     settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
   const dateLabel = new Date().toLocaleDateString('tr-TR')
@@ -503,7 +517,7 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
     companyId,
     type:      'return_invoice',
     status:    'pending',
-    payload: {
+    payload: await withTerminalPayment({
       sale_id:         `TOPLU-IADE-${dateLabel.replace(/\./g, '')}`,
       customer:        customerRowToInvoicePayload(torbaCari),
       customer_erp_id: Number.parseInt(torbaCari.id ?? '0', 10) || 0,
@@ -513,7 +527,7 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
       invoice_type:    invoiceType,
       cash_amount:     totalCash,
       card_amount:     totalCard,
-    },
+    }),
     label: `Toplu İade — ${dateLabel}`,
   })
 
@@ -571,7 +585,7 @@ export async function sendReturnInvoice(
     companyId,
     type:      'return_invoice',
     status:    'pending_dayend',
-    payload,
+    payload:   await withTerminalPayment(payload),
     label:     `${customer.name} iade faturası`,
   })
 }

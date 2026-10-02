@@ -15,6 +15,7 @@ import {
   setDbDir,
 } from './dbLocation'
 import { appendDailyLog, dailyLogPath, pruneOldLogs } from './paths'
+import { isDevtoolsPermitActive, type TerminalSettings } from '../src/lib/settingsModel'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
 import {
@@ -372,15 +373,95 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 
-/** DevTools — kiosk/tam ekranda globalShortcut güvenilir olmadığı için odaklı pencerede tuş yakalanır. */
-function toggleDevTools(): void {
-  if (!mainWindow) return
-  const wc = mainWindow.webContents
-  if (wc.isDevToolsOpened()) {
-    wc.closeDevTools()
-  } else {
-    wc.openDevTools({ mode: 'detach' })
+let devtoolsPermit: Pick<TerminalSettings, 'devtoolsEnabled' | 'devtoolsExpiresAt'> = {
+  devtoolsEnabled: false,
+  devtoolsExpiresAt: null,
+}
+let lastDevtoolsPermit: boolean | null = null
+
+function devtoolsWindowName(win: BrowserWindow): string {
+  if (win === mainWindow) return 'main'
+  if (win === customerWindow) return 'customer'
+  return 'other'
+}
+
+/** Yalnızca süre dolmamış kasa izni. Geliştirme ve paket aynı kuralı kullanır. */
+function devtoolsAllowed(): boolean {
+  return isDevtoolsPermitActive(devtoolsPermit)
+}
+
+function closeDevtoolsIfDenied(): void {
+  if (devtoolsAllowed()) return
+  for (const win of [mainWindow, customerWindow]) {
+    if (win && !win.isDestroyed() && win.webContents.isDevToolsOpened()) {
+      win.webContents.closeDevTools()
+    }
   }
+}
+
+async function refreshDevtools(): Promise<void> {
+  try {
+    const { getTerminalSettings } = await import('../db/operations')
+    const s = getTerminalSettings()
+    devtoolsPermit = {
+      devtoolsEnabled: s.devtoolsEnabled,
+      devtoolsExpiresAt: s.devtoolsExpiresAt,
+    }
+  } catch (e) {
+    console.warn('[devtools] ayar okunamadı:', e)
+  }
+  const next = isDevtoolsPermitActive(devtoolsPermit)
+  const prev = lastDevtoolsPermit
+  if (prev !== next) {
+    const sure = devtoolsPermit.devtoolsExpiresAt || 'yok'
+    if (prev !== null || next) {
+      console.log(`[devtools] izin ${next ? 'açıldı' : 'kapandı'}, süre: ${sure}`)
+    }
+    lastDevtoolsPermit = next
+  }
+  if (!next) closeDevtoolsIfDenied()
+  else if (prev !== true) openMainDevtools()
+}
+
+function openMainDevtools(): void {
+  if (!devtoolsAllowed()) return
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.webContents.isDevToolsOpened()) return
+  mainWindow.webContents.openDevTools({ mode: 'detach' })
+}
+
+function toggleDevTools(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return
+  if (!devtoolsAllowed()) {
+    if (win.webContents.isDevToolsOpened()) win.webContents.closeDevTools()
+    return
+  }
+  const wc = win.webContents
+  if (wc.isDevToolsOpened()) wc.closeDevTools()
+  else wc.openDevTools({ mode: 'detach' })
+}
+
+function guardDevtools(win: BrowserWindow): void {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const k = input.key.toLowerCase()
+    const mod = process.platform === 'darwin' ? input.meta : input.control
+    const isDevKey = input.key === 'F12' || (mod && input.shift && ['i', 'j', 'c'].includes(k))
+    if (!isDevKey) return
+    event.preventDefault()
+    if (!devtoolsAllowed()) return
+    setTimeout(() => toggleDevTools(win), 0)
+  })
+  win.webContents.on('devtools-opened', () => {
+    if (!devtoolsAllowed()) {
+      win.webContents.closeDevTools()
+      return
+    }
+    console.log(`[devtools] açıldı (pencere: ${devtoolsWindowName(win)})`)
+  })
+  win.webContents.on('devtools-closed', () => {
+    console.log(`[devtools] kapatıldı (pencere: ${devtoolsWindowName(win)})`)
+  })
 }
 
 /** Main process çıktısı renderer DevTools konsoluna düşmez; oraya da yansıtır. */
@@ -413,6 +494,7 @@ function createWindow() {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      devTools: true,
     },
     kiosk:      !isDev,   // Production'da kiosk
     fullscreen: !isDev,   // Production'da tam ekran
@@ -420,8 +502,9 @@ function createWindow() {
     show: false,
   })
 
-  // Menü çubuğunu (File/Edit/View/Help) kaldır
+  // Menü çubuğunu (File/Edit/View/Help, Toggle Developer Tools) kaldır
   Menu.setApplicationMenu(null)
+  guardDevtools(mainWindow)
 
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL!)
@@ -429,12 +512,9 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../dist/index.html'))
   }
 
-  if (DEVELOPMENT_MODE === 1) {
-    // Kiosk/tam ekranda pencereyi kapatmaması için ayrı pencerede aç
-    mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow?.webContents.openDevTools({ mode: 'detach' })
-    })
-  }
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (devtoolsAllowed()) openMainDevtools()
+  })
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow) return
@@ -444,24 +524,6 @@ function createWindow() {
   })
 
   setupMainWindowExitGuard(mainWindow)
-
-  // F12 / Ctrl+Shift+I — before-input-event kiosk’ta globalShortcut’tan güvenilir
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return
-    if (input.key === 'F12') {
-      event.preventDefault()
-      toggleDevTools()
-      return
-    }
-    const mod = process.platform === 'darwin' ? input.meta : input.control
-    if (mod && input.shift && input.key.toLowerCase() === 'i') {
-      event.preventDefault()
-      toggleDevTools()
-    }
-  })
-
-  // DevTools için globalShortcut kullanma: odaklı pencerede F12 ile çift tetiklenme riski var.
-  // Konsol gerekirse: pencereye tıklayıp F12 / Ctrl+Shift+I veya renderer’dan window.toggleDevTools().
 
   // F11 → tam ekran aç/kapat
   globalShortcut.register('F11', () => {
@@ -478,54 +540,56 @@ function getCustomerDisplayUrl(): { devUrl?: string; filePath?: string; query: R
   }
 }
 
-async function openCustomerWindow() {
-  const displays = screen.getAllDisplays()
-  const primary = screen.getPrimaryDisplay()
-  const external = displays.find(d =>
-    d.id !== primary.id ||
-    d.bounds.x !== primary.bounds.x ||
-    d.bounds.y !== primary.bounds.y ||
-    d.bounds.width !== primary.bounds.width ||
-    d.bounds.height !== primary.bounds.height,
-  ) ?? null
-  const targetBounds = external?.bounds
+let customerDisplayWanted = false
 
-  if (customerWindow && !customerWindow.isDestroyed()) {
-    if (external && targetBounds) {
-      customerWindow.setBounds(targetBounds)
-      customerWindow.setFullScreen(true)
-      customerWindow.setKiosk(true)
-      customerWindow.setAlwaysOnTop(true, 'screen-saver')
-    } else {
-      customerWindow.maximize()
-    }
-    customerWindow.show()
-    customerWindow.focus()
+function findExternalDisplay() {
+  const primary = screen.getPrimaryDisplay()
+  return screen.getAllDisplays().find(d => d.id !== primary.id) ?? null
+}
+
+function closeCustomerWindow() {
+  if (customerWindow && !customerWindow.isDestroyed()) customerWindow.close()
+  customerWindow = null
+}
+
+/** Müşteri ekranı: ayar açıksa ikinci monitörde açar, kapalıysa kapatır. İkinci monitör yoksa pencere açmaz. */
+export async function applyCustomerDisplay(enabled: boolean) {
+  customerDisplayWanted = enabled
+  if (!enabled) {
+    closeCustomerWindow()
     return
   }
-  const icon = resolveAppIconPath()
+  const external = findExternalDisplay()
+  if (!external) {
+    console.warn('[customer-display] ikinci ekran bulunamadı')
+    closeCustomerWindow()
+    return
+  }
+  if (customerWindow && !customerWindow.isDestroyed()) return
 
+  const icon = resolveAppIconPath()
+  const bounds = external.bounds
   customerWindow = new BrowserWindow({
-    x: targetBounds?.x,
-    y: targetBounds?.y,
-    width: targetBounds?.width ?? 1024,
-    height: targetBounds?.height ?? 768,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    fullscreen: true,
+    kiosk: true,
+    frame: false,
+    show: true,
     autoHideMenuBar: true,
-    fullscreen: Boolean(external),
-    kiosk: Boolean(external),
-    frame: external ? false : isDev,
-    show: false,
-    alwaysOnTop: Boolean(external),
-    resizable: !external,
-    minimizable: !external,
-    maximizable: !external,
+    alwaysOnTop: true,
+    resizable: false,
     ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      devTools: true,
     },
   })
+  guardDevtools(customerWindow)
 
   const target = getCustomerDisplayUrl()
   if (isDev && target.devUrl) {
@@ -536,22 +600,13 @@ async function openCustomerWindow() {
     await customerWindow.loadFile(target.filePath, { query: target.query })
   }
 
-  customerWindow.once('ready-to-show', () => {
-    if (!customerWindow) return
-    if (external && targetBounds) {
-      customerWindow.setBounds(targetBounds)
-      customerWindow.setFullScreen(true)
-      customerWindow.setKiosk(true)
-      customerWindow.setAlwaysOnTop(true, 'screen-saver')
-    } else {
-      customerWindow.maximize()
-    }
-    customerWindow.show()
-  })
   customerWindow.on('closed', () => {
     customerWindow = null
   })
   customerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  if (latestSecondScreenPayload && !customerWindow.isDestroyed()) {
+    customerWindow.webContents.send('secondScreen:data', latestSecondScreenPayload)
+  }
 }
 
 function pushSecondScreenPayload(payload: unknown) {
@@ -656,34 +711,6 @@ app.whenReady().then(async () => {
   if (!custCols.includes('email')) db.exec(`ALTER TABLE customers ADD COLUMN email TEXT`)
   const custTempCols = (db.prepare('PRAGMA table_info(customers_temp)').all() as { name: string }[]).map(c => c.name)
   if (!custTempCols.includes('email')) db.exec(`ALTER TABLE customers_temp ADD COLUMN email TEXT`)
-
-  const posCols = (db.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string }[]).map(c => c.name)
-  if (!posCols.includes('touch_keyboard')) {
-    db.exec('ALTER TABLE pos_settings_cache ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
-  }
-  const posTempCols = (db.prepare('PRAGMA table_info(pos_settings_temp)').all() as { name: string }[]).map(c => c.name)
-  if (!posTempCols.includes('touch_keyboard')) {
-    db.exec('ALTER TABLE pos_settings_temp ADD COLUMN touch_keyboard INTEGER DEFAULT 1')
-  }
-  if (!posCols.includes('customer_display')) {
-    db.exec('ALTER TABLE pos_settings_cache ADD COLUMN customer_display INTEGER DEFAULT 1')
-  }
-  if (!posTempCols.includes('customer_display')) {
-    db.exec('ALTER TABLE pos_settings_temp ADD COLUMN customer_display INTEGER DEFAULT 1')
-  }
-  const workplaceCols = [
-    'terminal_number', 'workplace_name', 'workplace_address',
-    'workplace_phone', 'workplace_city', 'workplace_district',
-    'workplace_tax_office', 'workplace_tax_no',
-  ] as const
-  for (const col of workplaceCols) {
-    if (!posCols.includes(col)) {
-      db.exec(`ALTER TABLE pos_settings_cache ADD COLUMN ${col} TEXT`)
-    }
-    if (!posTempCols.includes(col)) {
-      db.exec(`ALTER TABLE pos_settings_temp ADD COLUMN ${col} TEXT`)
-    }
-  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS cart_draft (
@@ -802,6 +829,16 @@ app.whenReady().then(async () => {
 
   createWindow()
   void autoConnectScale()
+  try {
+    const { getTerminalSettings } = await import('../db/operations')
+    await applyCustomerDisplay(Boolean(getTerminalSettings().customerDisplay))
+  } catch (e) {
+    console.warn('[customer-display] açılış ayarı okunamadı:', e)
+  }
+  await refreshDevtools()
+  setInterval(() => { void refreshDevtools() }, 60_000)
+  screen.on('display-added', () => { void applyCustomerDisplay(customerDisplayWanted) })
+  screen.on('display-removed', () => { void applyCustomerDisplay(customerDisplayWanted) })
 
   ipcMain.handle('app:selectFolder', async () => {
     const result = await dialog.showOpenDialog({
@@ -900,12 +937,36 @@ app.whenReady().then(async () => {
     mainWindow.webContents.focus()
   })
   ipcMain.handle('window:toggleDevTools', () => {
-    toggleDevTools()
+    toggleDevTools(mainWindow)
+  })
+
+  ipcMain.handle('devtools:refresh', async () => {
+    await refreshDevtools()
+    return {
+      enabled: isDevtoolsPermitActive(devtoolsPermit),
+      expiresAt: devtoolsPermit.devtoolsExpiresAt,
+    }
+  })
+
+  ipcMain.handle('devtools:open', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? mainWindow
+    if (!win || win.isDestroyed() || !devtoolsAllowed()) return { success: false as const }
+    win.webContents.openDevTools({ mode: 'detach' })
+    return { success: true as const }
+  })
+
+  ipcMain.handle('display:apply', async (_e, enabled: boolean) => {
+    try {
+      await applyCustomerDisplay(Boolean(enabled))
+      return { success: true as const }
+    } catch (error) {
+      return { success: false as const, error: String(error) }
+    }
   })
 
   ipcMain.handle('secondScreen:open', async () => {
     try {
-      await openCustomerWindow()
+      await applyCustomerDisplay(true)
       if (latestSecondScreenPayload && customerWindow && !customerWindow.isDestroyed()) {
         customerWindow.webContents.send('secondScreen:data', latestSecondScreenPayload)
       }
@@ -1056,22 +1117,32 @@ app.whenReady().then(async () => {
     return getPluGroups(companyId, wpId, cashierId)
   })
 
-  ipcMain.handle('db:savePosSettings', async (_e, settings: unknown, cashierId?: string) => {
-    const { syncPosSettingsAcid } = await import('../db/operations')
-    return syncPosSettingsAcid({
-      ...(settings as import('../db/operations').PosSettingsRow),
-      cashierId: cashierId ?? null,
+  ipcMain.handle('db:getTerminalSettings', async () => {
+    const { getTerminalSettings } = await import('../db/operations')
+    return getTerminalSettings()
+  })
+
+  ipcMain.handle('db:getCashierSettings', async (_e, cashierId?: string | null) => {
+    const { getCashierSettings } = await import('../db/operations')
+    return getCashierSettings(cashierId)
+  })
+
+  ipcMain.handle('db:syncSettingsBundle', async (_e, bundle: unknown, terminalId: string) => {
+    const { syncSettingsBundle } = await import('../db/operations')
+    return syncSettingsBundle(
+      bundle as import('../src/lib/settingsModel').SettingsBundle,
+      terminalId,
+    )
+  })
+
+  ipcMain.handle('db:matchPaymentAccounts', async (_e, opts: unknown) => {
+    const { matchPaymentAccountsForQueue } = await import('../db/operations')
+    return matchPaymentAccountsForQueue((opts ?? {}) as {
+      cashAmount?: number
+      cardAmount?: number
+      cardAcquirerId?: string | null
+      cardByBank?: Record<string, { amount?: number; acquirerName?: string }>
     })
-  })
-
-  ipcMain.handle('db:getPosSettings', async (_e, cashierId?: string) => {
-    const { getPosSettings } = await import('../db/operations')
-    return getPosSettings(cashierId ?? null)
-  })
-
-  ipcMain.handle('db:updatePosWorkplaceTerminal', async (_e, data: unknown) => {
-    const { updatePosWorkplaceTerminalCache } = await import('../db/operations')
-    updatePosWorkplaceTerminalCache(data as import('../db/operations').PosSettingsRow)
   })
 
   ipcMain.handle('db:saveCommandHistory', async (_e, row: unknown) => {

@@ -1,5 +1,14 @@
 import { getDB, getSqlite } from './index'
-import { products, sales, saleItems, cashiers, heldDocuments, pluGroupsCache, pluItemsCache, posSettingsCache, commandHistory } from './schema'
+import { products, sales, saleItems, cashiers, heldDocuments, pluGroupsCache, pluItemsCache, commandHistory } from './schema'
+import {
+  applySettingsBundle,
+  dropLegacySettingsTables,
+  matchPaymentAccounts,
+  readCashierSettings,
+  readTerminalSettings,
+  type SqliteLike,
+} from './settingsCache'
+import type { CashierSettings, PaymentAccountCache, SettingsBundle, TerminalSettings } from '../src/lib/settingsModel'
 import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type BetterSqlite3 from 'better-sqlite3'
@@ -718,50 +727,6 @@ export interface PluGroupCacheRow {
   plu_items:    Array<{ id: string; product_code: string; sort_order: number }>
 }
 
-export type DuplicateItemAction = 'increase_qty' | 'add_new'
-
-export interface PosSettingsRow {
-  showPrice:            boolean
-  showCode:             boolean
-  showBarcode:          boolean
-  duplicateItemAction:  DuplicateItemAction
-  minQtyPerLine:        number
-  allowLineDiscount:    boolean
-  allowDocDiscount:     boolean
-  maxLineDiscountPct:   number
-  maxDocDiscountPct:    number
-  pluCols:              number
-  pluRows:              number
-  fontSizeName:         number
-  fontSizePrice:        number
-  fontSizeCode:         number
-  source:               string
-  loginWithCode:        boolean
-  loginWithCard:        boolean
-  torbaCariId:          string | null
-  torbaCariName:        string | null
-  invoiceType:          'e_archive' | 'paper'
-  touchKeyboard?:       boolean
-  customerDisplay?:     boolean
-  printBehavior?:       Record<string, 'default' | 'ask' | 'none'>
-  defaultTemplateIds?:  Record<string, string>
-  allowExitWithHeldDocs?: boolean
-  /** true = cari tahsilat/ödemede Pavo AdvanceSale kullan */
-  cariPaymentUsePavo?:  boolean
-  terminalNumber?:      string | null
-  workplaceName?:       string | null
-  workplaceAddress?:    string | null
-  workplacePhone?:      string | null
-  workplaceCity?:       string | null
-  workplaceDistrict?:   string | null
-  workplaceTaxOffice?:  string | null
-  workplaceTaxNo?:      string | null
-}
-
-export interface PosSettingsAcidRow extends PosSettingsRow {
-  cashierId?: string | null
-}
-
 export interface PaymentDeviceRow {
   id:              string
   companyId:       string
@@ -915,341 +880,42 @@ export function getPluGroups(
   return mapPluGroups(db, rows)
 }
 
-export function savePosSettings(settings: PosSettingsRow): void {
-  const db = getDB()
-  const now = new Date().toISOString()
-  db.insert(posSettingsCache).values({
-    id:                   'local',
-    showPrice:            settings.showPrice,
-    showCode:             settings.showCode,
-    showBarcode:          settings.showBarcode,
-    duplicateItemAction:  settings.duplicateItemAction,
-    minQtyPerLine:        settings.minQtyPerLine,
-    allowLineDiscount:    settings.allowLineDiscount,
-    allowDocDiscount:     settings.allowDocDiscount,
-    maxLineDiscountPct:   settings.maxLineDiscountPct,
-    maxDocDiscountPct:    settings.maxDocDiscountPct,
-    pluCols:              settings.pluCols ?? 4,
-    pluRows:              settings.pluRows ?? 3,
-    fontSizeName:         settings.fontSizeName ?? 12,
-    fontSizePrice:        settings.fontSizePrice ?? 13,
-    fontSizeCode:         settings.fontSizeCode ?? 9,
-    source:               settings.source,
-    pluMode:              'cashier',
-    loginWithCode:        settings.loginWithCode ?? true,
-    loginWithCard:        settings.loginWithCard ?? false,
-    syncedAt:             now,
-    torbaCariId:          settings.torbaCariId   ?? null,
-    torbaCariName:        settings.torbaCariName ?? null,
-    invoiceType:          settings.invoiceType ?? 'e_archive',
-    touchKeyboard:        settings.touchKeyboard ?? true,
-    customerDisplay:      settings.customerDisplay ?? true,
-    printBehavior:        settings.printBehavior
-      ? JSON.stringify(settings.printBehavior)
-      : null,
-    defaultTemplateIds: settings.defaultTemplateIds
-      ? JSON.stringify(settings.defaultTemplateIds)
-      : null,
-    allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
-    cariPaymentUsePavo:  Boolean(settings.cariPaymentUsePavo),
-    terminalNumber:      settings.terminalNumber      ?? null,
-    workplaceName:       settings.workplaceName       ?? null,
-    workplaceAddress:    settings.workplaceAddress    ?? null,
-    workplacePhone:      settings.workplacePhone      ?? null,
-    workplaceCity:       settings.workplaceCity       ?? null,
-    workplaceDistrict:   settings.workplaceDistrict   ?? null,
-    workplaceTaxOffice:  settings.workplaceTaxOffice  ?? null,
-    workplaceTaxNo:      settings.workplaceTaxNo      ?? null,
-  }).onConflictDoUpdate({
-    target: posSettingsCache.id,
-    set: {
-      showPrice:            settings.showPrice,
-      showCode:             settings.showCode,
-      showBarcode:          settings.showBarcode,
-      duplicateItemAction:  settings.duplicateItemAction,
-      minQtyPerLine:        settings.minQtyPerLine,
-      allowLineDiscount:    settings.allowLineDiscount,
-      allowDocDiscount:     settings.allowDocDiscount,
-      maxLineDiscountPct:   settings.maxLineDiscountPct,
-      maxDocDiscountPct:    settings.maxDocDiscountPct,
-      pluCols:              settings.pluCols ?? 4,
-      pluRows:              settings.pluRows ?? 3,
-      fontSizeName:         settings.fontSizeName ?? 12,
-      fontSizePrice:        settings.fontSizePrice ?? 13,
-      fontSizeCode:         settings.fontSizeCode ?? 9,
-      source:               settings.source,
-      pluMode:              'cashier',
-      loginWithCode:        settings.loginWithCode ?? true,
-      loginWithCard:        settings.loginWithCard ?? false,
-      syncedAt:             now,
-      torbaCariId:          settings.torbaCariId   ?? null,
-      torbaCariName:        settings.torbaCariName ?? null,
-      invoiceType:          settings.invoiceType ?? 'e_archive',
-      touchKeyboard:        settings.touchKeyboard ?? true,
-      customerDisplay:      settings.customerDisplay ?? true,
-      printBehavior:        settings.printBehavior
-        ? JSON.stringify(settings.printBehavior)
-        : null,
-      defaultTemplateIds: settings.defaultTemplateIds
-        ? JSON.stringify(settings.defaultTemplateIds)
-        : null,
-      allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false,
-      cariPaymentUsePavo:  Boolean(settings.cariPaymentUsePavo),
-      terminalNumber:      settings.terminalNumber      ?? null,
-      workplaceName:       settings.workplaceName       ?? null,
-      workplaceAddress:    settings.workplaceAddress    ?? null,
-      workplacePhone:      settings.workplacePhone      ?? null,
-      workplaceCity:       settings.workplaceCity       ?? null,
-      workplaceDistrict:   settings.workplaceDistrict   ?? null,
-      workplaceTaxOffice:  settings.workplaceTaxOffice  ?? null,
-      workplaceTaxNo:      settings.workplaceTaxNo      ?? null,
-    },
-  }).run()
+export type { CashierSettings, PaymentAccountCache, SettingsBundle, TerminalSettings }
+
+function sqlite(): SqliteLike {
+  return getSqlite() as unknown as SqliteLike
 }
 
-export function syncPosSettingsAcid(settings: PosSettingsAcidRow): SyncResult {
-  const sqlite = getSqlite()
-  const now    = new Date().toISOString()
-  const rowId  = settings.cashierId ? `cashier_${settings.cashierId}` : 'local'
-  const isLocal = rowId === 'local'
+export function getTerminalSettings(): TerminalSettings {
+  return readTerminalSettings(sqlite())
+}
 
-  const txn = sqlite.transaction(() => {
-    // 1. Temp'e yaz
-    sqlite.prepare(`
-      INSERT OR REPLACE INTO pos_settings_temp (
-        id, cashier_id, show_price, show_code, show_barcode,
-        duplicate_item_action, min_qty_per_line,
-        allow_line_discount, allow_doc_discount,
-        max_line_discount_pct, max_doc_discount_pct,
-        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs, cari_payment_use_pavo,
-        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
-      ) VALUES (
-        @id, @cashierId, @showPrice, @showCode, @showBarcode,
-        @duplicateItemAction, @minQtyPerLine,
-        @allowLineDiscount, @allowDocDiscount,
-        @maxLineDiscountPct, @maxDocDiscountPct,
-        @pluCols, @pluRows, @fontSizeName, @fontSizePrice, @fontSizeCode,
-        @source, @pluMode, @loginWithCode, @loginWithCard, @syncedAt,
-        @torbaCariId, @torbaCariName, @invoiceType, @touchKeyboard, @customerDisplay, @printBehavior, @defaultTemplateIds,
-        @allowExitWithHeldDocs, @cariPaymentUsePavo,
-        @terminalNumber, @workplaceName, @workplaceAddress, @workplacePhone, @workplaceCity, @workplaceDistrict, @workplaceTaxOffice, @workplaceTaxNo
-      )
-    `).run({
-      id:                  rowId,
-      cashierId:           settings.cashierId ?? null,
-      showPrice:           settings.showPrice ? 1 : 0,
-      showCode:            settings.showCode ? 1 : 0,
-      showBarcode:         settings.showBarcode ? 1 : 0,
-      duplicateItemAction: settings.duplicateItemAction,
-      minQtyPerLine:       settings.minQtyPerLine,
-      allowLineDiscount:   settings.allowLineDiscount ? 1 : 0,
-      allowDocDiscount:    settings.allowDocDiscount ? 1 : 0,
-      maxLineDiscountPct:  settings.maxLineDiscountPct,
-      maxDocDiscountPct:   settings.maxDocDiscountPct,
-      pluCols:             settings.pluCols,
-      pluRows:             settings.pluRows,
-      fontSizeName:        settings.fontSizeName,
-      fontSizePrice:       settings.fontSizePrice,
-      fontSizeCode:        settings.fontSizeCode,
-      source:              settings.source,
-      pluMode:             'cashier',
-      loginWithCode:       settings.loginWithCode ? 1 : 0,
-      loginWithCard:       settings.loginWithCard ? 1 : 0,
-      syncedAt:            now,
-      torbaCariId:         settings.torbaCariId   ?? null,
-      torbaCariName:       settings.torbaCariName ?? null,
-      invoiceType:         settings.invoiceType ?? 'e_archive',
-      touchKeyboard:       settings.touchKeyboard !== false ? 1 : 0,
-      customerDisplay:     settings.customerDisplay !== false ? 1 : 0,
-      printBehavior:       settings.printBehavior
-        ? JSON.stringify(settings.printBehavior)
-        : null,
-      defaultTemplateIds: settings.defaultTemplateIds
-        ? JSON.stringify(settings.defaultTemplateIds)
-        : null,
-      allowExitWithHeldDocs: settings.allowExitWithHeldDocs !== false ? 1 : 0,
-      cariPaymentUsePavo:  settings.cariPaymentUsePavo ? 1 : 0,
-      terminalNumber:     isLocal ? (settings.terminalNumber ?? null) : null,
-      workplaceName:      isLocal ? (settings.workplaceName ?? null) : null,
-      workplaceAddress:   isLocal ? (settings.workplaceAddress ?? null) : null,
-      workplacePhone:     isLocal ? (settings.workplacePhone ?? null) : null,
-      workplaceCity:      isLocal ? (settings.workplaceCity ?? null) : null,
-      workplaceDistrict:  isLocal ? (settings.workplaceDistrict ?? null) : null,
-      workplaceTaxOffice: isLocal ? (settings.workplaceTaxOffice ?? null) : null,
-      workplaceTaxNo:     isLocal ? (settings.workplaceTaxNo ?? null) : null,
-    })
+export function getCashierSettings(cashierId?: string | null): CashierSettings {
+  return readCashierSettings(sqlite(), cashierId)
+}
 
-    // 2. Doğrula
-    const check = sqlite.prepare(
-      'SELECT COUNT(*) as c FROM pos_settings_temp WHERE id = ?'
-    ).get(rowId) as { c: number }
-    if (check.c === 0) throw new Error('pos_settings_temp boş — rollback')
-
-    // 3. Ana tabloya taşı
-    sqlite.prepare(`
-      INSERT OR REPLACE INTO pos_settings_cache (
-        id, cashier_id, show_price, show_code, show_barcode,
-        duplicate_item_action, min_qty_per_line,
-        allow_line_discount, allow_doc_discount,
-        max_line_discount_pct, max_doc_discount_pct,
-        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs, cari_payment_use_pavo,
-        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
-      )
-      SELECT
-        id, cashier_id, show_price, show_code, show_barcode,
-        duplicate_item_action, min_qty_per_line,
-        allow_line_discount, allow_doc_discount,
-        max_line_discount_pct, max_doc_discount_pct,
-        plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
-        source, plu_mode, login_with_code, login_with_card, synced_at,
-        torba_cari_id, torba_cari_name, invoice_type, touch_keyboard, customer_display, print_behavior, default_template_ids,
-        allow_exit_with_held_docs, cari_payment_use_pavo,
-        terminal_number, workplace_name, workplace_address, workplace_phone, workplace_city, workplace_district, workplace_tax_office, workplace_tax_no
-      FROM pos_settings_temp WHERE id = ?
-    `).run(rowId)
-
-    // 4. Temp temizle
-    sqlite.prepare('DELETE FROM pos_settings_temp WHERE id = ?').run(rowId)
-  })
-
+export function syncSettingsBundle(bundle: SettingsBundle, terminalId: string): SyncResult {
+  const db = sqlite()
   try {
-    txn()
-    return { success: true, inserted: 1, updated: 0, deleted: 0 }
+    applySettingsBundle(db, bundle, terminalId)
+    try {
+      dropLegacySettingsTables(db)
+    } catch (e) {
+      console.warn('[settings] eski ayar tablosu silinemedi:', e)
+    }
+    return { success: true, inserted: 1, updated: bundle.cashiers.length, deleted: 0 }
   } catch (e) {
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
   }
 }
 
-function normalizeDuplicateAction(v: string | null | undefined): DuplicateItemAction {
-  return v === 'add_new' ? 'add_new' : 'increase_qty'
-}
-
-export function updatePosWorkplaceTerminalCache(data: Pick<
-  PosSettingsRow,
-  | 'terminalNumber' | 'workplaceName' | 'workplaceAddress' | 'workplacePhone'
-  | 'workplaceCity' | 'workplaceDistrict' | 'workplaceTaxOffice' | 'workplaceTaxNo'
->): void {
-  const sqlite = getSqlite()
-  sqlite.prepare(`
-    UPDATE pos_settings_cache SET
-      terminal_number = ?, workplace_name = ?, workplace_address = ?,
-      workplace_phone = ?, workplace_city = ?, workplace_district = ?,
-      workplace_tax_office = ?, workplace_tax_no = ?
-    WHERE id = 'local'
-  `).run(
-    data.terminalNumber ?? null,
-    data.workplaceName ?? null,
-    data.workplaceAddress ?? null,
-    data.workplacePhone ?? null,
-    data.workplaceCity ?? null,
-    data.workplaceDistrict ?? null,
-    data.workplaceTaxOffice ?? null,
-    data.workplaceTaxNo ?? null,
-  )
-}
-
-export function getPosSettings(cashierId?: string | null): PosSettingsRow {
-  const db = getDB()
-
-  const localRow = db.select().from(posSettingsCache)
-    .where(eq(posSettingsCache.id, 'local'))
-    .get()
-
-  // Önce kasiyer bazlı ara
-  let row: typeof posSettingsCache.$inferSelect | undefined = undefined
-
-  if (cashierId) {
-    const cashierRowId = `cashier_${cashierId}`
-    row = db.select().from(posSettingsCache)
-      .where(eq(posSettingsCache.id, cashierRowId))
-      .get()
-  }
-
-  // Kasiyer ayarı yoksa kasa default'una düş
-  if (!row) {
-    row = localRow
-  }
-
-  const wp = localRow ?? row
-
-  return {
-    showPrice:            row?.showPrice            ?? true,
-    showCode:             row?.showCode             ?? true,
-    showBarcode:          row?.showBarcode          ?? false,
-    duplicateItemAction:  normalizeDuplicateAction(row?.duplicateItemAction as string | undefined),
-    minQtyPerLine:        row?.minQtyPerLine        ?? 1,
-    allowLineDiscount:    row?.allowLineDiscount    ?? true,
-    allowDocDiscount:     row?.allowDocDiscount     ?? true,
-    maxLineDiscountPct:   row?.maxLineDiscountPct   ?? 100,
-    maxDocDiscountPct:    row?.maxDocDiscountPct    ?? 100,
-    pluCols:              row?.pluCols              ?? 4,
-    pluRows:              row?.pluRows              ?? 3,
-    fontSizeName:         row?.fontSizeName         ?? 12,
-    fontSizePrice:        row?.fontSizePrice        ?? 13,
-    fontSizeCode:         row?.fontSizeCode         ?? 9,
-    source:               row?.source               ?? 'default',
-    loginWithCode:        row?.loginWithCode        ?? true,
-    loginWithCard:        row?.loginWithCard        ?? false,
-    torbaCariId:          row?.torbaCariId          ?? null,
-    torbaCariName:        row?.torbaCariName        ?? null,
-    invoiceType:          (row?.invoiceType === 'paper' ? 'paper' : 'e_archive'),
-    touchKeyboard:        row?.touchKeyboard ?? true,
-    customerDisplay:      row?.customerDisplay ?? true,
-    printBehavior:        parsePrintBehaviorField(row?.printBehavior),
-    defaultTemplateIds: parseDefaultTemplateIdsField(row?.defaultTemplateIds),
-    allowExitWithHeldDocs: row?.allowExitWithHeldDocs ?? true,
-    cariPaymentUsePavo:   Boolean(row?.cariPaymentUsePavo),
-    terminalNumber:    wp?.terminalNumber     ?? null,
-    workplaceName:      wp?.workplaceName       ?? null,
-    workplaceAddress:   wp?.workplaceAddress    ?? null,
-    workplacePhone:     wp?.workplacePhone      ?? null,
-    workplaceCity:      wp?.workplaceCity       ?? null,
-    workplaceDistrict:  wp?.workplaceDistrict   ?? null,
-    workplaceTaxOffice: wp?.workplaceTaxOffice  ?? null,
-    workplaceTaxNo:     wp?.workplaceTaxNo      ?? null,
-  }
-}
-
-function parseDefaultTemplateIdsField(
-  raw: string | null | undefined,
-): Record<string, string> | undefined {
-  if (!raw) return undefined
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const out: Record<string, string> = {}
-    for (const [k, v] of Object.entries(parsed)) {
-      if (v != null && String(v).trim()) out[k] = String(v)
-    }
-    return Object.keys(out).length > 0 ? out : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function parsePrintBehaviorField(
-  raw: string | null | undefined,
-): PosSettingsRow['printBehavior'] {
-  if (!raw) {
-    return { satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none' }
-  }
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const out: Record<string, 'default' | 'ask' | 'none'> = {
-      satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none',
-    }
-    for (const [k, v] of Object.entries(parsed)) {
-      if (v === 'default' || v === 'ask' || v === 'none') out[k] = v
-    }
-    return out
-  } catch {
-    return { satis: 'ask', tahsilat: 'ask', odeme: 'ask', iade: 'ask', gunsonu: 'default', etiket: 'none', manuel: 'none' }
-  }
+export function matchPaymentAccountsForQueue(opts: {
+  cashAmount?: number
+  cardAmount?: number
+  cardAcquirerId?: string | null
+  cardByBank?: Record<string, { amount?: number; acquirerName?: string }>
+}) {
+  return matchPaymentAccounts(sqlite(), opts)
 }
 
 // Odeme cihazi ayarlarini getir

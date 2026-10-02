@@ -155,6 +155,13 @@ export async function processOperationQueue({
               console.log('[worker] payment from SQLite:', { cash_amount, card_amount, card_acquirer_id })
               if (typeof saleId === 'string' && !saleId.startsWith('gunsonu-')) {
                 const customer = saleData.customer ?? {}
+                const terminalId = String(await window.electron.store.get('terminal_id').catch(() => '') ?? '')
+                const paymentAccounts = await window.electron.db.matchPaymentAccounts({
+                  cashAmount: cash_amount,
+                  cardAmount: card_amount,
+                  cardAcquirerId: card_acquirer_id,
+                  cardByBank: card_by_bank,
+                })
                 await window.electron.db.enqueueOperation({
                   id:        crypto.randomUUID(),
                   companyId,
@@ -175,6 +182,8 @@ export async function processOperationQueue({
                     card_amount,
                     card_acquirer_id,
                     card_by_bank,
+                    terminal_id: terminalId,
+                    payment_accounts: paymentAccounts,
                   },
                   label: `Tahsilat — ${String(customer.name ?? '')}`,
                 })
@@ -227,6 +236,17 @@ export async function processOperationQueue({
               }
               if (typeof saleData.sale_id === 'string') {
                 const customer = saleData.customer ?? {}
+                const terminalId = String(await window.electron.store.get('terminal_id').catch(() => '') ?? '')
+                const dayCash = Number(saleData.cash_amount ?? 0)
+                const dayCard = Number(saleData.card_amount ?? 0)
+                const dayAcquirer = saleData.card_acquirer_id ?? null
+                const dayByBank = saleData.card_by_bank ?? {}
+                const paymentAccounts = await window.electron.db.matchPaymentAccounts({
+                  cashAmount: dayCash,
+                  cardAmount: dayCard,
+                  cardAcquirerId: dayAcquirer,
+                  cardByBank: dayByBank,
+                })
                 await window.electron.db.enqueueOperation({
                   id:        crypto.randomUUID(),
                   companyId,
@@ -243,10 +263,12 @@ export async function processOperationQueue({
                     ),
                     customer_code:    String(customer.code ?? ''),
                     customer_name:    String(customer.name ?? ''),
-                    cash_amount:      Number(saleData.cash_amount ?? 0),
-                    card_amount:      Number(saleData.card_amount ?? 0),
-                    card_acquirer_id: saleData.card_acquirer_id ?? null,
-                    card_by_bank:     saleData.card_by_bank ?? {},
+                    cash_amount:      dayCash,
+                    card_amount:      dayCard,
+                    card_acquirer_id: dayAcquirer,
+                    card_by_bank:     dayByBank,
+                    terminal_id:      terminalId,
+                    payment_accounts: paymentAccounts,
                   },
                   label: `Tahsilat — ${String(customer.name ?? '')}`,
                 })

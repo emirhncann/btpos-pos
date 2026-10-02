@@ -52,7 +52,7 @@ interface Props {
   onLogout:               () => void
   onShowMessage:          (text: string) => void
   onPluUpdated:           (groups: PluGroupCacheRow[]) => void
-  onSettingsUpdated:      (s: PosSettingsRow) => void
+  onSettingsUpdated:      () => void
   commandSyncing?:        boolean
   merkezToast?:           string | null
   cmdPollTick?:           number

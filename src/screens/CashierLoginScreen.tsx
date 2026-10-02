@@ -4,11 +4,11 @@ import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { syncCashierPluOnLogin } from '../hooks/merkezCommandHandlers'
 import { api } from '../lib/api'
+import { useSettings } from '../hooks/useSettings'
 
 interface Props {
   companyId:   string
   terminalId:  string
-  posSettings: PosSettingsRow
   onLogin:     (cashier: CashierRow, pluGroups: PluGroupCacheRow[]) => void
 }
 
@@ -17,8 +17,9 @@ const BARCODE_TIMEOUT_MS = 150
 
 type LoginStage = 'idle' | 'auth' | 'plu'
 
-export default function CashierLoginScreen({ companyId, terminalId, posSettings, onLogin }: Props) {
-  const initialMode = !posSettings.loginWithCode && posSettings.loginWithCard
+export default function CashierLoginScreen({ companyId, terminalId, onLogin }: Props) {
+  const { terminal, cashier } = useSettings()
+  const initialMode = !terminal.loginWithCode && terminal.loginWithCard
     ? 'kart'
     : 'kod'
 
@@ -48,7 +49,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
 
   useEffect(() => {
     window.__btpos_exit_check = async () => {
-      const allowExit = posSettings?.allowExitWithHeldDocs ?? true
+      const allowExit = cashier.allowExitWithHeldDocs ?? true
       if (allowExit) return { canExit: true, heldCount: 0 }
 
       const docs = await window.electron.db.getHeldDocuments(companyId).catch(() => [])
@@ -61,7 +62,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
     return () => {
       delete window.__btpos_exit_check
     }
-  }, [companyId, posSettings?.allowExitWithHeldDocs])
+  }, [companyId, cashier.allowExitWithHeldDocs])
 
   useEffect(() => {
     const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
@@ -88,7 +89,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
   }
 
   const handleGlobalKey = useCallback((e: KeyboardEvent) => {
-    if (!posSettings.loginWithCard || loggingIn) return
+    if (!terminal.loginWithCard || loggingIn) return
     const tag = (e.target as HTMLElement)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
@@ -107,7 +108,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
         barcodeBuffer.current = ''
       }, BARCODE_TIMEOUT_MS)
     }
-  }, [posSettings.loginWithCard, loggingIn])
+  }, [terminal.loginWithCard, loggingIn])
 
   useEffect(() => {
     window.addEventListener('keydown', handleGlobalKey)
@@ -115,7 +116,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
   }, [handleGlobalKey])
 
   async function handleCardLogin(cardNumber: string) {
-    if (!posSettings.loginWithCard) return
+    if (!terminal.loginWithCard) return
     if (loggingIn) return
     setLoggingIn(true)
     setLoginStage('auth')
@@ -270,7 +271,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
           <p className="text-gray-400 text-sm mt-1">Kasiyer Girişi</p>
         </div>
 
-        {posSettings.loginWithCode && posSettings.loginWithCard && (
+        {terminal.loginWithCode && terminal.loginWithCard && (
           <div className="flex gap-2 mb-6 p-1 bg-gray-800 rounded-lg">
             <button
               type="button"
@@ -299,13 +300,13 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
           </div>
         )}
 
-        {!posSettings.loginWithCode && !posSettings.loginWithCard && (
+        {!terminal.loginWithCode && !terminal.loginWithCard && (
           <div className="mb-4 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm text-center">
             ⚠️ Giriş yöntemi tanımlanmamış. Yöneticiye bildirin.
           </div>
         )}
 
-        {posSettings.loginWithCode && mode === 'kod' && (
+        {terminal.loginWithCode && mode === 'kod' && (
           <div className="space-y-4">
             <div className="flex justify-end">
               <button
@@ -382,7 +383,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
           </div>
         )}
 
-        {posSettings.loginWithCard && mode === 'kart' && (
+        {terminal.loginWithCard && mode === 'kart' && (
           <div className="flex flex-col items-center gap-6 py-4">
             <div style={{
               width: 120, height: 120, borderRadius: 16,
@@ -402,7 +403,7 @@ export default function CashierLoginScreen({ companyId, terminalId, posSettings,
               Barkod okuyucuyu kasiyerin kartına tutun
             </p>
 
-            {posSettings.loginWithCode && (
+            {terminal.loginWithCode && (
               <p className="text-gray-500 text-xs text-center">
                 veya <button
                   type="button"

@@ -20,10 +20,11 @@ import {
   type PrinterSettingsRow,
 } from './printerService'
 
-function getPrintBehavior(db: Database.Database): Record<string, PrintBehavior> {
+function getPrintBehavior(db: Database.Database, cashierId?: string | null): Record<string, PrintBehavior> {
+  if (!cashierId) return { ...DEFAULT_PRINT_BEHAVIOR }
   const row = db.prepare(
-    `SELECT print_behavior FROM pos_settings_cache WHERE id = 'local'`,
-  ).get() as { print_behavior?: string | null } | undefined
+    `SELECT print_behavior FROM cashier_settings_cache WHERE cashier_id = ?`,
+  ).get(cashierId) as { print_behavior?: string | null } | undefined
   if (!row?.print_behavior) return { ...DEFAULT_PRINT_BEHAVIOR }
   try {
     return normalizePrintBehavior(JSON.parse(row.print_behavior))
@@ -34,7 +35,7 @@ function getPrintBehavior(db: Database.Database): Record<string, PrintBehavior> 
 
 function getDefaultTemplateIds(db: Database.Database): Record<string, string> {
   const row = db.prepare(
-    `SELECT default_template_ids FROM pos_settings_cache WHERE id = 'local'`,
+    `SELECT default_template_ids FROM terminal_settings_cache WHERE id = 1`,
   ).get() as { default_template_ids?: string | null } | undefined
   if (!row?.default_template_ids) return {}
   try {
@@ -214,21 +215,6 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
     )
   `)
 
-  const posCols = (db.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string }[]).map(c => c.name)
-  if (!posCols.includes('print_behavior')) {
-    db.exec(`ALTER TABLE pos_settings_cache ADD COLUMN print_behavior TEXT DEFAULT NULL`)
-  }
-  const posTempCols = (db.prepare('PRAGMA table_info(pos_settings_temp)').all() as { name: string }[]).map(c => c.name)
-  if (!posTempCols.includes('print_behavior')) {
-    db.exec(`ALTER TABLE pos_settings_temp ADD COLUMN print_behavior TEXT DEFAULT NULL`)
-  }
-  if (!posCols.includes('default_template_ids')) {
-    db.exec(`ALTER TABLE pos_settings_cache ADD COLUMN default_template_ids TEXT DEFAULT NULL`)
-  }
-  if (!posTempCols.includes('default_template_ids')) {
-    db.exec(`ALTER TABLE pos_settings_temp ADD COLUMN default_template_ids TEXT DEFAULT NULL`)
-  }
-
   ipcMain.handle('templates:getAll', () => {
     return db.prepare(
       'SELECT * FROM receipt_templates ORDER BY trigger_type, name',
@@ -337,9 +323,10 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
     triggerType: string
     data:        RenderData
     templateId?: string
+    cashierId?:  string | null
   }) => {
     try {
-      const pb       = getPrintBehavior(db)
+      const pb       = getPrintBehavior(db, opts.cashierId)
       const behavior = pb[opts.triggerType] ?? 'none'
 
       if (behavior === 'none') {

@@ -1,13 +1,13 @@
 /**
  * OrderNo: KKK + YY + MM + DD + HH + mm + ss (15 karakter)
- * KKK — pos_settings.terminal_number (merkezden sync)
+ * KKK — terminal_info.terminal_number (merkezden sync)
  */
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-/** pos_settings.terminal_number → 3 hane (örn. 1 → 001, 42 → 042) */
+/** terminal_info.terminal_number → 3 hane (örn. 1 → 001, 42 → 042) */
 export function normalizeTerminalNumber(raw: string | null | undefined): string {
   const t = String(raw ?? '').trim()
   if (!t) return '000'

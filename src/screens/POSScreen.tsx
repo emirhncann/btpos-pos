@@ -30,6 +30,8 @@ import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 import { buildSaleReceiptData } from '../lib/templateEngine'
 import { nextOrderNo } from '../lib/orderNo'
+import { useSettings } from '../hooks/useSettings'
+import { isDevtoolsPermitActive } from '../lib/settingsModel'
 import QuickReturnModal, {
   type QuickReturnModalState,
   type RecentSalesFilter,
@@ -246,7 +248,6 @@ interface Props {
   cashier:         CashierRow
   allProducts:     ProductRow[]
   pluGroups:       PluGroupCacheRow[]
-  posSettings:     PosSettingsRow
   syncedEnabledBrands?: PaymentProviderBrand[] | null
   syncedBarcodeFormats?: BarcodeFormatRow[] | null
   onBack:          () => void
@@ -262,7 +263,6 @@ interface Props {
   onPollCommands?: () => Promise<{ skipped: 'busy' | 'cooldown' } | { count: number }>
   commandRecentlyReceived?: boolean
   commandDeferred?: boolean
-  customerDisplay?: boolean
 }
 
 type PaymentMethodKey = 'cash' | 'card' | 'meal_card' | 'other'
@@ -643,7 +643,7 @@ function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout =
 
 export default function POSScreen({
   companyId, cashier, allProducts,
-  pluGroups, posSettings,
+  pluGroups,
   syncedEnabledBrands = null,
   syncedBarcodeFormats = null,
   onBack, onLogout,
@@ -657,10 +657,11 @@ export default function POSScreen({
   onPollCommands,
   commandRecentlyReceived = false,
   commandDeferred = false,
-  customerDisplay = true,
 }: Props) {
+  const settings = useSettings()
+  const customerDisplay = settings.terminal.customerDisplay
 
-  const touchEnabled = posSettings?.touchKeyboard ?? true
+  const touchEnabled = settings.terminal.touchKeyboard
   const { openKeyboard, keyboardProps, keyboardOpen } = useTouchKeyboard(touchEnabled)
 
   /* ── State ── */
@@ -1013,7 +1014,7 @@ export default function POSScreen({
         } catch { /* kapanışta kayıt başarısız olsa da çıkış kontrolüne devam */ }
       }
 
-      const allowExit = posSettings?.allowExitWithHeldDocs ?? true
+      const allowExit = settings.cashier.allowExitWithHeldDocs ?? true
       if (allowExit) return { canExit: true, heldCount: 0 }
 
       const count = heldDocs.length
@@ -1027,7 +1028,7 @@ export default function POSScreen({
       delete window.__btpos_exit_check
     }
   }, [
-    posSettings?.allowExitWithHeldDocs,
+    settings.cashier.allowExitWithHeldDocs,
     heldDocs.length,
     cart,
     companyId,
@@ -1104,9 +1105,6 @@ export default function POSScreen({
   useEffect(() => {
     void (async () => {
       try {
-        const settings = await window.electron.db.getPosSettings()
-        setInvoiceType(settings?.invoiceType === 'paper' ? 'paper' : 'e_archive')
-
         const device = await window.electron.db.getPaymentDeviceSettings('pavo')
         if (device?.ipAddress && device.isActive) {
           setPavoSettings({
@@ -1120,11 +1118,14 @@ export default function POSScreen({
           setPavoSettings(null)
         }
       } catch {
-        setInvoiceType('e_archive')
         setPavoSettings(null)
       }
     })()
   }, [])
+
+  useEffect(() => {
+    setInvoiceType(settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive')
+  }, [settings.terminal.invoiceType])
 
   useEffect(() => {
     if (!pavoSettings) return
@@ -1308,12 +1309,12 @@ export default function POSScreen({
       })()
     : groupProducts
 
-  const pluCols      = posSettings.pluCols ?? 4
-  const pluRows      = posSettings.pluRows ?? 3
+  const pluCols      = settings.cashier.pluCols
+  const pluRows      = settings.cashier.pluRows
   const PLU_PER_PAGE = pluCols * pluRows
-  const fontSizeName  = posSettings.fontSizeName ?? 12
-  const fontSizePrice = posSettings.fontSizePrice ?? 13
-  const fontSizeCode  = posSettings.fontSizeCode ?? 9
+  const fontSizeName  = settings.cashier.fontSizeName
+  const fontSizePrice = settings.cashier.fontSizePrice
+  const fontSizeCode  = settings.cashier.fontSizeCode
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PLU_PER_PAGE))
   const safePage   = Math.min(page, totalPages - 1)
@@ -1539,12 +1540,12 @@ export default function POSScreen({
     }
 
     if (cart.length === 0 && !currentOrderNo) {
-      setCurrentOrderNo(nextOrderNo(posSettings.terminalNumber))
+      setCurrentOrderNo(nextOrderNo(settings.terminal.terminalInfo.terminalNumber))
       setLastReceipt(null)
     }
 
     setCart(prev => {
-      const dup = posSettings.duplicateItemAction ?? 'increase_qty'
+      const dup = settings.cashier.duplicateItemAction
 
       if (dup === 'increase_qty') {
         const exIdx = prev.findIndex(c => c.productId === product.id)
@@ -1604,7 +1605,7 @@ export default function POSScreen({
   }
 
   function updateQty(id: string, delta: number) {
-    const minQty = posSettings.minQtyPerLine ?? 1
+    const minQty = settings.cashier.minQtyPerLine
     setCart(prev => prev.map(c => {
       if (c.id !== id) return c
       const newQty = Math.max(minQty, c.quantity + delta)
@@ -1618,7 +1619,7 @@ export default function POSScreen({
     if (!lineDiscountTarget) return
     const rate = discMode === 'rate' ? parseFloat(lineDiscRateIn.replace(',', '.')) || 0 : 0
     const amt = discMode === 'amt' ? parseFloat(lineDiscAmtIn.replace(',', '.')) || 0 : 0
-    const maxPct = posSettings.maxLineDiscountPct ?? 100
+    const maxPct = settings.cashier.maxLineDiscountPct
     if (rate > maxPct) {
       showError('İndirim Limiti', `Maksimum satır indirimi %${maxPct}`)
       return
@@ -1817,7 +1818,7 @@ export default function POSScreen({
     if (!cart.length) return
 
     const orderNo = currentOrderNo
-      ?? nextOrderNo(posSettings.terminalNumber)
+      ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
 
     const label = selectedCustomer
       ? selectedCustomer.name
@@ -1938,6 +1939,7 @@ export default function POSScreen({
       const result = await window.electron.templates.printWithBehavior({
         triggerType: trigger,
         data,
+        cashierId: cashier.id,
       })
       if (result.needsSelection && result.templates?.length) {
         setPrintSelectModal({
@@ -1961,14 +1963,14 @@ export default function POSScreen({
     setCariPaymentSaving(true)
     setCariPaymentResult(null)
 
-    const terminalName = posSettings.source?.trim() || 'Kasa'
+    const terminalName = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
     const customerIdNum = Number.parseInt(cariPaymentCust.id, 10) || 0
-    const orderNo = nextOrderNo(posSettings.terminalNumber)
+    const orderNo = nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
     const reason = `${cariPaymentModal === 'tahsilat' ? 'Tahsilat' : 'Ödeme'} — ${cariPaymentCust.name}`
 
     try {
       // ── 1. Pavo AdvanceSale — parametre açıksa ───────────────────
-      if (posSettings?.cariPaymentUsePavo && pavoSettings) {
+      if (settings.terminal.cariPaymentUsePavo && pavoSettings) {
         const seq = await window.electron.db.nextPavoSequence()
         const nameParts = (cariPaymentCust.name ?? '').split(' ')
 
@@ -2105,14 +2107,16 @@ export default function POSScreen({
     : 0
   const paidTotal = paymentLines.reduce((s, l) => s + l.amount, 0)
   // Parçalı ödeme: sadece KK Taksit/Puan (999), Pavo yoksa hiçbiri
+  const brandPool = settings.terminal.enabledPaymentBrands.length
+    ? enabledBrands.filter(b => settings.terminal.enabledPaymentBrands.includes(b.payment_provider_brand_id))
+    : enabledBrands
   const karmaVisibleBrands = pavoSettings
-    ? enabledBrands.filter(b => b.payment_provider_brand_id === 999)
+    ? brandPool.filter(b => b.payment_provider_brand_id === 999)
     : []
-  // Diğer (tek ödeme): tüm markalar; Pavo yoksa 999 gizle
   const otherVisibleBrands = (
     pavoSettings
-      ? enabledBrands
-      : enabledBrands.filter(b => b.payment_provider_brand_id !== 999)
+      ? brandPool
+      : brandPool.filter(b => b.payment_provider_brand_id !== 999)
   ).slice().sort((a, b) => {
     if (a.payment_provider_brand_id === 999) return -1
     if (b.payment_provider_brand_id === 999) return 1
@@ -2522,7 +2526,7 @@ export default function POSScreen({
       cartOverride, grandTotalOverride,
     } = opts
     void window.electron.store.set('last_pavo_order_no', opts.orderNo).catch(() => {})
-    const terminalLabel = posSettings.source?.trim() || 'Kasa'
+    const terminalLabel = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
 
     const effectiveCart = cartOverride ?? cart
     const effectiveLineSubtotal = effectiveCart.reduce((s, c) => s + c.netTotal, 0)
@@ -2768,15 +2772,15 @@ export default function POSScreen({
       customer: selectedCustomer,
       terminalId: terminalId ?? '',
       terminalName: terminalLabel,
-      terminalNumber: posSettings.terminalNumber,
+      terminalNumber: settings.terminal.terminalInfo.terminalNumber,
       workplace: {
-        name: posSettings.workplaceName,
-        address: posSettings.workplaceAddress,
-        phone: posSettings.workplacePhone,
-        city: posSettings.workplaceCity,
-        district: posSettings.workplaceDistrict,
-        taxOffice: posSettings.workplaceTaxOffice,
-        taxNo: posSettings.workplaceTaxNo,
+        name: settings.terminal.terminalInfo.workplace?.name,
+        address: settings.terminal.terminalInfo.workplace?.address,
+        phone: settings.terminal.terminalInfo.workplace?.phone,
+        city: settings.terminal.terminalInfo.workplace?.city,
+        district: settings.terminal.terminalInfo.workplace?.district,
+        taxOffice: settings.terminal.terminalInfo.workplace?.taxOffice,
+        taxNo: settings.terminal.terminalInfo.workplace?.taxNo,
       },
       planName: license?.planName ?? '',
       changeAmount,
@@ -3104,7 +3108,7 @@ export default function POSScreen({
         .reduce((s, l) => s + l.amount, 0)
       let cashRemaining = Math.max(0, grandTotal - nonCashTotal)
       const orderNo = currentOrderNo
-        ?? nextOrderNo(posSettings.terminalNumber)
+        ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
       const pavoPaymentsFinal = lines.map(l => {
         if (l.method === 'cash') {
           const cashPart = Math.min(l.amount, cashRemaining)
@@ -3278,7 +3282,7 @@ export default function POSScreen({
     const cashAmt = lines.filter(l => l.method === 'cash').reduce((s, l) => s + l.amount, 0)
     const cardAmt = lines.filter(l => l.method !== 'cash').reduce((s, l) => s + l.amount, 0)
     const paidAmt = lines.reduce((s, l) => s + l.amount, 0)
-    const orderNo = currentOrderNo ?? nextOrderNo(posSettings.terminalNumber)
+    const orderNo = currentOrderNo ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
     const smsNorm = normalizeTrMobileForSms(smsPhone)
 
     const pavoItems = cart.map(c => {
@@ -3876,7 +3880,7 @@ export default function POSScreen({
         .filter(p => p.mediator !== 0 && p.mediator !== 1)
         .reduce((s, p) => s + p.amount, 0)
 
-      const orderNo = nextOrderNo(posSettings.terminalNumber)
+      const orderNo = nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
       const saleRow = {
         orderNo,
         totalAmount:    totalReturn,
@@ -3918,9 +3922,8 @@ export default function POSScreen({
 
       if (companyId) {
         try {
-          const settings = await window.electron.db.getPosSettings()
           const queueInvoiceType: 'e_archive' | 'paper' =
-            settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
+            settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive'
 
           const { enqueueQuickReturnInvoice } = await import('../lib/invoiceSend')
 
@@ -3967,9 +3970,9 @@ export default function POSScreen({
       }
 
       const invoiceCustomer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
-      const terminalLabel = posSettings.source?.trim() || 'Kasa'
+      const terminalLabel = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
       const orderNo = currentOrderNo
-        ?? nextOrderNo(posSettings.terminalNumber)
+        ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
       const salePaymentType: 'cash' | 'card' | 'mixed' =
         cashAmt > 0 && cardAmt > 0 ? 'mixed' : cashAmt > 0 ? 'cash' : 'card'
       const saleRow = {
@@ -4006,9 +4009,8 @@ export default function POSScreen({
       if (companyId) {
         try {
           const { sendReturnInvoice, resolveTorbaCustomer } = await import('../lib/invoiceSend')
-          const settings = await window.electron.db.getPosSettings()
           const queueInvoiceType: 'e_archive' | 'paper' =
-            settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
+            settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive'
 
           const customer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
 
@@ -4029,7 +4031,7 @@ export default function POSScreen({
         }
       }
 
-      const terminalLabelIade = posSettings.source?.trim() || 'Kasa'
+      const terminalLabelIade = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
       void printIfTemplate('iade', buildSaleReceiptData({
         receiptNo,
         orderNo,
@@ -4046,15 +4048,15 @@ export default function POSScreen({
         customer: invoiceCustomer,
         terminalId: (await window.electron.store.get('terminal_id') as string | null) ?? '',
         terminalName: terminalLabelIade,
-        terminalNumber: posSettings.terminalNumber,
+        terminalNumber: settings.terminal.terminalInfo.terminalNumber,
         workplace: {
-          name: posSettings.workplaceName,
-          address: posSettings.workplaceAddress,
-          phone: posSettings.workplacePhone,
-          city: posSettings.workplaceCity,
-          district: posSettings.workplaceDistrict,
-          taxOffice: posSettings.workplaceTaxOffice,
-          taxNo: posSettings.workplaceTaxNo,
+          name: settings.terminal.terminalInfo.workplace?.name,
+          address: settings.terminal.terminalInfo.workplace?.address,
+          phone: settings.terminal.terminalInfo.workplace?.phone,
+          city: settings.terminal.terminalInfo.workplace?.city,
+          district: settings.terminal.terminalInfo.workplace?.district,
+          taxOffice: settings.terminal.terminalInfo.workplace?.taxOffice,
+          taxNo: settings.terminal.terminalInfo.workplace?.taxNo,
         },
         planName: license?.planName ?? '',
         changeAmount: 0,
@@ -4084,6 +4086,16 @@ export default function POSScreen({
   /* ── Renkler ── */
   const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? '#1565C0'
   const activeSoft  = hexToSoft(activeColor)
+  const devtoolsOn = isDevtoolsPermitActive(settings.terminal)
+  const devtoolsUntil = (() => {
+    const raw = settings.terminal.devtoolsExpiresAt
+    if (!raw) return ''
+    const d = new Date(raw)
+    if (Number.isNaN(d.getTime())) return ''
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  })()
 
   /* ────────── RENDER ────────── */
   return (
@@ -4241,6 +4253,26 @@ export default function POSScreen({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {devtoolsOn && (
+            <button
+              type="button"
+              onClick={() => { void window.electron.devtools.open() }}
+              title="Geliştirici araçlarını aç"
+              style={{
+                background: '#F59E0B',
+                color: '#1C1917',
+                border: 'none',
+                borderRadius: 999,
+                padding: '3px 10px',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🛠 Hata ayıklama modu{devtoolsUntil ? ` · ${devtoolsUntil}'e kadar` : ''}
+            </button>
+          )}
           <ConnectionDot status={conn} />
           {commandListenerActive && (
             <button
@@ -4723,7 +4755,7 @@ export default function POSScreen({
                 onClick={() => {
                   const val = parseFloat(docDiscInput.replace(',', '.')) || 0
                   if (docDiscMode === 'rate') {
-                    const maxPct = posSettings.maxDocDiscountPct ?? 100
+                    const maxPct = settings.cashier.maxDocDiscountPct
                     if (val > maxPct) {
                       showError('İndirim Limiti', `Maksimum belge indirimi %${maxPct}`)
                       return
@@ -4731,7 +4763,7 @@ export default function POSScreen({
                     setDocDiscountRate(val)
                     setDocDiscountAmt(0)
                   } else {
-                    const maxPct = posSettings.maxDocDiscountPct ?? 100
+                    const maxPct = settings.cashier.maxDocDiscountPct
                     if (lineSubtotal > 0) {
                       const effectivePct = (val / lineSubtotal) * 100
                       if (effectivePct > maxPct) {
@@ -5235,7 +5267,7 @@ export default function POSScreen({
               type="button"
               onClick={() => {
                 if (cart.length === 0 && !currentOrderNo) {
-                  setCurrentOrderNo(nextOrderNo(posSettings.terminalNumber))
+                  setCurrentOrderNo(nextOrderNo(settings.terminal.terminalInfo.terminalNumber))
                   setLastReceipt(null)
                 }
 
@@ -6132,7 +6164,7 @@ export default function POSScreen({
                 ? '#FFF5F5'
                 : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
               const pills: ReactNode[] = []
-              if (posSettings.showCode && item.code?.trim()) pills.push(
+              if (settings.cashier.showCode && item.code?.trim()) pills.push(
                 <span key="kod" style={{
                   display: 'inline-flex', alignItems: 'center',
                   padding: '0 5px', height: 16, borderRadius: 3,
@@ -6287,7 +6319,7 @@ export default function POSScreen({
                       }}>
                         {rowIdx + 1}
                       </div>
-                    {posSettings.allowLineDiscount ? (
+                    {settings.cashier.allowLineDiscount ? (
                       <button
                         type="button"
                         onClick={e => {
@@ -6896,7 +6928,7 @@ export default function POSScreen({
                   { icon: '%', label: docDiscountRate > 0 || docDiscountAmt > 0
                       ? `Belge İndirimi (${docDiscountRate > 0 ? `%${docDiscountRate}` : fmt(docDiscountAmt)})`
                       : 'Belge İndirimi',
-                    disabled: cart.length === 0 || !(posSettings.allowDocDiscount ?? true) },
+                    disabled: cart.length === 0 || !(settings.cashier.allowDocDiscount) },
                   { icon: '✕', label: 'Ürün İptal', disabled: cart.length === 0 },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
@@ -7242,7 +7274,7 @@ export default function POSScreen({
                 </div>
 
                 {/* Ödeme Yöntemi — sadece Pavo cari tahsilat açıksa */}
-                {posSettings?.cariPaymentUsePavo && pavoSettings && (
+                {settings.terminal.cariPaymentUsePavo && pavoSettings && (
                   <div style={{ marginBottom: 0 }}>
                     <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>
                       Ödeme Yöntemi
@@ -7439,7 +7471,7 @@ export default function POSScreen({
                 >⌨</button>
               </div>
 
-          {/* PLU grid — sütun/satır sayısı posSettings'ten */}
+          {/* PLU grid — sütun/satır sayısı kasiyer ayarından */}
           {searchQ ? (
             // Arama modu — liste
             <div style={{ flex: 1, overflowY: 'auto', padding: '5px 8px' }}>
@@ -7453,15 +7485,15 @@ export default function POSScreen({
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: fontSizeName, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{truncatePluName(p.name)}</div>
-                    {(posSettings.showCode || posSettings.showBarcode) && (
+                    {(settings.cashier.showCode || settings.cashier.showBarcode) && (
                       <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>
-                        {posSettings.showCode && p.code}
-                        {posSettings.showCode && posSettings.showBarcode && p.barcode && ' · '}
-                        {posSettings.showBarcode && p.barcode}
+                        {settings.cashier.showCode && p.code}
+                        {settings.cashier.showCode && settings.cashier.showBarcode && p.barcode && ' · '}
+                        {settings.cashier.showBarcode && p.barcode}
                       </div>
                     )}
                   </div>
-                  {posSettings.showPrice && (
+                  {settings.cashier.showPrice && (
                     <div style={{ fontSize: fontSizePrice, fontWeight: 700, color: activeColor, flexShrink: 0, marginLeft: 8 }}>{fmt(p.price)}</div>
                   )}
                 </div>
@@ -7494,9 +7526,9 @@ export default function POSScreen({
                     price={p.price}
                     code={p.code ?? ''}
                     barcode={p.barcode ?? ''}
-                    showPrice={posSettings.showPrice ?? true}
-                    showCode={posSettings.showCode ?? true}
-                    showBarcode={posSettings.showBarcode ?? false}
+                    showPrice={settings.cashier.showPrice ?? true}
+                    showCode={settings.cashier.showCode ?? true}
+                    showBarcode={settings.cashier.showBarcode ?? false}
                     activeColor={activeColor}
                     activeSoft={activeSoft}
                     baseFontSize={fontSizeName}
@@ -8314,6 +8346,7 @@ export default function POSScreen({
                     triggerType: modal.trigger,
                     data:        modal.data,
                     templateId:  t.id,
+                    cashierId:   cashier.id,
                   })
                 }}
                 style={{

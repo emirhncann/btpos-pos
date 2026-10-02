@@ -80,6 +80,13 @@ contextBridge.exposeInMainWorld('electron', {
       templateId?: string
     }) => ipcRenderer.invoke('templates:printWithBehavior', opts),
   },
+  display: {
+    apply: (enabled: boolean) => ipcRenderer.invoke('display:apply', enabled),
+  },
+  devtools: {
+    refresh: () => ipcRenderer.invoke('devtools:refresh') as Promise<{ enabled: boolean; expiresAt: string | null }>,
+    open: () => ipcRenderer.invoke('devtools:open') as Promise<{ success: boolean }>,
+  },
   secondScreen: {
     open: () => ipcRenderer.invoke('secondScreen:open'),
     update: (payload: SecondScreenPayload) => ipcRenderer.invoke('secondScreen:update', payload),
@@ -121,12 +128,13 @@ contextBridge.exposeInMainWorld('electron', {
     savePluGroups:      (groups: unknown[])                  => ipcRenderer.invoke('db:savePluGroups', groups),
     getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) =>
       ipcRenderer.invoke('db:getPluGroups', companyId, wpId, cashierId),
-    savePosSettings:    (settings: unknown, cashierId?: string) =>
-      ipcRenderer.invoke('db:savePosSettings', settings, cashierId),
-    getPosSettings:     (cashierId?: string) =>
-      ipcRenderer.invoke('db:getPosSettings', cashierId),
-    updatePosWorkplaceTerminal: (data: unknown) =>
-      ipcRenderer.invoke('db:updatePosWorkplaceTerminal', data),
+    getTerminalSettings: () => ipcRenderer.invoke('db:getTerminalSettings'),
+    getCashierSettings: (cashierId?: string | null) =>
+      ipcRenderer.invoke('db:getCashierSettings', cashierId),
+    syncSettingsBundle: (bundle: unknown, terminalId: string) =>
+      ipcRenderer.invoke('db:syncSettingsBundle', bundle, terminalId),
+    matchPaymentAccounts: (opts: unknown) =>
+      ipcRenderer.invoke('db:matchPaymentAccounts', opts),
     saveCommandHistory: (row: unknown)                        => ipcRenderer.invoke('db:saveCommandHistory', row),
     getCommandHistory:  (limit?: number)                     => ipcRenderer.invoke('db:getCommandHistory', limit),
     syncProductsAcid:   (items: unknown[], mode?: string)                      => ipcRenderer.invoke('db:syncProductsAcid', items, mode ?? 'full'),

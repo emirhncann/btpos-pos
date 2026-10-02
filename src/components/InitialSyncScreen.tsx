@@ -6,7 +6,7 @@ interface Props {
   companyId: string
   terminalId: string
   onDone: () => void
-  onSettings: (s: PosSettingsRow) => void
+  onSettings: () => void
 }
 
 export default function InitialSyncScreen({ companyId, terminalId, onDone, onSettings }: Props) {

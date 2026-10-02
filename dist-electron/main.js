@@ -1,8 +1,10 @@
 "use strict";
+Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 require("electron");
 require("child_process");
 require("fs");
 require("path");
 require("os");
 require("electron-store");
-require("./main-YfCm8N7j.js");
+const main = require("./main-Beqs_Wy9.js");
+exports.applyCustomerDisplay = main.applyCustomerDisplay;
