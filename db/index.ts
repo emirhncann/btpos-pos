@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 4
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -65,7 +65,8 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       device_uid TEXT NOT NULL,
       activated_at TEXT NOT NULL,
       plan_name TEXT,
-      expiry_date TEXT
+      expiry_date TEXT,
+      license_key TEXT
     );
 
     CREATE TABLE IF NOT EXISTS products (
@@ -122,6 +123,11 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       discount_amount REAL DEFAULT 0,
       line_total REAL NOT NULL,
       applied_by TEXT,
+      unit_price_gross REAL,
+      gross_amount REAL,
+      line_discount REAL DEFAULT 0,
+      doc_discount_share REAL DEFAULT 0,
+      net_amount REAL,
       FOREIGN KEY (sale_id) REFERENCES sales(id)
     );
 
@@ -358,6 +364,7 @@ function addColumnIfMissing(sqlite: Database.Database, table: string, column: st
 function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'products', 'modification_date', 'modification_date TEXT')
   addColumnIfMissing(sqlite, 'products_temp', 'modification_date', 'modification_date TEXT')
+  addColumnIfMissing(sqlite, 'activation', 'license_key', 'license_key TEXT')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'duplicate_item_action', `duplicate_item_action TEXT DEFAULT 'increase_qty'`)
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'min_qty_per_line', 'min_qty_per_line INTEGER DEFAULT 1')
   addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_line_discount', 'allow_line_discount INTEGER DEFAULT 1')
@@ -419,6 +426,11 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sale_items', 'applied_by', 'applied_by TEXT')
+  addColumnIfMissing(sqlite, 'sale_items', 'unit_price_gross', 'unit_price_gross REAL')
+  addColumnIfMissing(sqlite, 'sale_items', 'gross_amount', 'gross_amount REAL')
+  addColumnIfMissing(sqlite, 'sale_items', 'line_discount', 'line_discount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'doc_discount_share', 'doc_discount_share REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'net_amount', 'net_amount REAL')
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS customers (

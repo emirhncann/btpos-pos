@@ -155,6 +155,23 @@ declare global {
         getPluGroups:       (companyId: string, wpId?: string | null, cashierId?: string | null) => Promise<PluGroupCacheRow[]>
         getTerminalSettings: () => Promise<import('./lib/settingsModel').TerminalSettings>
         getCashierSettings: (cashierId?: string | null) => Promise<import('./lib/settingsModel').CashierSettings>
+        saveActivation: (row: {
+          terminalId: string
+          companyId: string
+          deviceUid: string
+          planName?: string | null
+          expiryDate?: string | null
+          licenseKey?: string | null
+        }) => Promise<{ success: boolean }>
+        getActivation: () => Promise<{
+          terminalId: string
+          companyId: string
+          deviceUid: string
+          activatedAt: string
+          planName: string | null
+          expiryDate: string | null
+          licenseKey: string | null
+        } | null>
         syncSettingsBundle: (
           bundle: import('./lib/settingsModel').SettingsBundle,
           terminalId: string,
@@ -199,6 +216,7 @@ declare global {
         syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
         getCustomerById:    (companyId: string, id: string) => Promise<CustomerRow | null>
+        getCustomerByCode:  (companyId: string, code: string) => Promise<CustomerRow | null>
         getPendingInvoices: (onlyAnonymous?: boolean) => Promise<SaleDbRow[]>
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
@@ -231,6 +249,10 @@ declare global {
         markOperationSuccess: (id: string) => Promise<void>
         markOperationFailed: (id: string, error: string) => Promise<void>
         retryOperation:    (id: string) => Promise<void>
+        retryOperationsByErrorPrefix: (companyId: string, prefix: string) => Promise<number>
+        updateOperationPayload: (id: string, payload: Record<string, unknown>) => Promise<void>
+        markOperationConfigFailed: (id: string, error: string) => Promise<void>
+        markOperationManuallySent: (id: string, note: string) => Promise<void>
         deleteOperation:   (id: string) => Promise<void>
         getSalesReport: (opts: { dateFrom: string; dateTo: string }) => Promise<SalesReportRow[]>
         getDayEndReport: (opts: { dateFrom: string; dateTo: string }) => Promise<Array<{
@@ -530,6 +552,11 @@ declare global {
     discountAmount?: number
     lineTotal:       number
     appliedBy?:      string
+    unitPriceGross?: number
+    grossAmount?: number
+    lineDiscount?: number
+    docDiscountShare?: number
+    netAmount?: number
   }
 
   interface SaveSaleResult {
@@ -588,7 +615,12 @@ declare global {
     price:        number
     vatRate:      number
     unit:         string
-    discountRate?: number
+    unitPriceGross: number
+    grossAmount: number
+    lineDiscount: number
+    docDiscountShare: number
+    discountAmount: number
+    netAmount: number
   }
 
   interface SalePaymentRow {

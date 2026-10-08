@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { api, API_URL } from '../lib/api'
+import {
+  QueueCustomerError,
+  applyCustomerToInvoicePayload,
+  queueCustomerErrorMessage,
+} from '../lib/queueCustomer'
 
 const POLL_INTERVAL = 15_000
 
@@ -82,6 +87,36 @@ export async function processOperationQueue({
         try {
           let success = false
           let error: string | null = null
+          let sendPayload = payload
+
+          if (
+            op.type === 'invoice'
+            || op.type === 'day_end_invoice'
+            || op.type === 'return_invoice'
+          ) {
+            try {
+              sendPayload = await applyCustomerToInvoicePayload(companyId, payload)
+            } catch (e) {
+              const { message } = queueCustomerErrorMessage(e)
+              await window.electron.db.markOperationConfigFailed(op.id, message)
+              if (e instanceof QueueCustomerError && op.type === 'invoice') {
+                const sid = payload.sale_id
+                if (typeof sid === 'string' && !sid.startsWith('gunsonu-')) {
+                  await window.electron.db.markInvoiceError(sid, message)
+                }
+              }
+              if (e instanceof QueueCustomerError && op.type === 'day_end_invoice') {
+                const ids = payload.day_end_sale_ids
+                if (Array.isArray(ids) && ids.every((x): x is string => typeof x === 'string')) {
+                  for (const saleId of ids) {
+                    await window.electron.db.markInvoiceError(saleId, message)
+                  }
+                }
+              }
+              onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: message })
+              continue
+            }
+          }
 
           if (op.type === 'invoice') {
             const invItems = (payload.items ?? []) as Array<{
@@ -102,13 +137,13 @@ export async function processOperationQueue({
               onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
               continue
             }
-            const res = await api.sendInvoiceToErp(companyId, payload as never)
+            const res = await api.sendInvoiceToErp(companyId, sendPayload as never)
             success = !!(res.success && res.invoice_id)
             error = res.message ?? null
             const invoiceNumber = pickInvoiceNumber(res as unknown as Record<string, unknown>)
 
             if (success && res.invoice_id) {
-              const saleData = payload as {
+              const saleData = sendPayload as {
                 sale_id?: string
                 cash_amount?: number
                 card_amount?: number
@@ -190,7 +225,7 @@ export async function processOperationQueue({
               }
             }
 
-            const sid = payload.sale_id
+            const sid = sendPayload.sale_id
             if (typeof sid === 'string' && !sid.startsWith('gunsonu-')) {
               if (success && res.invoice_id) {
                 await window.electron.db.markInvoiceSent(sid, String(res.invoice_id))
@@ -219,13 +254,13 @@ export async function processOperationQueue({
               onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
               continue
             }
-            const res = await api.sendInvoiceToErp(companyId, payload as never)
+            const res = await api.sendInvoiceToErp(companyId, sendPayload as never)
             success = !!(res.success && res.invoice_id)
             error = res.message ?? null
             const invoiceNumber = pickInvoiceNumber(res as unknown as Record<string, unknown>)
 
             if (success && res.invoice_id) {
-              const saleData = payload as {
+              const saleData = sendPayload as {
                 sale_id?: string
                 cash_amount?: number
                 card_amount?: number
@@ -275,7 +310,7 @@ export async function processOperationQueue({
               }
             }
 
-            const ids = payload.day_end_sale_ids
+            const ids = sendPayload.day_end_sale_ids
             if (Array.isArray(ids) && ids.every((x): x is string => typeof x === 'string')) {
               if (success && res.invoice_id) {
                 for (const saleId of ids) {
@@ -291,13 +326,13 @@ export async function processOperationQueue({
             const res = await fetch(`${API_URL}/integration/return-invoice/${companyId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
+              body: JSON.stringify(sendPayload),
             })
             const data = await res.json() as { success?: boolean; message?: string; invoice_id?: string }
             success = data.success === true
             error = data.message ?? null
 
-            const returnSaleId = payload.sale_id
+            const returnSaleId = sendPayload.sale_id
             if (typeof returnSaleId === 'string') {
               if (success && data.invoice_id) {
                 await window.electron.db.markInvoiceSent(returnSaleId, String(data.invoice_id))

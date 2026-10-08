@@ -131,6 +131,15 @@ contextBridge.exposeInMainWorld('electron', {
     getTerminalSettings: () => ipcRenderer.invoke('db:getTerminalSettings'),
     getCashierSettings: (cashierId?: string | null) =>
       ipcRenderer.invoke('db:getCashierSettings', cashierId),
+    saveActivation: (row: {
+      terminalId: string
+      companyId: string
+      deviceUid: string
+      planName?: string | null
+      expiryDate?: string | null
+      licenseKey?: string | null
+    }) => ipcRenderer.invoke('db:saveActivation', row),
+    getActivation: () => ipcRenderer.invoke('db:getActivation'),
     syncSettingsBundle: (bundle: unknown, terminalId: string) =>
       ipcRenderer.invoke('db:syncSettingsBundle', bundle, terminalId),
     matchPaymentAccounts: (opts: unknown) =>
@@ -148,6 +157,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:getCustomers', companyId, query),
     getCustomerById:    (companyId: string, id: string) =>
       ipcRenderer.invoke('db:getCustomerById', companyId, id),
+    getCustomerByCode:  (companyId: string, code: string) =>
+      ipcRenderer.invoke('db:getCustomerByCode', companyId, code),
     getPendingInvoices: (onlyAnonymous?: boolean) =>
       ipcRenderer.invoke('db:getPendingInvoices', onlyAnonymous),
     markInvoiceSent:   (saleId: string, invoiceId: string) =>
@@ -181,6 +192,14 @@ contextBridge.exposeInMainWorld('electron', {
     markOperationFailed: (id: string, error: string) =>
       ipcRenderer.invoke('db:markOperationFailed', id, error),
     retryOperation:    (id: string) => ipcRenderer.invoke('db:retryOperation', id),
+    retryOperationsByErrorPrefix: (companyId: string, prefix: string) =>
+      ipcRenderer.invoke('db:retryOperationsByErrorPrefix', companyId, prefix),
+    updateOperationPayload: (id: string, payload: Record<string, unknown>) =>
+      ipcRenderer.invoke('db:updateOperationPayload', id, payload),
+    markOperationConfigFailed: (id: string, error: string) =>
+      ipcRenderer.invoke('db:markOperationConfigFailed', id, error),
+    markOperationManuallySent: (id: string, note: string) =>
+      ipcRenderer.invoke('db:markOperationManuallySent', id, note),
     deleteOperation:   (id: string) => ipcRenderer.invoke('db:deleteOperation', id),
     getSalesReport: (opts: { dateFrom: string; dateTo: string }) =>
       ipcRenderer.invoke('db:getSalesReport', opts),

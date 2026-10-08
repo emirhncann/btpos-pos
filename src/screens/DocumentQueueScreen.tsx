@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
+import {
+  customerRefFromCustomerRow,
+  customerRefTorba,
+  payloadSummary,
+  TORBA_CARI_YOK,
+} from '../lib/queueCustomer'
 
 type OpStatus = 'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
 
@@ -14,6 +20,7 @@ interface OpRow {
   error:       string | null
   createdAt:   string
   sentAt:      string | null
+  payload:     string
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -53,12 +60,18 @@ function formatError(error: string): string {
   return trimmed.slice(0, 117) + '…'
 }
 
+const INVOICE_TYPES = new Set(['invoice', 'day_end_invoice', 'return_invoice'])
+
 export function DocumentQueueScreen({
   companyId,
+  cashierRole = 'cashier',
   onAfterEnqueue,
+  onRetryTrigger,
 }: {
   companyId: string
+  cashierRole?: string
   onAfterEnqueue?: () => void
+  onRetryTrigger?: () => void
 }) {
   const [ops,          setOps]          = useState<OpRow[]>([])
   const [loading,      setLoading]      = useState(true)
@@ -68,7 +81,12 @@ export function DocumentQueueScreen({
   const [dateTo,       setDateTo]       = useState(todayStr())
   const [retrying,     setRetrying]     = useState<string | null>(null)
   const [sending,      setSending]      = useState(false)
+  const [detailOp,     setDetailOp]     = useState<OpRow | null>(null)
+  const [changeOp,     setChangeOp]     = useState<OpRow | null>(null)
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerHits,  setCustomerHits]  = useState<CustomerRow[]>([])
   const { dialogProps, showError, showSuccess, confirm } = useAlertDialog()
+  const isManager = cashierRole === 'manager'
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -111,6 +129,7 @@ export function DocumentQueueScreen({
     try {
       await window.electron.db.retryOperation(id)
       await reload()
+      onRetryTrigger?.()
     } finally {
       setRetrying(null)
     }
@@ -120,6 +139,59 @@ export function DocumentQueueScreen({
     const failed = ops.filter(o => o.status === 'failed')
     for (const op of failed) await window.electron.db.retryOperation(op.id)
     await reload()
+    onRetryTrigger?.()
+  }
+
+  const torbaFailed = ops.filter(
+    o => o.status === 'failed' && (o.error ?? '').includes(TORBA_CARI_YOK),
+  )
+
+  const handleRetryTorbaAll = async () => {
+    await window.electron.db.retryOperationsByErrorPrefix(companyId, TORBA_CARI_YOK)
+    await reload()
+    onRetryTrigger?.()
+  }
+
+  async function searchCustomers(q: string) {
+    setCustomerQuery(q)
+    if (!q.trim()) {
+      setCustomerHits([])
+      return
+    }
+    const list = await window.electron.db.getCustomers(companyId, q.trim())
+    setCustomerHits(list.slice(0, 20))
+  }
+
+  async function applyCustomerRef(
+    op: OpRow,
+    ref: { type: 'customer'; id: string } | { type: 'torba' },
+  ) {
+    const raw = JSON.parse(op.payload || '{}') as Record<string, unknown>
+    raw.customer_ref = ref
+    delete raw.customer
+    delete raw.customer_erp_id
+    await window.electron.db.updateOperationPayload(op.id, raw)
+    await window.electron.db.retryOperation(op.id)
+    setChangeOp(null)
+    setCustomerQuery('')
+    setCustomerHits([])
+    await reload()
+    onRetryTrigger?.()
+  }
+
+  async function handleManualSent(op: OpRow) {
+    const ok = await confirm({
+      title: 'Gönderildi İşaretle',
+      message:
+        'Bu belge ERP\'ye elle girildiyse kuyruktan düşürülür. Emin misiniz?',
+      confirmLabel: 'Evet, işaretle',
+      cancelLabel:  'Vazgeç',
+    })
+    if (!ok) return
+    const note = `Manuel — ${cashierRole} — ${new Date().toISOString()}`
+    await window.electron.db.markOperationManuallySent(op.id, note)
+    await reload()
+    showSuccess('Tamam', 'Kayıt gönderildi olarak işaretlendi.')
   }
 
   const handleDelete = async (id: string) => {
@@ -267,6 +339,24 @@ export function DocumentQueueScreen({
         </div>
       )}
 
+      {torbaFailed.length > 0 && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', background: '#FFEBEE',
+          border: '1px solid #EF9A9A', borderRadius: 8,
+        }}>
+          <div style={{ fontSize: 13, color: '#C62828', fontWeight: 600, marginBottom: 8 }}>
+            {torbaFailed.length} belge torba cari tanımlı olmadığı için gönderilemedi.
+            Torba cari tanımlandıktan sonra &quot;Tümünü Yeniden Dene&quot; ile tekrar deneyin.
+          </div>
+          <button type="button" onClick={() => void handleRetryTorbaAll()}
+            style={{ background: '#C62828', color: 'white', border: 'none',
+              borderRadius: 7, padding: '6px 14px', fontSize: 12,
+              fontWeight: 600, cursor: 'pointer' }}>
+            Tümünü Yeniden Dene
+          </button>
+        </div>
+      )}
+
       {counts.failed > 0 && (
         <div style={{ marginBottom: 12, padding: '10px 14px', background: '#FFF3E0',
           border: '1px solid #FFCC02', borderRadius: 8,
@@ -278,7 +368,7 @@ export function DocumentQueueScreen({
             style={{ background: '#E65100', color: 'white', border: 'none',
               borderRadius: 7, padding: '6px 14px', fontSize: 12,
               fontWeight: 600, cursor: 'pointer' }}>
-            Tümünü Tekrar Gönder
+            Tümünü Yeniden Dene
           </button>
         </div>
       )}
@@ -343,7 +433,14 @@ export function DocumentQueueScreen({
                   {ss.label}
                 </div>
 
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+                  {(op.status === 'failed' || INVOICE_TYPES.has(op.type)) && (
+                    <button type="button" onClick={() => setDetailOp(op)}
+                      style={{ background: '#F3F4F6', border: '1px solid #E5E7EB',
+                        borderRadius: 7, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}>
+                      Detay
+                    </button>
+                  )}
                   {op.status === 'failed' && (
                     <button type="button"
                       onClick={() => void handleRetry(op.id)}
@@ -352,7 +449,23 @@ export function DocumentQueueScreen({
                         borderRadius: 7, padding: '5px 10px', fontSize: 11,
                         fontWeight: 600, color: '#1D4ED8', cursor: 'pointer',
                         opacity: retrying === op.id ? 0.5 : 1 }}>
-                      {retrying === op.id ? '...' : '↺ Tekrar'}
+                      {retrying === op.id ? '...' : 'Yeniden Dene'}
+                    </button>
+                  )}
+                  {op.status === 'failed' && INVOICE_TYPES.has(op.type) && (
+                    <button type="button" onClick={() => { setChangeOp(op); setCustomerQuery('') }}
+                      style={{ background: '#F3E5F5', border: '1px solid #CE93D8',
+                        borderRadius: 7, padding: '5px 8px', fontSize: 11,
+                        fontWeight: 600, color: '#6A1B9A', cursor: 'pointer' }}>
+                      Cariyi Değiştir
+                    </button>
+                  )}
+                  {op.status === 'failed' && isManager && (
+                    <button type="button" onClick={() => void handleManualSent(op)}
+                      style={{ background: '#E8F5E9', border: '1px solid #A5D6A7',
+                        borderRadius: 7, padding: '5px 8px', fontSize: 11,
+                        fontWeight: 600, color: '#2E7D32', cursor: 'pointer' }}>
+                      Gönderildi İşaretle
                     </button>
                   )}
                   {op.status === 'success' && (
@@ -369,6 +482,98 @@ export function DocumentQueueScreen({
           })}
         </div>
       )}
+      {detailOp && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%',
+            maxHeight: '80vh', overflow: 'auto',
+          }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Kayıt detayı</h3>
+            {(() => {
+              const full = ops.find(o => o.id === detailOp.id)
+              let summary = { saleId: '—', expectedTotal: null as number | null, customerHint: '—', invoiceDate: '—' }
+              try {
+                if (full?.payload) {
+                  summary = payloadSummary(JSON.parse(full.payload) as Record<string, unknown>)
+                }
+              } catch { /* parse hatası */ }
+              return (
+                <div style={{ fontSize: 13, lineHeight: 1.6, color: '#374151' }}>
+                  <div><strong>Tür:</strong> {TYPE_LABEL[detailOp.type] ?? detailOp.type}</div>
+                  <div><strong>Fiş / satış:</strong> {summary.saleId}</div>
+                  <div><strong>Cari:</strong> {summary.customerHint}</div>
+                  <div><strong>Tutar:</strong> {summary.expectedTotal != null
+                    ? `${summary.expectedTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+                    : '—'}</div>
+                  <div><strong>Tarih:</strong> {summary.invoiceDate}</div>
+                  {detailOp.error && (
+                    <div style={{ marginTop: 10, color: '#C62828', fontSize: 12,
+                      background: '#FEF2F2', padding: 8, borderRadius: 6 }}>
+                      {detailOp.error}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+            <button type="button" onClick={() => setDetailOp(null)}
+              style={{ marginTop: 16, padding: '8px 16px', borderRadius: 8,
+                border: '1px solid #E5E7EB', background: '#F9FAFB', cursor: 'pointer' }}>
+              Kapat
+            </button>
+          </div>
+        </div>
+      )}
+
+      {changeOp && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        }}>
+          <div style={{
+            background: 'white', borderRadius: 12, padding: 20, maxWidth: 420, width: '100%',
+          }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Cariyi değiştir</h3>
+            <input
+              value={customerQuery}
+              onChange={e => void searchCustomers(e.target.value)}
+              placeholder="Cari ara (ad, kod, vergi no…)"
+              style={{ width: '100%', padding: '8px 10px', borderRadius: 8,
+                border: '1px solid #E5E7EB', marginBottom: 8, boxSizing: 'border-box' }}
+            />
+            <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 10 }}>
+              {customerHits.map(c => (
+                <button key={c.id} type="button"
+                  onClick={() => void applyCustomerRef(changeOp, customerRefFromCustomerRow(c))}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                    border: 'none', borderBottom: '1px solid #F3F4F6', background: 'white',
+                    cursor: 'pointer', fontSize: 13,
+                  }}>
+                  {c.name} <span style={{ color: '#9CA3AF' }}>({c.code})</span>
+                </button>
+              ))}
+            </div>
+            <button type="button"
+              onClick={() => void applyCustomerRef(changeOp, customerRefTorba())}
+              style={{
+                width: '100%', padding: '10px', borderRadius: 8, marginBottom: 8,
+                border: '1px solid #CE93D8', background: '#F3E5F5', fontWeight: 600,
+                cursor: 'pointer', color: '#6A1B9A',
+              }}>
+              Torba cari kullan (gönderimde ayarlardan çözülür)
+            </button>
+            <button type="button" onClick={() => setChangeOp(null)}
+              style={{ width: '100%', padding: '8px', borderRadius: 8,
+                border: '1px solid #E5E7EB', background: '#F9FAFB', cursor: 'pointer' }}>
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      )}
+
       <AlertDialog {...dialogProps} />
     </div>
   )

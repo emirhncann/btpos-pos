@@ -1,22 +1,12 @@
+import {
+  customerRefFromCustomerRow,
+  customerRefTorba,
+  tryResolveTorbaCustomer,
+} from './queueCustomer'
+
 export type SendPendingInvoicesOpts = { silent?: boolean }
 
-/** ERP fatura `customer` gövdesi — `api.sendInvoiceToErp` ile uyumlu */
-function customerRowToInvoicePayload(c: CustomerRow) {
-  return {
-    code:       c.code       || undefined,
-    name:       c.name,
-    firstName:  c.firstName  || undefined,
-    lastName:   c.lastName   || undefined,
-    taxNo:      c.taxNo      || undefined,
-    address:    c.address    || undefined,
-    phone:      c.phone      || undefined,
-    email:      c.email      || undefined,
-    postalCode: c.postalCode || undefined,
-    city:       c.city       || undefined,
-    district:   c.district   || undefined,
-    isPerson:   c.isPerson ?? true,
-  }
-}
+export { tryResolveTorbaCustomer }
 
 async function withTerminalPayment(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
   const terminalId = String(await window.electron.store.get('terminal_id').catch(() => '') ?? '')
@@ -32,52 +22,6 @@ async function withTerminalPayment(payload: Record<string, unknown>): Promise<Re
   return { ...payload, terminal_id: terminalId, payment_accounts: paymentAccounts }
 }
 
-/** Cari seçilmediğinde fatura/iade için torba cari (kasa ayarından) */
-export async function resolveTorbaCustomer(companyId: string): Promise<CustomerRow> {
-  const settings = await window.electron.db.getTerminalSettings()
-  const torbaKey = settings.torbaCariId?.trim()
-
-  if (torbaKey) {
-    const allCustomers = await window.electron.db.getCustomers(companyId)
-    const found = allCustomers.find(c => c.code === torbaKey)
-    if (found) return found
-
-    return {
-      id:         '',
-      companyId,
-      code:       torbaKey,
-      name:       settings.torbaCariName ?? 'Genel Müşteri',
-      phone:      '',
-      taxNo:      '',
-      address:    '',
-      balance:    0,
-      isPerson:   true,
-      firstName:  '',
-      lastName:   '',
-      postalCode: '',
-      city:       '',
-      district:   '',
-    }
-  }
-
-  return {
-    id:         '',
-    companyId,
-    code:       '',
-    name:       'Genel Müşteri',
-    phone:      '',
-    taxNo:      '',
-    address:    '',
-    balance:    0,
-    isPerson:   true,
-    firstName:  '',
-    lastName:   '',
-    postalCode: '',
-    city:       '',
-    district:   '',
-  }
-}
-
 /** Gün sonu: carisiz bekleyen fişler tek ERP faturasında birleştirilir; gönderim kuyruğa yazılır */
 export async function sendPendingInvoices(
   companyId: string,
@@ -88,69 +32,40 @@ export async function sendPendingInvoices(
 
   const settings = await window.electron.db.getTerminalSettings()
   const invoiceType: 'e_archive' | 'paper' = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
-  let torbaCari: {
-    code?: string
-    name: string
-    erp_id?: number
-    taxNo?: string
-    address?: string
-    phone?: string
-    isPerson: boolean
-    firstName?: string
-    lastName?: string
-    postalCode?: string
-    city?: string
-    district?: string
-  }
+  const torbaRef = customerRefTorba()
 
-  const torbaKey = settings.torbaCariId?.trim()
-  if (torbaKey) {
-    const allCustomers = await window.electron.db.getCustomers(companyId)
-    const found = allCustomers.find(c => c.code === torbaKey)
-    if (found) {
-      torbaCari = {
-        code:       found.code || undefined,
-        name:       found.name,
-        erp_id:     found.id ? Number.parseInt(found.id, 10) || 0 : 0,
-        taxNo:      found.taxNo || undefined,
-        address:    found.address || undefined,
-        phone:      found.phone || undefined,
-        isPerson:   found.isPerson ?? true,
-        firstName:  found.firstName || undefined,
-        lastName:   found.lastName || undefined,
-        postalCode: found.postalCode || undefined,
-        city:       found.city || undefined,
-        district:   found.district || undefined,
-      }
-    } else {
-      torbaCari = {
-        code:     torbaKey,
-        name:     settings.torbaCariName ?? 'Genel Müşteri',
-        isPerson: true,
-      }
-    }
-  } else {
-    torbaCari = { name: 'Genel Müşteri', isPerson: true }
-  }
-
-  const groupMap = new Map<string, {
+  type DayEndErpLine = {
     product_code: string
-    name:         string
-    quantity:     number
-    price:        number
-    vatRate:      number
-    unit:         string
-    discountRate: number
-    product_id:   number
-  }>()
+    name: string
+    quantity: number
+    vatRate: number
+    unit: string
+    product_id: number
+    unit_price_gross: number
+    gross_amount: number
+    discount_amount: number
+    net_amount: number
+  }
+
+  const groupMap = new Map<string, DayEndErpLine>()
+  let expectedTotal = 0
 
   for (const sale of pending) {
     const items = await window.electron.db.getSaleItems(sale.id)
     for (const i of items) {
-      const key = `${i.productCode}|${i.price}`
+      const qty = Math.abs(Number(i.quantity) || 0)
+      const unitPriceGross = Number(i.unitPriceGross ?? i.price)
+      const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
+      const discountAmount = Number(i.discountAmount ?? 0)
+      const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
+      expectedTotal = Math.round((expectedTotal + netAmount) * 100) / 100
+      const key = `${i.productCode}|${unitPriceGross}|${i.vatRate}`
       const existing = groupMap.get(key)
       if (existing) {
-        existing.quantity += i.quantity
+        existing.quantity = Math.round((existing.quantity + qty) * 1000) / 1000
+        existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
+        existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
+        existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
         if (existing.product_id === 0 && i.productId) {
           existing.product_id = Number.parseInt(i.productId, 10) || 0
         }
@@ -158,12 +73,14 @@ export async function sendPendingInvoices(
         groupMap.set(key, {
           product_code: i.productCode,
           name:         i.productName ?? i.productCode,
-          quantity:     i.quantity,
-          price:        i.price,
+          quantity:     qty,
           vatRate:      i.vatRate,
           unit:         i.unit ?? 'Adet',
-          discountRate: i.discountRate ?? 0,
           product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
+          unit_price_gross: unitPriceGross,
+          gross_amount: grossAmount,
+          discount_amount: discountAmount,
+          net_amount: netAmount,
         })
       }
     }
@@ -199,12 +116,14 @@ export async function sendPendingInvoices(
     product_code: string
     name:         string
     quantity:     number
-    price:        number
     vatRate:      number
     unit:         string
-    discountRate: number
     product_id:   number
     unit_code?:   string
+    unit_price_gross: number
+    gross_amount: number
+    discount_amount: number
+    net_amount: number
   }
 
   let returnBatchCount = 0
@@ -218,14 +137,34 @@ export async function sendPendingInvoices(
         items?: DayEndLineItem[]
       }
       for (const item of payload.items ?? []) {
-        const key = `${item.product_code}|${item.price}`
+        const unitPriceGross = Number(item.unit_price_gross ?? 0)
+        const qty = Math.abs(Number(item.quantity) || 0)
+        const grossAmount = Number(item.gross_amount ?? (unitPriceGross * qty).toFixed(2))
+        const discountAmount = Number(item.discount_amount ?? 0)
+        const netAmount = Number(item.net_amount ?? (grossAmount - discountAmount).toFixed(2))
+        const key = `${item.product_code}|${unitPriceGross}|${item.vatRate}`
         const existing = returnItems.find(r =>
-          `${r.product_code}|${r.price}` === key,
+          `${r.product_code}|${r.unit_price_gross}|${r.vatRate}` === key,
         )
         if (existing) {
-          existing.quantity += item.quantity
+          existing.quantity += qty
+          existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
+          existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
+          existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
         } else {
-          returnItems.push({ ...item })
+          returnItems.push({
+            product_code: item.product_code,
+            name: item.name,
+            quantity: qty,
+            vatRate: item.vatRate,
+            unit: item.unit,
+            product_id: item.product_id,
+            unit_code: item.unit_code,
+            unit_price_gross: unitPriceGross,
+            gross_amount: grossAmount,
+            discount_amount: discountAmount,
+            net_amount: netAmount,
+          })
         }
       }
     }
@@ -250,8 +189,7 @@ export async function sendPendingInvoices(
         type:      'return_invoice',
         payload: await withTerminalPayment({
           sale_id:         returnSaleId,
-          customer:        torbaCari,
-          customer_erp_id: Number(torbaCari.erp_id ?? 0),
+          customer_ref:    torbaRef,
           items:           returnItems,
           invoice_date:    returnDate,
           description:     returnDesc,
@@ -295,9 +233,9 @@ export async function sendPendingInvoices(
   const payload = {
     sale_id:           daySaleId,
     day_end_sale_ids:  pending.map(s => s.id),
-    customer:          torbaCari,
-    customer_erp_id:   Number(torbaCari.erp_id ?? 0),
+    customer_ref:      torbaRef,
     items:             allItems,
+    expected_total:    expectedTotal,
     invoice_date:      invoiceDate,
     description,
     endpoint,
@@ -345,31 +283,42 @@ export async function sendInvoiceForSale(
     : `/integration/invoice/${companyId}`
 
   const items = await window.electron.db.getSaleItems(saleId)
+  const mappedItems = await Promise.all(items.map(async i => {
+    let productId = 0
+    let unitCode = 'C62'
+    if (invoiceType === 'paper') {
+      const product = await window.electron.db.getProductByCode(i.productCode)
+      const productIdRaw = await window.electron.db.getProductIdByCode(i.productCode)
+      productId = Number.parseInt(productIdRaw ?? '0', 10) || 0
+      unitCode = await window.electron.db.getUnitPavoCode(product?.unit ?? 'Adet')
+    }
+    const qty = Math.abs(Number(i.quantity) || 0)
+    const unitPriceGross = Number(i.unitPriceGross ?? i.price)
+    const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
+    const discountAmount = Number(i.discountAmount ?? 0)
+    const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
+    return {
+      product_code: i.productCode,
+      name:         i.productName ?? i.productCode,
+      quantity:     qty,
+      vatRate:      i.vatRate,
+      unit:         i.unit ?? 'Adet',
+      product_id:   productId,
+      unit_code:    unitCode,
+      unit_price_gross: unitPriceGross,
+      gross_amount: grossAmount,
+      discount_amount: discountAmount,
+      net_amount: netAmount,
+    }
+  }))
+  const expectedTotal = Math.round(
+    mappedItems.reduce((s, i) => s + Number(i.net_amount), 0) * 100,
+  ) / 100
   const payload = {
     sale_id:      saleId,
-    customer:     customerRowToInvoicePayload(customer),
-    customer_erp_id: Number.parseInt(customer.id ?? '0', 10) || 0,
-    items:        await Promise.all(items.map(async i => {
-      let productId = 0
-      let unitCode = 'C62'
-      if (invoiceType === 'paper') {
-        const product = await window.electron.db.getProductByCode(i.productCode)
-        const productIdRaw = await window.electron.db.getProductIdByCode(i.productCode)
-        productId = Number.parseInt(productIdRaw ?? '0', 10) || 0
-        unitCode = await window.electron.db.getUnitPavoCode(product?.unit ?? 'Adet')
-      }
-      return {
-        product_code: i.productCode,
-        name:         i.productName ?? i.productCode,
-        quantity:     i.quantity,
-        price:        i.price,
-        vatRate:      i.vatRate,
-        unit:         i.unit ?? 'Adet',
-        discountRate: i.discountRate ?? 0,
-        product_id:   productId,
-        unit_code:    unitCode,
-      }
-    })),
+    customer_ref: customerRefFromCustomerRow(customer),
+    items:        mappedItems,
+    expected_total: expectedTotal,
     invoice_number: invoiceNumber,
     invoice_date: new Date().toISOString().replace('T', ' ').slice(0, 19),
     description:  `POS Satışı — ${customer.name}`,
@@ -424,8 +373,6 @@ export async function enqueueQuickReturnInvoice(
     items:       QuickReturnInvoiceLine[]
   },
 ): Promise<void> {
-  const torbaCari = await resolveTorbaCustomer(companyId)
-
   const returnItems = await Promise.all(opts.items.map(async item => {
     let productId = item.stockRef ?? item.productId ?? 0
     const productCode = item.productCode?.trim() ?? ''
@@ -434,25 +381,33 @@ export async function enqueueQuickReturnInvoice(
       productId = Number.parseInt(fromDb ?? '0', 10) || 0
     }
 
+    const qty = Math.abs(Number(item.quantity) || 0)
+    const unitPriceGross = Number(item.unitPrice)
+    const grossAmount = Math.round(unitPriceGross * qty * 100) / 100
     return {
       product_code: productCode,
       name:         item.productName,
-      quantity:     item.quantity,
-      price:        item.unitPrice,
+      quantity:     qty,
       vatRate:      item.vatRate ?? 20,
       unit:         item.unitName ?? 'Adet',
       unit_code:    item.unitCode ?? await window.electron.db.getUnitPavoCode(item.unitName ?? 'Adet'),
-      discountRate: 0,
       product_id:   productId,
+      unit_price_gross: unitPriceGross,
+      gross_amount: grossAmount,
+      discount_amount: 0,
+      net_amount: grossAmount,
     }
   }))
+  const expectedTotal = Math.round(
+    returnItems.reduce((s, i) => s + Number(i.net_amount), 0) * 100,
+  ) / 100
 
   const payload = {
     sale_id:         opts.receiptNo,
     invoice_number:  opts.orderNo ?? opts.receiptNo,
-    customer:        customerRowToInvoicePayload(torbaCari),
-    customer_erp_id: Number.parseInt(torbaCari.id ?? '0', 10) || 0,
+    customer_ref:    customerRefTorba(),
     items:           returnItems,
+    expected_total:  expectedTotal,
     invoice_date:    new Date().toISOString().replace('T', ' ').slice(0, 19),
     description:     `İade — ${opts.orderNo ?? opts.receiptNo}`,
     invoice_type:    opts.invoiceType,
@@ -474,12 +429,14 @@ export interface ReturnInvoiceItem {
   product_code: string
   name:         string
   quantity:     number
-  price:        number
   vatRate:      number
   unit:         string
   unit_code:    string
-  discountRate: number
   product_id:   number
+  unit_price_gross: number
+  gross_amount: number
+  discount_amount: number
+  net_amount: number
 }
 
 /** Gün sonu — bekleyen iade kalemlerini tek faturada birleştir */
@@ -506,7 +463,6 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
 
   if (!allItems.length) return
 
-  const torbaCari   = await resolveTorbaCustomer(companyId)
   const settings    = await window.electron.db.getTerminalSettings()
   const invoiceType: 'e_archive' | 'paper' =
     settings?.invoiceType === 'paper' ? 'paper' : 'e_archive'
@@ -519,8 +475,7 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
     status:    'pending',
     payload: await withTerminalPayment({
       sale_id:         `TOPLU-IADE-${dateLabel.replace(/\./g, '')}`,
-      customer:        customerRowToInvoicePayload(torbaCari),
-      customer_erp_id: Number.parseInt(torbaCari.id ?? '0', 10) || 0,
+      customer_ref:    customerRefTorba(),
       items:           allItems,
       invoice_date:    new Date().toISOString().replace('T', ' ').slice(0, 19),
       description:     `Toplu İade — ${dateLabel}`,
@@ -539,7 +494,7 @@ export async function sendBatchReturnInvoice(companyId: string): Promise<void> {
 export async function sendReturnInvoice(
   companyId:   string,
   saleId:      string,
-  customer:    CustomerRow,
+  customer:    CustomerRow | null,
   invoiceType: 'e_archive' | 'paper' = 'e_archive',
   payment?: {
     cashAmount: number
@@ -549,32 +504,48 @@ export async function sendReturnInvoice(
 ): Promise<void> {
   const items = await window.electron.db.getSaleItems(saleId)
 
+  const mappedItems = await Promise.all(items.map(async i => {
+    const productCode = i.productCode?.trim() ?? ''
+    let productId = 0
+    if (productCode) {
+      const fromDb = await window.electron.db.getProductIdByCode(productCode)
+      productId = Number.parseInt(fromDb ?? '0', 10) || 0
+    }
+    const qty = Math.abs(Number(i.quantity) || 0)
+    // İade: net birim fiyat (indirimli tutar müşteriye/ERP'ye)
+    const netAmount = Math.abs(Number(i.netAmount ?? i.price * qty))
+    const netUnit = qty > 0 ? Math.round((netAmount / qty) * 100) / 100 : Number(i.unitPriceGross ?? i.price)
+    return {
+      product_code: productCode,
+      name:         i.productName ?? productCode,
+      quantity:     qty,
+      vatRate:      i.vatRate,
+      unit:         i.unit ?? 'Adet',
+      product_id:   productId,
+      unit_code:    await window.electron.db.getUnitPavoCode(i.unit ?? 'Adet'),
+      unit_price_gross: netUnit,
+      gross_amount: netAmount,
+      discount_amount: 0,
+      net_amount: netAmount,
+    }
+  }))
+  const expectedTotal = Math.round(
+    mappedItems.reduce((s, i) => s + Number(i.net_amount), 0) * 100,
+  ) / 100
+
+  const customerRef = customer
+    ? customerRefFromCustomerRow(customer)
+    : customerRefTorba()
+  const customerLabel = customer?.name ?? 'Torba cari'
+
   const payload = {
     sale_id:         saleId,
     invoice_number:  invoiceNumber,
-    customer:        customerRowToInvoicePayload(customer),
-    customer_erp_id: Number.parseInt(customer.id ?? '0', 10) || 0,
-    items: await Promise.all(items.map(async i => {
-      const productCode = i.productCode?.trim() ?? ''
-      let productId = 0
-      if (productCode) {
-        const fromDb = await window.electron.db.getProductIdByCode(productCode)
-        productId = Number.parseInt(fromDb ?? '0', 10) || 0
-      }
-      return {
-        product_code: productCode,
-        name:         i.productName ?? productCode,
-        quantity:     Math.abs(i.quantity),
-        price:        i.price,
-        vatRate:      i.vatRate,
-        unit:         i.unit ?? 'Adet',
-        discountRate: i.discountRate ?? 0,
-        product_id:   productId,
-        unit_code:    await window.electron.db.getUnitPavoCode(i.unit ?? 'Adet'),
-      }
-    })),
+    customer_ref:    customerRef,
+    items: mappedItems,
+    expected_total: expectedTotal,
     invoice_date:  new Date().toISOString().replace('T', ' ').slice(0, 19),
-    description:   `POS İade — ${customer.name}`,
+    description:   `POS İade — ${customerLabel}`,
     invoice_type:  invoiceType,
     cash_amount:   payment?.cashAmount ?? 0,
     card_amount:   payment?.cardAmount ?? 0,
@@ -586,7 +557,7 @@ export async function sendReturnInvoice(
     type:      'return_invoice',
     status:    'pending_dayend',
     payload:   await withTerminalPayment(payload),
-    label:     `${customer.name} iade faturası`,
+    label:     `${customerLabel} iade faturası`,
   })
 }
 

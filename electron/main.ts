@@ -1122,6 +1122,24 @@ app.whenReady().then(async () => {
     return getTerminalSettings()
   })
 
+  ipcMain.handle('db:saveActivation', async (_e, row: {
+    terminalId: string
+    companyId: string
+    deviceUid: string
+    planName?: string | null
+    expiryDate?: string | null
+    licenseKey?: string | null
+  }) => {
+    const { saveActivation } = await import('../db/operations')
+    saveActivation(row)
+    return { success: true as const }
+  })
+
+  ipcMain.handle('db:getActivation', async () => {
+    const { getActivation } = await import('../db/operations')
+    return getActivation()
+  })
+
   ipcMain.handle('db:getCashierSettings', async (_e, cashierId?: string | null) => {
     const { getCashierSettings } = await import('../db/operations')
     return getCashierSettings(cashierId)
@@ -1189,6 +1207,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getCustomerById', async (_e, companyId: string, id: string) => {
     const { getCustomerById } = await import('../db/operations')
     return getCustomerById(companyId, id)
+  })
+
+  ipcMain.handle('db:getCustomerByCode', async (_e, companyId: string, code: string) => {
+    const { getCustomerByCode } = await import('../db/operations')
+    return getCustomerByCode(companyId, code)
   })
 
   ipcMain.handle('db:getPendingInvoices', async (_e, onlyAnonymous = false) => {
@@ -1301,6 +1324,26 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:retryOperation', async (_e, id: string) => {
     const { retryOperation } = await import('../db/operations')
     retryOperation(id)
+  })
+
+  ipcMain.handle('db:retryOperationsByErrorPrefix', async (_e, companyId: string, prefix: string) => {
+    const { retryOperationsByErrorPrefix } = await import('../db/operations')
+    return retryOperationsByErrorPrefix(companyId, prefix)
+  })
+
+  ipcMain.handle('db:updateOperationPayload', async (_e, id: string, payload: Record<string, unknown>) => {
+    const { updateOperationPayload } = await import('../db/operations')
+    updateOperationPayload(id, payload)
+  })
+
+  ipcMain.handle('db:markOperationConfigFailed', async (_e, id: string, error: string) => {
+    const { markOperationConfigFailed } = await import('../db/operations')
+    markOperationConfigFailed(id, error)
+  })
+
+  ipcMain.handle('db:markOperationManuallySent', async (_e, id: string, note: string) => {
+    const { markOperationManuallySent } = await import('../db/operations')
+    markOperationManuallySent(id, note)
   })
 
   ipcMain.handle('db:deleteOperation', async (_e, id: string) => {

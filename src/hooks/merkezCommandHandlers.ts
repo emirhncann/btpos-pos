@@ -242,6 +242,20 @@ async function syncSettings(
     console.warn('[sync_settings] unit mapping hatası:', e)
   }
 
+  if (saved.torbaCariId?.trim()) {
+    try {
+      const retried = await window.electron.db.retryOperationsByErrorPrefix(
+        companyId,
+        'TORBA_CARI_YOK',
+      )
+      if (retried > 0) {
+        console.log(`[sync_settings] ${retried} TORBA_CARI_YOK kaydı yeniden kuyruğa alındı`)
+      }
+    } catch (e) {
+      console.warn('[sync_settings] torba kuyruk retry:', e)
+    }
+  }
+
   return { success: true, inserted: 1, updated: 0, deleted: 0 }
 }
 

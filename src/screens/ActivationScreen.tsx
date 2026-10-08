@@ -41,6 +41,7 @@ export default function ActivationScreen({ onActivated }: Props) {
       const hasHistory = result.has_history === true
 
       await window.electron.store.set('activated', true)
+      await window.electron.store.set('license_key', licenseKey.trim())
       await window.electron.store.set('company_id', companyId)
       await window.electron.store.set('terminal_id', terminalId)
       await window.electron.store.set('has_history', hasHistory)
@@ -51,6 +52,15 @@ export default function ActivationScreen({ onActivated }: Props) {
       if (result.expiry_date) {
         await window.electron.store.set('expiry_date', result.expiry_date)
       }
+
+      await window.electron.db.saveActivation({
+        terminalId,
+        companyId,
+        deviceUid: deviceInfo.device_uid,
+        planName: result.plan_name != null ? String(result.plan_name) : null,
+        expiryDate: result.expiry_date != null ? String(result.expiry_date) : null,
+        licenseKey: licenseKey.trim(),
+      })
 
       onActivated(companyId, hasHistory)
     } catch (e: unknown) {

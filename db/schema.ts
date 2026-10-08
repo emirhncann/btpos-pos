@@ -8,6 +8,7 @@ export const activation = sqliteTable('activation', {
   activatedAt: text('activated_at').notNull(),
   planName: text('plan_name'),
   expiryDate: text('expiry_date'),
+  licenseKey: text('license_key'),
 })
 
 export const products = sqliteTable('products', {
@@ -53,17 +54,22 @@ export const sales = sqliteTable('sales', {
 })
 
 export const saleItems = sqliteTable('sale_items', {
-  id:             text('id').primaryKey(),
-  saleId:         text('sale_id').notNull().references(() => sales.id),
-  productId:      text('product_id'),
-  productName:    text('product_name').notNull(),
-  quantity:       real('quantity').notNull(),
-  unitPrice:      real('unit_price').notNull(),
-  vatRate:        real('vat_rate').default(18),
-  discountRate:   real('discount_rate').default(0),
-  discountAmount: real('discount_amount').default(0),
-  lineTotal:      real('line_total').notNull(),
-  appliedBy:      text('applied_by'),
+  id:               text('id').primaryKey(),
+  saleId:           text('sale_id').notNull().references(() => sales.id),
+  productId:        text('product_id'),
+  productName:      text('product_name').notNull(),
+  quantity:         real('quantity').notNull(),
+  unitPrice:        real('unit_price').notNull(),
+  vatRate:          real('vat_rate').default(18),
+  discountRate:     real('discount_rate').default(0),
+  discountAmount:   real('discount_amount').default(0),
+  lineTotal:        real('line_total').notNull(),
+  appliedBy:        text('applied_by'),
+  unitPriceGross:   real('unit_price_gross'),
+  grossAmount:      real('gross_amount'),
+  lineDiscount:     real('line_discount').default(0),
+  docDiscountShare: real('doc_discount_share').default(0),
+  netAmount:        real('net_amount'),
 })
 
 export const salePayments = sqliteTable('sale_payments', {

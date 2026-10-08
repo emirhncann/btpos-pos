@@ -38,6 +38,12 @@ export interface SaleItem {
   discountAmount?: number
   lineTotal: number
   appliedBy?: string
+  /** KDV dahil liste birim fiyatı */
+  unitPriceGross?: number
+  grossAmount?: number
+  lineDiscount?: number
+  docDiscountShare?: number
+  netAmount?: number
 }
 
 export interface SalePaymentRow {
@@ -217,6 +223,15 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
       ).get(item.productCode) as { id: string } | undefined
       : undefined
 
+    const unitPriceGross = item.unitPriceGross ?? item.unitPrice
+    const qtyAbs = Math.abs(item.quantity)
+    const grossAmount = item.grossAmount ?? Number((unitPriceGross * qtyAbs).toFixed(2))
+    const lineDiscount = item.lineDiscount ?? item.discountAmount ?? 0
+    const docDiscountShare = item.docDiscountShare ?? 0
+    const netAmount = item.netAmount
+      ?? Number((grossAmount - lineDiscount - docDiscountShare).toFixed(2))
+    const totalDiscount = Number((lineDiscount + docDiscountShare).toFixed(2))
+
     db.insert(saleItems).values({
       id: randomUUID(),
       saleId,
@@ -226,9 +241,14 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
       unitPrice: item.unitPrice,
       vatRate: item.vatRate,
       discountRate: item.discountRate ?? 0,
-      discountAmount: item.discountAmount ?? 0,
-      lineTotal: item.lineTotal,
+      discountAmount: totalDiscount,
+      lineTotal: item.lineTotal ?? netAmount,
       appliedBy: item.appliedBy ?? null,
+      unitPriceGross,
+      grossAmount,
+      lineDiscount,
+      docDiscountShare,
+      netAmount,
     }).run()
   }
 
@@ -288,53 +308,98 @@ export function markInvoiceError(saleId: string, error: string): void {
 
 /** ERP faturası için satır verisi (ürün kodu/birim products ile zenginleştirilir) */
 export interface SaleItemInvoiceRow {
-  productId:     string | null
-  productCode:   string
-  productName:   string
-  quantity:      number
-  price:         number
-  vatRate:       number
-  unit:          string
-  discountRate:  number
+  productId:         string | null
+  productCode:       string
+  productName:       string
+  quantity:          number
+  /** @deprecated unitPriceGross kullan */
+  price:             number
+  vatRate:           number
+  unit:              string
+  unitPriceGross:    number
+  grossAmount:       number
+  lineDiscount:      number
+  docDiscountShare:  number
+  /** line_discount + doc_discount_share (KDV dahil) */
+  discountAmount:    number
+  netAmount:         number
 }
 
 export function getSaleItems(saleId: string): SaleItemInvoiceRow[] {
   const sqlite = getSqlite()
   const rows = sqlite.prepare(`
     SELECT
-      si.product_id   AS product_id,
-      si.product_name AS product_name,
-      si.quantity     AS quantity,
-      si.unit_price   AS unit_price,
-      si.vat_rate     AS vat_rate,
-      si.discount_rate AS discount_rate,
-      p.code          AS p_code,
-      p.unit          AS p_unit
+      si.product_id          AS product_id,
+      si.product_name        AS product_name,
+      si.quantity            AS quantity,
+      si.unit_price          AS unit_price,
+      si.vat_rate            AS vat_rate,
+      si.discount_rate       AS discount_rate,
+      si.discount_amount     AS discount_amount,
+      si.line_total          AS line_total,
+      si.unit_price_gross    AS unit_price_gross,
+      si.gross_amount        AS gross_amount,
+      si.line_discount       AS line_discount,
+      si.doc_discount_share  AS doc_discount_share,
+      si.net_amount          AS net_amount,
+      p.code                 AS p_code,
+      p.unit                 AS p_unit
     FROM sale_items si
     LEFT JOIN products p ON p.id = si.product_id
     WHERE si.sale_id = ?
   `).all(saleId) as Array<{
-    product_id:      string | null
-    product_name:    string
-    quantity:        number
-    unit_price:      number
-    vat_rate:        number | null
-    discount_rate:   number | null
-    p_code:          string | null
-    p_unit:          string | null
+    product_id:         string | null
+    product_name:       string
+    quantity:           number
+    unit_price:         number
+    vat_rate:           number | null
+    discount_rate:      number | null
+    discount_amount:    number | null
+    line_total:         number | null
+    unit_price_gross:   number | null
+    gross_amount:       number | null
+    line_discount:      number | null
+    doc_discount_share: number | null
+    net_amount:         number | null
+    p_code:             string | null
+    p_unit:             string | null
   }>
 
-  return rows.map(r => ({
-    productId:    r.product_id ?? null,
-    productCode:  r.p_code || '',
-    productName:  r.product_name,
-    quantity:     r.quantity,
-    price:        r.unit_price,
-    // Eksik KDV'yi 0 varsayma — ERP doğrulaması Number.isFinite ile yakalar
-    vatRate:      r.vat_rate == null ? Number.NaN : Number(r.vat_rate),
-    unit:         r.p_unit?.trim() ? r.p_unit : 'Adet',
-    discountRate: r.discount_rate ?? 0,
-  }))
+  return rows.map(r => {
+    const qtyAbs = Math.abs(Number(r.quantity) || 0)
+    const unitPriceGross = r.unit_price_gross != null
+      ? Number(r.unit_price_gross)
+      : Number(r.unit_price)
+    const grossAmount = r.gross_amount != null
+      ? Number(r.gross_amount)
+      : Number((unitPriceGross * qtyAbs).toFixed(2))
+    const lineDiscount = r.line_discount != null
+      ? Number(r.line_discount)
+      : (r.doc_discount_share == null ? Number(r.discount_amount ?? 0) : 0)
+    const docDiscountShare = Number(r.doc_discount_share ?? 0)
+    const discountAmount = Number((lineDiscount + docDiscountShare).toFixed(2))
+      || Number(r.discount_amount ?? 0)
+    const netAmount = r.net_amount != null
+      ? Number(r.net_amount)
+      : (r.line_total != null
+        ? Number(r.line_total)
+        : Number((grossAmount - discountAmount).toFixed(2)))
+    return {
+      productId:        r.product_id ?? null,
+      productCode:      r.p_code || '',
+      productName:      r.product_name,
+      quantity:         r.quantity,
+      price:            unitPriceGross,
+      vatRate:          r.vat_rate == null ? Number.NaN : Number(r.vat_rate),
+      unit:             r.p_unit?.trim() ? r.p_unit : 'Adet',
+      unitPriceGross,
+      grossAmount,
+      lineDiscount,
+      docDiscountShare,
+      discountAmount,
+      netAmount,
+    }
+  })
 }
 
 export function getSaleByReceiptNo(receiptNo: string): { id: string; receiptNo: string } | null {
@@ -892,6 +957,69 @@ export function getTerminalSettings(): TerminalSettings {
 
 export function getCashierSettings(cashierId?: string | null): CashierSettings {
   return readCashierSettings(sqlite(), cashierId)
+}
+
+export interface ActivationRow {
+  terminalId: string
+  companyId: string
+  deviceUid: string
+  activatedAt: string
+  planName: string | null
+  expiryDate: string | null
+  licenseKey: string | null
+}
+
+/** Tek satır (id = 1). Aktivasyon sonrası lisans anahtarı buraya yazılır. */
+export function saveActivation(row: {
+  terminalId: string
+  companyId: string
+  deviceUid: string
+  planName?: string | null
+  expiryDate?: string | null
+  licenseKey?: string | null
+}): void {
+  const db = getSqlite()
+  db.prepare(`
+    INSERT OR REPLACE INTO activation (
+      id, terminal_id, company_id, device_uid, activated_at,
+      plan_name, expiry_date, license_key
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.terminalId,
+    row.companyId,
+    row.deviceUid,
+    new Date().toISOString(),
+    row.planName ?? null,
+    row.expiryDate ?? null,
+    row.licenseKey ?? null,
+  )
+}
+
+export function getActivation(): ActivationRow | null {
+  const db = getSqlite()
+  const row = db.prepare(`SELECT * FROM activation WHERE id = 1`).get() as
+    | {
+        terminal_id?: string
+        company_id?: string
+        device_uid?: string
+        activated_at?: string
+        plan_name?: string | null
+        expiry_date?: string | null
+        license_key?: string | null
+      }
+    | undefined
+  if (!row?.terminal_id) return null
+  return {
+    terminalId: String(row.terminal_id),
+    companyId: String(row.company_id ?? ''),
+    deviceUid: String(row.device_uid ?? ''),
+    activatedAt: String(row.activated_at ?? ''),
+    planName: row.plan_name != null ? String(row.plan_name) : null,
+    expiryDate: row.expiry_date != null ? String(row.expiry_date) : null,
+    licenseKey: row.license_key != null && String(row.license_key).trim()
+      ? String(row.license_key).trim()
+      : null,
+  }
 }
 
 export function syncSettingsBundle(bundle: SettingsBundle, terminalId: string): SyncResult {
@@ -1534,6 +1662,17 @@ export function getCustomerById(companyId: string, id: string): CustomerRow | nu
   return mapCustomerRow(r)
 }
 
+export function getCustomerByCode(companyId: string, code: string): CustomerRow | null {
+  const trimmed = code.trim()
+  if (!trimmed) return null
+  const db = getSqlite()
+  const r = db.prepare(`
+    SELECT * FROM customers WHERE company_id = ? AND code = ?
+  `).get(companyId, trimmed) as Record<string, unknown> | undefined
+  if (!r) return null
+  return mapCustomerRow(r)
+}
+
 export function getCustomers(companyId: string, query?: string): CustomerRow[] {
   const db = getSqlite()
   if (query && query.trim()) {
@@ -1734,6 +1873,42 @@ export function retryOperation(id: string): void {
   db.prepare(`
     UPDATE operation_queue SET status = 'pending', attempts = 0, error = NULL WHERE id = ?
   `).run(id)
+}
+
+export function retryOperationsByErrorPrefix(companyId: string, errorPrefix: string): number {
+  const db = getSqlite()
+  const pattern = `${errorPrefix}%`
+  const result = db.prepare(`
+    UPDATE operation_queue
+    SET status = 'pending', attempts = 0, error = NULL
+    WHERE company_id = ? AND status = 'failed' AND error LIKE ?
+  `).run(companyId, pattern)
+  return result.changes
+}
+
+export function updateOperationPayload(id: string, payload: Record<string, unknown>): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue SET payload = ? WHERE id = ?
+  `).run(JSON.stringify(payload), id)
+}
+
+export function markOperationConfigFailed(id: string, error: string): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE operation_queue
+    SET status = 'failed', error = ?, attempts = max_attempts
+    WHERE id = ?
+  `).run(error, id)
+}
+
+export function markOperationManuallySent(id: string, note: string): void {
+  const db = getSqlite()
+  const at = new Date().toISOString()
+  console.log(`[operation_queue] manual sent id=${id} note=${note}`)
+  db.prepare(`
+    UPDATE operation_queue SET status = 'success', sent_at = ?, error = NULL WHERE id = ?
+  `).run(at, id)
 }
 
 export function deleteOperation(id: string): void {

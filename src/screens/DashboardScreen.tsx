@@ -9,6 +9,7 @@ import PrinterSettingsPanel, { type PrinterDraft } from '../components/PrinterSe
 import ScaleSettings, { type ScaleDraft } from '../components/ScaleSettings'
 import PaymentDeviceSettingsPanel from '../components/PaymentDeviceSettingsPanel'
 import DbLocationPanel from '../components/DbLocationPanel'
+import LicenseSettingsPanel from '../components/LicenseSettingsPanel'
 import UpdateSettingsPanel from '../components/UpdateSettingsPanel'
 import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
@@ -88,7 +89,9 @@ export default function DashboardScreen({
   const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
   const [showSettings, setShowSettings] = useState(false)
-  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device' | 'general' | 'update'>('screen')
+  const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device' | 'general' | 'update' | 'license'>('screen')
+  const [generalUnlocked, setGeneralUnlocked] = useState(false)
+  const titleTapRef = useRef({ count: 0, at: 0 })
   const [draftCart, setDraftCart] = useState<CartSettings>(cartSettings)
   const [printerDraft, setPrinterDraft] = useState<PrinterDraft | null>(null)
   const [scaleDraft, setScaleDraft] = useState<ScaleDraft | null>(null)
@@ -198,6 +201,20 @@ export default function DashboardScreen({
   function requestCloseSettings() {
     if (settingsDirty && !window.confirm('Kaydedilmemiş değişiklikler var. Yine de çıkılsın mı?')) return
     setShowSettings(false)
+    setGeneralUnlocked(false)
+    titleTapRef.current = { count: 0, at: 0 }
+    if (settingsTab === 'general') setSettingsTab('screen')
+  }
+
+  function onSettingsTitleTap() {
+    const now = Date.now()
+    const prev = titleTapRef.current
+    const count = now - prev.at > 2000 ? 1 : prev.count + 1
+    titleTapRef.current = { count, at: now }
+    if (count < 5) return
+    titleTapRef.current = { count: 0, at: 0 }
+    setGeneralUnlocked(true)
+    setSettingsTab('general')
   }
 
   async function saveKasaSettings() {
@@ -319,6 +336,8 @@ export default function DashboardScreen({
               setScaleDraft(null)
               setDraftCart(cartSettings)
               setSettingsTab('screen')
+              setGeneralUnlocked(false)
+              titleTapRef.current = { count: 0, at: 0 }
               setShowSettings(true)
             }}
             style={{
@@ -466,7 +485,9 @@ export default function DashboardScreen({
             <div style={{ overflowY: 'auto', flex: 1 }}>
               <DocumentQueueScreen
                 companyId={companyId}
+                cashierRole={cashier.role}
                 onAfterEnqueue={() => scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })}
+                onRetryTrigger={() => scheduleProcessQueue(processQueue, 300, { includeDayEnd: true })}
               />
             </div>
           </div>
@@ -519,7 +540,15 @@ export default function DashboardScreen({
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '16px 20px', borderBottom: '1px solid #F0F0F0',
             }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>Kasa Ayarları</div>
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={onSettingsTitleTap}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onSettingsTitleTap() }}
+                style={{ fontSize: 16, fontWeight: 600, color: '#111', cursor: 'default', userSelect: 'none' }}
+              >
+                Kasa Ayarları
+              </div>
               <button
                 type="button"
                 onClick={() => requestCloseSettings()}
@@ -534,10 +563,11 @@ export default function DashboardScreen({
               borderBottom: '1px solid #F0F0F0',
             }}>
               {([
-                { id: 'general' as const, label: 'Genel' },
+                ...(generalUnlocked ? [{ id: 'general' as const, label: 'Genel' }] : []),
                 { id: 'screen' as const, label: 'Ekran' },
                 { id: 'device' as const, label: 'Ödeme Cihazı' },
                 { id: 'payment' as const, label: 'Ödeme & Yazıcı' },
+                { id: 'license' as const, label: 'Lisans' },
                 { id: 'update' as const, label: 'Güncelleme' },
               ]).map(tab => (
                 <button
@@ -557,13 +587,11 @@ export default function DashboardScreen({
               ))}
             </div>
             <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
-              {settingsTab === 'general' && (
-                <DbLocationPanel
-                  disabled={cartActive || heldCount > 0}
-                  disabledReason={cartActive || heldCount > 0
-                    ? 'Sepet dolu veya askıda belge varken veritabanı konumu değiştirilemez.'
-                    : undefined}
-                />
+              {settingsTab === 'general' && generalUnlocked && (
+                <DbLocationPanel pathOnly />
+              )}
+              {settingsTab === 'license' && (
+                <LicenseSettingsPanel />
               )}
               {settingsTab === 'update' && (
                 <UpdateSettingsPanel companyId={companyId} cartActive={cartActive} />
@@ -694,7 +722,7 @@ export default function DashboardScreen({
               </div>
               </>)}
             </div>
-            {settingsTab !== 'device' && settingsTab !== 'general' && settingsTab !== 'update' && (
+            {settingsTab !== 'device' && settingsTab !== 'general' && settingsTab !== 'update' && settingsTab !== 'license' && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid #F0F0F0' }}>
               <button
                 type="button"

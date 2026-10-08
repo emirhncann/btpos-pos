@@ -205,7 +205,20 @@ export const api = {
         city?:       string
         district?:   string
       }
-      items:        { product_code: string; name: string; quantity: number; price: number; vatRate: number; unit: string; discountRate?: number }[]
+      items: {
+        product_code: string
+        product_id?: number
+        name: string
+        quantity: number
+        vatRate: number
+        unit: string
+        unit_code?: string
+        unit_price_gross: number
+        gross_amount: number
+        discount_amount: number
+        net_amount: number
+      }[]
+      expected_total?: number
       invoice_date: string
       description?: string
       endpoint?: string

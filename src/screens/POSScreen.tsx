@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { sendInvoiceForSale, sendReturnInvoice, resolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
+import { sendInvoiceForSale, sendReturnInvoice, tryResolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
 import {
   pavoCompleteSale,
   pavoStartSaleWithItems,
@@ -436,7 +436,10 @@ function vatRateFromPavoItem(pi: Record<string, unknown>): number {
 }
 
 /** Pavo satırı → yerel ürün tablosundan kod/KDV/birim ile CartItem */
-async function cartItemFromPavoLine(pi: Record<string, unknown>): Promise<CartItem & { needsProductMatch?: boolean }> {
+async function cartItemFromPavoLine(
+  pi: Record<string, unknown>,
+  lineEffectTl = 0,
+): Promise<CartItem & { needsProductMatch?: boolean; pavoSaleItemId?: number }> {
   const round2 = (n: number) => parseFloat(n.toFixed(2))
   const code = String(pi.StockReference ?? pi.ItemCode ?? pi.code ?? '').trim()
   const nameHint = String(pi.Name ?? pi.ProductName ?? '')
@@ -473,7 +476,11 @@ async function cartItemFromPavoLine(pi: Record<string, unknown>): Promise<CartIt
   const qty = Number(pi.ItemQuantity ?? pi.Quantity ?? 1)
   const unitPrice = Number(pi.UnitPriceAmount ?? pi.UnitPrice ?? product?.price ?? 0)
   const gross = round2(unitPrice * qty)
-  const netTotal = Number(pi.TotalPriceAmount ?? pi.TotalPrice ?? gross)
+  // TotalPriceAmount iskonto sonrası olabilir; yoksa AddedPriceEffects satır tutarı düşülür
+  const rawNet = Number(pi.TotalPriceAmount ?? pi.TotalPrice)
+  const netTotal = Number.isFinite(rawNet)
+    ? round2(rawNet)
+    : round2(Math.max(0, gross - lineEffectTl))
   const discountAmount = Math.max(0, round2(gross - netTotal))
   const vatFromPavo = vatRateFromPavoItem(pi)
   const vatRate = product?.vatRate != null && Number.isFinite(Number(product.vatRate))
@@ -483,6 +490,7 @@ async function cartItemFromPavoLine(pi: Record<string, unknown>): Promise<CartIt
   const resolvedVat = Number.isFinite(vatRate) ? vatRate : Number.NaN
 
   const id = crypto.randomUUID()
+  const pavoSaleItemId = Number(pi.Id ?? pi.SaleItemId ?? 0) || undefined
   return {
     id,
     productId:    product?.id ?? id,
@@ -499,14 +507,63 @@ async function cartItemFromPavoLine(pi: Record<string, unknown>): Promise<CartIt
     discountAmount,
     netTotal:     round2(netTotal),
     needsProductMatch: !product || !(product.code ?? code).trim() || !Number.isFinite(resolvedVat),
+    pavoSaleItemId,
   }
+}
+
+/** Pavo AddedPriceEffects → satır iskontosu (SaleItemId) / belge iskontosu (bağsız) */
+function priceEffectsFromPavoData(pavoData: Record<string, unknown> | undefined): {
+  bySaleItemId: Map<number, number>
+  docDiscountTl: number
+} {
+  const bySaleItemId = new Map<number, number>()
+  let docDiscountTl = 0
+  if (!pavoData) return { bySaleItemId, docDiscountTl }
+
+  const rawEffects = (
+    pavoData.AddedPriceEffects
+    ?? (pavoData.Sale as Record<string, unknown> | undefined)?.AddedPriceEffects
+    ?? []
+  ) as Array<Record<string, unknown>>
+
+  for (const eff of rawEffects) {
+    const amt = Math.abs(Number(
+      eff.PriceEffectAmount ?? eff.Amount ?? eff.EffectAmount ?? 0,
+    ))
+    if (!(amt > 0)) continue
+    const saleItemId = Number(eff.SaleItemId ?? eff.RelatedSaleItemId ?? eff.ItemId ?? 0)
+    if (saleItemId > 0) {
+      bySaleItemId.set(saleItemId, (bySaleItemId.get(saleItemId) ?? 0) + amt)
+    } else {
+      docDiscountTl += amt
+    }
+  }
+
+  // Belge seviyesi tek PriceEffect
+  const salePe = (pavoData.PriceEffect
+    ?? (pavoData.Sale as Record<string, unknown> | undefined)?.PriceEffect) as
+    | Record<string, unknown>
+    | undefined
+  if (salePe && bySaleItemId.size === 0) {
+    const amt = Math.abs(Number(salePe.Amount ?? salePe.PriceEffectAmount ?? 0))
+    if (amt > 0) docDiscountTl = Math.max(docDiscountTl, amt)
+  }
+
+  return { bySaleItemId, docDiscountTl: parseFloat(docDiscountTl.toFixed(2)) }
 }
 
 async function cartFromPavoData(
   pavoData: Record<string, unknown> | undefined,
 ): Promise<Array<CartItem & { needsProductMatch?: boolean }>> {
-  const items = (pavoData?.AddedSaleItems ?? []) as Array<Record<string, unknown>>
-  return Promise.all(items.map(cartItemFromPavoLine))
+  const items = (pavoData?.AddedSaleItems
+    ?? (pavoData?.Sale as Record<string, unknown> | undefined)?.AddedSaleItems
+    ?? []) as Array<Record<string, unknown>>
+  const { bySaleItemId } = priceEffectsFromPavoData(pavoData)
+  return Promise.all(items.map(pi => {
+    const sid = Number(pi.Id ?? pi.SaleItemId ?? 0)
+    const lineEffect = sid > 0 ? (bySaleItemId.get(sid) ?? 0) : 0
+    return cartItemFromPavoLine(pi, lineEffect)
+  }))
 }
 
 /** Askıdaki ödeme kalemlerini yerel ürüne bağla */
@@ -1839,7 +1896,8 @@ export default function POSScreen({
   }
 
   async function retrieveDoc(doc: HeldDocRow) {
-    setCart(doc.items.map(normalizeHeldCartItem))
+    const items = doc.items.map(normalizeHeldCartItem)
+    setCart(items)
     if (doc.customer) {
       applyCustomerSelection(doc.customer)
     } else {
@@ -1847,10 +1905,24 @@ export default function POSScreen({
     }
     if ((doc.discountRate ?? 0) > 0) {
       setDocDiscountRate(doc.discountRate!)
+      setDocDiscountAmt(0)
       setDocDiscMode('rate')
     } else if ((doc.discountAmount ?? 0) > 0) {
       setDocDiscountAmt(doc.discountAmount!)
+      setDocDiscountRate(0)
       setDocDiscMode('amt')
+    } else {
+      // Belge iskontosu kolonlarda yoksa totalAmount ile satır netleri farkından geri yükle
+      const lineSum = items.reduce((s, c) => s + c.netTotal, 0)
+      const gap = parseFloat(Math.max(0, lineSum - Number(doc.totalAmount ?? 0)).toFixed(2))
+      if (gap > 0.009) {
+        setDocDiscountAmt(gap)
+        setDocDiscountRate(0)
+        setDocDiscMode('amt')
+      } else {
+        setDocDiscountAmt(0)
+        setDocDiscountRate(0)
+      }
     }
     setCurrentOrderNo(doc.orderNo ?? null)
     await window.electron.db.deleteHeldDocument(doc.id)
@@ -2530,11 +2602,15 @@ export default function POSScreen({
 
     const effectiveCart = cartOverride ?? cart
     const effectiveLineSubtotal = effectiveCart.reduce((s, c) => s + c.netTotal, 0)
-    const effectiveDocDiscCalc = docDiscountRate > 0
+    // Belge iskontosu: oran veya tutar; askı/Pavo'da grandTotalOverride ile kuruş farkı da burada kapanır
+    const fromStateDocDisc = docDiscountRate > 0
       ? parseFloat((effectiveLineSubtotal * docDiscountRate / 100).toFixed(2))
-      : 0
+      : docDiscountAmt
     const effectiveTotal = grandTotalOverride
-      ?? Math.max(0, parseFloat((effectiveLineSubtotal - effectiveDocDiscCalc).toFixed(2)))
+      ?? Math.max(0, parseFloat((effectiveLineSubtotal - fromStateDocDisc).toFixed(2)))
+    const effectiveDocDiscCalc = parseFloat(
+      Math.max(0, effectiveLineSubtotal - effectiveTotal).toFixed(2),
+    )
 
     const round2 = (n: number) => parseFloat(n.toFixed(2))
     const net = effectiveTotal
@@ -2659,17 +2735,39 @@ export default function POSScreen({
       customerName: selectedCustomer?.name ?? null,
       customerCode: selectedCustomer?.code ?? null,
     }
-    const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, effectiveCart.map(c => ({
-      productId: c.productId,
-      productCode: c.code,
-      productName: c.name,
-      quantity: c.quantity,
-      unitPrice: c.price,
-      vatRate: c.vatRate,
-      discountRate: c.discountRate,
-      discountAmount: c.discountAmount,
-      lineTotal: c.netTotal,
+    const { allocateDocDiscount, assertAllocatedTotal } = await import('../lib/saleDiscount')
+    const allocated = allocateDocDiscount(
+      effectiveCart.map(c => ({
+        quantity: c.quantity,
+        unitPrice: c.price,
+        discountAmount: c.discountAmount,
+        discountRate: c.discountRate,
+        afterLineNet: c.netTotal,
+        productId: c.productId,
+        code: c.code,
+        name: c.name,
+        vatRate: c.vatRate,
+      })),
+      effectiveDocDiscCalc,
+    )
+    assertAllocatedTotal(allocated, effectiveTotal, '[finalize/iskonto]')
+
+    const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, allocated.map(a => ({
+      productId: a.source.productId,
+      productCode: a.source.code,
+      productName: a.source.name,
+      quantity: a.quantity,
+      unitPrice: a.unitPriceGross,
+      vatRate: a.source.vatRate,
+      discountRate: a.source.discountRate ?? 0,
+      discountAmount: a.lineDiscount + a.docDiscountShare,
+      lineTotal: a.netAmount,
       appliedBy: cashier.id,
+      unitPriceGross: a.unitPriceGross,
+      grossAmount: a.grossAmount,
+      lineDiscount: a.lineDiscount,
+      docDiscountShare: a.docDiscountShare,
+      netAmount: a.netAmount,
     })), enrichedDevice)
 
     // Görev 2 — kodsuz/KDV'siz satır: satışı kaydet, ERP'ye ekleme
@@ -3072,8 +3170,9 @@ export default function POSScreen({
       const finalSale = await fetchFinalPavoResult(saleRef.orderNo)
       await finalizeSaleToSQLite({
         lines,
-        orderNo:      saleRef.orderNo,
-        deviceResult: finalSale ? deviceResultFromPavoData(finalSale.raw) : undefined,
+        orderNo:             saleRef.orderNo,
+        deviceResult:        finalSale ? deviceResultFromPavoData(finalSale.raw) : undefined,
+        grandTotalOverride:  saleRef.totalPrice,
       })
 
       setPavoPendingSaleRef(null)
@@ -3905,16 +4004,23 @@ export default function POSScreen({
         .filter((item: ReturnableSaleItem) => (selected[item.Id] ?? 0) > 0)
         .map((item: ReturnableSaleItem) => {
           const qty = selected[item.Id] ?? 0
-          const lineTotal = Math.round(qty * item.UnitPrice * 100) / 100
+          // Pavo iade: müşteriye ödenen (indirimli) tutar
+          const unitNet = Number(item.UnitPrice) || 0
+          const lineTotal = Math.round(qty * unitNet * 100) / 100
           return {
             productCode:    '',
             productName:    item.ProductName,
             quantity:       -qty,
-            unitPrice:      item.UnitPrice,
+            unitPrice:      unitNet,
             vatRate:        item.VatRate ?? 20,
             discountRate:   0,
             discountAmount: 0,
             lineTotal,
+            unitPriceGross: unitNet,
+            grossAmount: lineTotal,
+            lineDiscount: 0,
+            docDiscountShare: 0,
+            netAmount: lineTotal,
           }
         })
 
@@ -3969,7 +4075,7 @@ export default function POSScreen({
         return
       }
 
-      const invoiceCustomer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
+      const invoiceCustomer = selectedCustomer ?? await tryResolveTorbaCustomer(companyId)
       const terminalLabel = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
       const orderNo = currentOrderNo
         ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
@@ -3987,32 +4093,57 @@ export default function POSScreen({
         cardAcquirerId: null,
         cashierId: cashier.id,
         cashierName: cashier.fullName,
-        customerId:   invoiceCustomer.id   || null,
-        customerName: invoiceCustomer.name ?? null,
-        customerCode: invoiceCustomer.code ?? null,
+        customerId:   invoiceCustomer?.id   || null,
+        customerName: invoiceCustomer?.name ?? null,
+        customerCode: invoiceCustomer?.code ?? null,
         isReturn: true,
       }
 
-      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, cart.map(c => ({
-        productId: c.productId,
-        productCode: c.code,
-        productName: c.name,
-        quantity: -Math.abs(c.quantity),
-        unitPrice: c.price,
-        vatRate: c.vatRate,
-        discountRate: c.discountRate,
-        discountAmount: c.discountAmount,
-        lineTotal: c.netTotal,
-        appliedBy: cashier.id,
-      })), undefined)
+      const { allocateDocDiscount, assertAllocatedTotal, r2 } = await import('../lib/saleDiscount')
+      const allocated = allocateDocDiscount(
+        cart.map(c => ({
+          quantity: Math.abs(c.quantity),
+          unitPrice: c.price,
+          discountAmount: c.discountAmount,
+          discountRate: c.discountRate,
+          afterLineNet: c.netTotal,
+          productId: c.productId,
+          code: c.code,
+          name: c.name,
+          vatRate: c.vatRate,
+        })),
+        docDiscountCalc,
+      )
+      assertAllocatedTotal(allocated, grandTotal, '[iade/iskonto]')
+
+      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, allocated.map(a => {
+        const netUnit = a.quantity > 0 ? r2(a.netAmount / a.quantity) : a.unitPriceGross
+        return {
+          productId: a.source.productId,
+          productCode: a.source.code,
+          productName: a.source.name,
+          quantity: -Math.abs(a.quantity),
+          unitPrice: netUnit,
+          vatRate: a.source.vatRate,
+          discountRate: 0,
+          discountAmount: 0,
+          lineTotal: a.netAmount,
+          appliedBy: cashier.id,
+          unitPriceGross: netUnit,
+          grossAmount: a.netAmount,
+          lineDiscount: 0,
+          docDiscountShare: 0,
+          netAmount: a.netAmount,
+        }
+      }), undefined)
 
       if (companyId) {
         try {
-          const { sendReturnInvoice, resolveTorbaCustomer } = await import('../lib/invoiceSend')
+          const { sendReturnInvoice } = await import('../lib/invoiceSend')
           const queueInvoiceType: 'e_archive' | 'paper' =
             settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive'
 
-          const customer = selectedCustomer ?? await resolveTorbaCustomer(companyId)
+          const customer = selectedCustomer ?? await tryResolveTorbaCustomer(companyId)
 
           await sendReturnInvoice(
             companyId,
@@ -5689,8 +5820,16 @@ export default function POSScreen({
                                     `Bu satıştaki ürün(ler) kasada bulunamadı, ERP'ye gönderilemez: ${missing.map(m => m.name).join(', ')}`,
                                   )
                                 }
+                                const cartOnly = enriched.map(({ needsProductMatch: _, ...c }) => c)
+                                const lineSum = cartOnly.reduce((s, c) => s + c.netTotal, 0)
+                                const docGap = parseFloat(
+                                  Math.max(0, lineSum - Number(sale.totalPrice ?? 0)).toFixed(2),
+                                )
                                 setShowHeld(false)
-                                setCart(enriched.map(({ needsProductMatch: _, ...c }) => c))
+                                setCart(cartOnly)
+                                setDocDiscountAmt(docGap > 0.009 ? docGap : 0)
+                                setDocDiscountRate(0)
+                                if (docGap > 0.009) setDocDiscMode('amt')
                                 setCurrentOrderNo(sale.orderNo || null)
                                 setPaymentMode(true)
                                 setPaymentLines([])

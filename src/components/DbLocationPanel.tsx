@@ -3,12 +3,15 @@ import { useEffect, useState } from 'react'
 interface Props {
   disabled?: boolean
   disabledReason?: string
+  /** true: yalnızca yol + kopyala (klasör değiştirme yok) */
+  pathOnly?: boolean
 }
 
-export default function DbLocationPanel({ disabled, disabledReason }: Props) {
+export default function DbLocationPanel({ disabled, disabledReason, pathOnly }: Props) {
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [info, setInfo] = useState<{ ok: boolean; text: string } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     void window.electron.db.getLocation().then(setPath).catch(() => {})
@@ -42,12 +45,23 @@ export default function DbLocationPanel({ disabled, disabledReason }: Props) {
     }
   }
 
+  async function copyPath() {
+    if (!path) return
+    try {
+      await navigator.clipboard.writeText(path)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setInfo({ ok: false, text: 'Kopyalanamadı' })
+    }
+  }
+
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
         Veritabanı konumu
       </div>
-      {disabled && disabledReason && (
+      {!pathOnly && disabled && disabledReason && (
         <div style={{ fontSize: 12, color: '#B45309', marginBottom: 8 }}>{disabledReason}</div>
       )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -55,21 +69,36 @@ export default function DbLocationPanel({ disabled, disabledReason }: Props) {
           flex: 1, minWidth: 0, border: '1px solid #E0E0E0', borderRadius: 8,
           padding: '8px 10px', fontSize: 12, color: '#111', background: '#F9FAFB',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
+          userSelect: 'text',
+        }} title={path || undefined}>
           {path || '…'}
         </div>
         <button
           type="button"
-          disabled={disabled || busy}
-          onClick={() => void changeFolder()}
+          disabled={!path}
+          onClick={() => void copyPath()}
           style={{
-            background: '#1565C0', color: 'white', border: 'none', borderRadius: 8,
-            padding: '8px 12px', cursor: disabled || busy ? 'not-allowed' : 'pointer',
-            fontSize: 12, fontWeight: 600, opacity: disabled || busy ? 0.6 : 1, whiteSpace: 'nowrap',
+            background: copied ? '#166534' : '#374151', color: 'white', border: 'none', borderRadius: 8,
+            padding: '8px 12px', cursor: path ? 'pointer' : 'not-allowed',
+            fontSize: 12, fontWeight: 600, opacity: path ? 1 : 0.6, whiteSpace: 'nowrap',
           }}
         >
-          {busy ? '…' : 'Değiştir…'}
+          {copied ? 'Kopyalandı' : 'Kopyala'}
         </button>
+        {!pathOnly && (
+          <button
+            type="button"
+            disabled={disabled || busy}
+            onClick={() => void changeFolder()}
+            style={{
+              background: '#1565C0', color: 'white', border: 'none', borderRadius: 8,
+              padding: '8px 12px', cursor: disabled || busy ? 'not-allowed' : 'pointer',
+              fontSize: 12, fontWeight: 600, opacity: disabled || busy ? 0.6 : 1, whiteSpace: 'nowrap',
+            }}
+          >
+            {busy ? '…' : 'Değiştir…'}
+          </button>
+        )}
       </div>
       {info && (
         <div style={{ marginTop: 8, fontSize: 12, color: info.ok ? '#166534' : '#B91C1C' }}>
