@@ -21,7 +21,7 @@ button {
 button:active:not(:disabled),
 [role="button"]:active,
 .pressable:active {
-  opacity: 0.65;
+  filter: brightness(0.92);
 }
 
 /* Scrollbar — ince ve sade */
@@ -33,6 +33,43 @@ button:active:not(:disabled),
 /* PLU buton hover efekti */
 .plu-btn:hover { border-color: #1565C0 !important; background: #E3F2FD !important; }
 .plu-btn:active { transform: scale(0.97); opacity: 1; }
+
+/* Satış pencereleri — dokunmatik ölçü */
+.pos-modal button:not(.pos-modal-close) {
+  min-height: 72px !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+}
+.pos-modal .pos-modal-close {
+  width: 56px !important;
+  height: 56px !important;
+  min-width: 56px !important;
+  min-height: 56px !important;
+  font-size: 28px !important;
+}
+.pos-modal input,
+.pos-modal textarea {
+  min-height: 64px !important;
+  font-size: 22px !important;
+}
+.pos-modal .pos-numpad button {
+  min-height: 80px !important;
+  min-width: 0 !important;
+  font-size: 28px !important;
+}
+.pos-modal .pos-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.pos-modal .pos-menu-grid button {
+  min-height: 96px !important;
+}
+@keyframes cartLineFlash {
+  0%   { box-shadow: inset 0 0 0 999px rgba(21, 128, 61, 0); }
+  35%  { box-shadow: inset 0 0 0 999px rgba(21, 128, 61, 0.38); }
+  100% { box-shadow: inset 0 0 0 999px rgba(21, 128, 61, 0); }
+}
 
 /* Grup sekme aktif */
 .group-tab-active { background: #1565C0 !important; color: white !important; }

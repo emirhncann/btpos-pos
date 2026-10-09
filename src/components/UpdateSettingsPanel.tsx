@@ -5,6 +5,7 @@ import {
   type Release,
 } from '../lib/appUpdate'
 import { API_URL } from '../lib/api'
+import { C } from '../theme/colors'
 
 function formatDate(raw?: string): string {
   if (!raw) return ''
@@ -70,7 +71,7 @@ export default function UpdateSettingsPanel({
         Kurulu sürüm: <b>v{installed || '…'}</b>
       </div>
       {error && (
-        <div style={{ background: '#FFEBEE', color: '#C62828', borderRadius: 8, padding: '10px 12px', fontSize: 13 }}>
+        <div style={{ background: C.danger, color: '#FFFFFF', borderRadius: 8, padding: '10px 12px', fontSize: 13, fontWeight: 700 }}>
           {error}
           <button
             type="button"

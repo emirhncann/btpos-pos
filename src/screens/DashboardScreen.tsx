@@ -14,6 +14,7 @@ import UpdateSettingsPanel from '../components/UpdateSettingsPanel'
 import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
+import { C, solidBtn } from '../theme/colors'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -31,18 +32,18 @@ const CMD_LABELS: Record<string, string> = {
 }
 
 const CMD_COLORS: Record<string, { bg: string; icon: string }> = {
-  sync_all:       { bg: '#E3F2FD', icon: '📦' },
-  sync_products:  { bg: '#E3F2FD', icon: '🔄' },
-  sync_prices:    { bg: '#E8F5E9', icon: '💰' },
-  sync_plu:       { bg: '#FFF8E1', icon: '🏷️' },
-  sync_cashiers:  { bg: '#F3E5F5', icon: '👤' },
-  sync_customers: { bg: '#FBE9E7', icon: '🏢' },
-  sync_settings:  { bg: '#F5F5F5', icon: '⚙️' },
-  sync_templates: { bg: '#E8F5E9', icon: '🧾' },
-  logout:         { bg: '#FFF3E0', icon: '🚪' },
-  message:        { bg: '#E8F5E9', icon: '💬' },
-  restart:        { bg: '#FFF8E1', icon: '🔁' },
-  lock:           { bg: '#FFEBEE', icon: '🔒' },
+  sync_all:       { bg: C.primary, icon: '📦' },
+  sync_products:  { bg: C.primary, icon: '🔄' },
+  sync_prices:    { bg: C.success, icon: '💰' },
+  sync_plu:       { bg: C.warning, icon: '🏷️' },
+  sync_cashiers:  { bg: C.online, icon: '👤' },
+  sync_customers: { bg: C.meal, icon: '🏢' },
+  sync_settings:  { bg: C.neutral, icon: '⚙️' },
+  sync_templates: { bg: C.success, icon: '🧾' },
+  logout:         { bg: C.warning, icon: '🚪' },
+  message:        { bg: C.success, icon: '💬' },
+  restart:        { bg: C.warning, icon: '🔁' },
+  lock:           { bg: C.danger, icon: '🔒' },
 }
 
 interface Props {
@@ -299,7 +300,7 @@ export default function DashboardScreen({
 
         {/* Kasiyer kartı */}
         <div style={{ background: 'white', borderRadius: 16, padding: '24px 40px', textAlign: 'center', border: '1px solid #E0E0E0', minWidth: 320 }}>
-          <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#E3F2FD', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', fontSize: 28, fontWeight: 600, color: '#1565C0' }}>
+          <div style={{ width: 72, height: 72, borderRadius: '50%', background: C.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', fontSize: 28, fontWeight: 700, color: '#FFFFFF' }}>
             {cashier.fullName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
           </div>
           <div style={{ fontSize: 20, fontWeight: 600, color: '#212121' }}>{cashier.fullName}</div>
@@ -311,12 +312,12 @@ export default function DashboardScreen({
         {/* Günlük özet */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 160px)', gap: 16 }}>
           {[
-            { label: 'Satış Sayısı', value: String(summary.saleCount), unit: 'adet', color: '#1565C0', bg: '#E3F2FD' },
-            { label: 'Günlük Ciro',  value: fmt(summary.totalSales),   unit: '₺',    color: '#2E7D32', bg: '#E8F5E9' },
-            { label: 'Nakit',        value: fmt(summary.totalCash),    unit: '₺',    color: '#E65100', bg: '#FFF8E1' },
-            { label: 'Kart',         value: fmt(summary.totalCard),    unit: '₺',    color: '#6A1B9A', bg: '#F3E5F5' },
+            { label: 'Satış Sayısı', value: String(summary.saleCount), unit: 'adet', color: C.primary },
+            { label: 'Günlük Ciro',  value: fmt(summary.totalSales),   unit: '₺',    color: C.success },
+            { label: 'Nakit',        value: fmt(summary.totalCash),    unit: '₺',    color: C.meal },
+            { label: 'Kart',         value: fmt(summary.totalCard),    unit: '₺',    color: C.online },
           ].map(card => (
-            <div key={card.label} style={{ background: card.bg, borderRadius: 12, padding: '16px 20px', textAlign: 'center' }}>
+            <div key={card.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderTop: `4px solid ${card.color}`, borderRadius: 12, padding: '16px 20px', textAlign: 'center' }}>
               <div style={{ fontSize: 11, color: card.color, marginBottom: 6, fontWeight: 500 }}>{card.label}</div>
               <div style={{ fontSize: 22, fontWeight: 600, color: card.color }}>{card.value}</div>
               <div style={{ fontSize: 11, color: card.color, marginTop: 2 }}>{card.unit}</div>
@@ -341,10 +342,9 @@ export default function DashboardScreen({
               setShowSettings(true)
             }}
             style={{
+              ...solidBtn(C.neutral),
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
-              background: '#F3F4F6', border: '1px solid #E0E0E0',
-              fontSize: 13, fontWeight: 500, color: '#374151',
+              padding: '10px 18px', borderRadius: 10, fontSize: 13,
             }}
           >
             ⚙ Kasa Ayarları
@@ -354,11 +354,10 @@ export default function DashboardScreen({
             disabled={invoiceSending}
             onClick={() => void handleSendPendingInvoices()}
             style={{
+              ...solidBtn(C.success, invoiceSending),
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, cursor: invoiceSending ? 'wait' : 'pointer',
-              background: '#E8F5E9', border: '1px solid #A5D6A7',
-              fontSize: 13, fontWeight: 500, color: '#2E7D32',
-              opacity: invoiceSending ? 0.7 : 1,
+              padding: '10px 18px', borderRadius: 10, fontSize: 13,
+              cursor: invoiceSending ? 'wait' : 'pointer',
             }}
             title="Bekleyen POS faturalarını ERP’ye gönderir (Z raporu / toplu)"
           >
@@ -368,10 +367,9 @@ export default function DashboardScreen({
             type="button"
             onClick={() => setShowQueue(true)}
             style={{
+              ...solidBtn(C.primary),
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
-              background: '#E3F2FD', border: '1px solid #90CAF9',
-              fontSize: 13, fontWeight: 500, color: '#1565C0',
+              padding: '10px 18px', borderRadius: 10, fontSize: 13,
             }}
           >
             📤 Belge Aktarım
@@ -380,10 +378,9 @@ export default function DashboardScreen({
             type="button"
             onClick={() => setShowSalesReport(true)}
             style={{
+              ...solidBtn(C.online),
               display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, cursor: 'pointer',
-              background: '#F3E5F5', border: '1px solid #CE93D8',
-              fontSize: 13, fontWeight: 500, color: '#6A1B9A',
+              padding: '10px 18px', borderRadius: 10, fontSize: 13,
             }}
           >
             📈 Belge Raporu
@@ -391,7 +388,7 @@ export default function DashboardScreen({
           <button
             type="button"
             onClick={onStartSale}
-            style={{ background: '#1565C0', color: 'white', border: 'none', borderRadius: 16, cursor: 'pointer', width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22, fontWeight: 600 }}
+            style={{ ...solidBtn(C.primary), borderRadius: 16, width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22 }}
           >
             <span style={{ fontSize: 36 }}>🛒</span>
             <span>Satış Başlat</span>
@@ -400,7 +397,7 @@ export default function DashboardScreen({
           <button
             type="button"
             onClick={onLogout}
-            style={{ background: 'white', color: '#C62828', border: '1px solid #FFCDD2', borderRadius: 16, cursor: 'pointer', width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14, fontWeight: 500 }}
+            style={{ ...solidBtn(C.danger), borderRadius: 16, width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14 }}
           >
             <span style={{ fontSize: 28 }}>🚪</span>
             <span>Kasiyer Çıkışı</span>
@@ -413,11 +410,11 @@ export default function DashboardScreen({
         <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
 
           {heldCount > 0 && (
-            <div style={{ background: '#F3E5F5', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ background: C.online, borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
               <span style={{ fontSize: 24 }}>⏸</span>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#6A1B9A' }}>{heldCount} Bekletilen Belge</div>
-                <div style={{ fontSize: 11, color: '#9C27B0' }}>Satış ekranından getirilebilir</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#FFFFFF' }}>{heldCount} Bekletilen Belge</div>
+                <div style={{ fontSize: 11, color: '#FFFFFF' }}>Satış ekranından getirilebilir</div>
               </div>
             </div>
           )}
@@ -575,11 +572,8 @@ export default function DashboardScreen({
                   type="button"
                   onClick={() => setSettingsTab(tab.id)}
                   style={{
-                    flex: 1, padding: '8px 12px', borderRadius: 8, border: 'none',
-                    background: settingsTab === tab.id ? '#E3F2FD' : 'transparent',
-                    color: settingsTab === tab.id ? '#1565C0' : '#6B7280',
-                    fontWeight: settingsTab === tab.id ? 600 : 400,
-                    fontSize: 13, cursor: 'pointer',
+                    ...(settingsTab === tab.id ? solidBtn(C.primary, false, true) : { background: 'transparent', color: C.textMuted, border: 'none', fontWeight: 400, cursor: 'pointer', boxShadow: 'none' }),
+                    flex: 1, padding: '8px 12px', borderRadius: 8, fontSize: 13,
                   }}
                 >
                   {tab.label}
@@ -605,8 +599,8 @@ export default function DashboardScreen({
               )}
               {settingsTab === 'payment' && (
                 <div style={{
-                  padding: '12px 16px', background: '#E3F2FD', borderRadius: 10,
-                  border: '1px solid #90CAF9', fontSize: 12, color: '#1565C0', marginBottom: 16,
+                  padding: '12px 16px', background: C.bg, borderRadius: 10,
+                  border: `1px solid ${C.border}`, fontSize: 12, color: C.text, marginBottom: 16,
                 }}>
                   <div style={{ fontWeight: 700, marginBottom: 4 }}>Pavo ödeme cihazı</div>
                   {pavoDeviceInfo
@@ -641,12 +635,9 @@ export default function DashboardScreen({
                       [t.key]: !draftCart[t.key],
                     })}
                     style={{
+                      ...(draftCart[t.key] ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
                       display: 'flex', alignItems: 'center', gap: 5,
-                      padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
-                      fontSize: 12, fontWeight: 500, border: '1px solid',
-                      background: draftCart[t.key] ? '#E3F2FD' : 'white',
-                      borderColor: draftCart[t.key] ? '#90CAF9' : '#E0E0E0',
-                      color: draftCart[t.key] ? '#1565C0' : '#9ca3af',
+                      padding: '5px 12px', borderRadius: 7, fontSize: 12,
                     }}
                   >
                     <span style={{ fontSize: 11 }}>{draftCart[t.key] ? '✓' : '○'}</span>

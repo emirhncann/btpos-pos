@@ -22,6 +22,9 @@ import { parsePavoResult, type PaymentDeviceResult, isSuccessfulPavoPayment } fr
 import { useQueueWorker, type QueueToastPayload } from '../hooks/useQueueWorker'
 import { API_URL } from '../lib/api'
 import { PluButton, truncatePluName } from '../components/PluButton'
+import { DiscountLine } from '../components/DiscountLine'
+import { PosModal, modalActionStyle } from '../components/PosModal'
+import { C, solidBtn } from '../theme/colors'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
@@ -230,16 +233,17 @@ function appendTrMobileSmsDigit(prev: string, k: string): string {
   return d + k
 }
 
-function hexToSoft(hex: string): string {
+function hexToTint(hex: string, weight = 0.5): string {
   try {
-    if (!hex?.startsWith('#') || hex.length < 7) return '#E3F2FD'
+    if (!hex?.startsWith('#') || hex.length < 7) return '#f8f9fa'
     const r = parseInt(hex.slice(1, 3), 16)
     const g = parseInt(hex.slice(3, 5), 16)
     const b = parseInt(hex.slice(5, 7), 16)
-    if ([r, g, b].some(n => Number.isNaN(n))) return '#E3F2FD'
-    return `rgba(${r}, ${g}, ${b}, 0.12)`
+    if ([r, g, b].some(n => Number.isNaN(n))) return '#f8f9fa'
+    const mix = (c: number) => Math.round(c * weight + 255 * (1 - weight))
+    return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`
   } catch {
-    return '#E3F2FD'
+    return '#f8f9fa'
   }
 }
 
@@ -297,6 +301,14 @@ interface PendingSaleRow {
 
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
+
+function payBrandColor(id: number, name: string): string {
+  if (id === 999) return C.install
+  const n = name.toLocaleLowerCase('tr-TR')
+  if (n.includes('yemek')) return C.meal
+  if (n.includes('online')) return C.online
+  return C.online
+}
 
 function isPavoTimeoutMessage(msg: string): boolean {
   return msg.includes('zaman aşımı') || msg.includes('AbortError')
@@ -628,9 +640,16 @@ function localISOString(): string {
 }
 
 const MENU_ACCENT: Record<'islemler' | 'belge' | 'musteri', string> = {
-  islemler: '#1565C0',
-  belge:    '#7C3AED',
-  musteri:  '#2E7D32',
+  islemler: C.primary,
+  belge:    C.online,
+  musteri:  C.success,
+}
+
+const DEFAULT_HELD_LABEL = /^Bekleyen #\d+ · \d{2}:\d{2}$/
+
+function defaultHeldLabel(seq: number, at = new Date()): string {
+  const hm = at.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+  return `Bekleyen #${seq} · ${hm}`
 }
 
 function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout = 'row', onClick }: {
@@ -642,7 +661,7 @@ function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout =
   layout?:  'row' | 'stack'
   onClick?: () => void
 }) {
-  const tone = danger ? '#DC2626' : accent
+  const tone = danger ? C.danger : accent
   const stacked = layout === 'stack'
   return (
     <button
@@ -650,50 +669,22 @@ function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout =
       disabled={disabled}
       onClick={onClick}
       style={{
+        ...solidBtn(tone, !!disabled),
         display: 'flex',
         flexDirection: stacked ? 'column' : 'row',
-        alignItems: stacked ? 'center' : 'center',
-        justifyContent: stacked ? 'center' : 'flex-start',
-        gap: stacked ? 10 : 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: stacked ? 8 : 14,
         width: '100%',
-        minHeight: stacked ? 100 : 60,
-        padding: stacked ? '16px 12px' : '14px 16px',
-        borderRadius: 14,
-        border: `1.5px solid ${disabled ? '#E5E7EB' : danger ? '#FECACA' : `${tone}30`}`,
-        background: disabled ? '#F9FAFB' : danger ? '#FFF5F5' : '#FFFFFF',
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        textAlign: stacked ? 'center' as const : 'left' as const,
-        boxShadow: disabled ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
-        WebkitTapHighlightColor: 'transparent',
+        minHeight: stacked ? 96 : 72,
+        padding: '12px',
+        fontSize: 20,
+        textAlign: 'center' as const,
         touchAction: 'manipulation',
       }}
     >
-      <span style={{
-        width: stacked ? 52 : 46,
-        height: stacked ? 52 : 46,
-        borderRadius: 12,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: stacked ? 26 : 22,
-        flexShrink: 0,
-        background: disabled ? '#F3F4F6' : danger ? '#FEE2E2' : `${tone}12`,
-      }}>
-        {icon}
-      </span>
-      <span style={{
-        fontSize: stacked ? 14 : 15,
-        fontWeight: 600,
-        color: disabled ? '#9CA3AF' : danger ? '#DC2626' : '#1F2937',
-        lineHeight: 1.35,
-        flex: stacked ? undefined : 1,
-      }}>
-        {label}
-      </span>
-      {!disabled && !stacked && (
-        <span style={{ fontSize: 18, color: '#D1D5DB', flexShrink: 0 }}>›</span>
-      )}
+      <span style={{ fontSize: stacked ? 28 : 22, lineHeight: 1 }}>{icon}</span>
+      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.25, color: '#FFFFFF' }}>{label}</span>
     </button>
   )
 }
@@ -787,6 +778,12 @@ export default function POSScreen({
   const [pendingError, setPendingError]   = useState<string | null>(null)
   const [heldPreview, setHeldPreview]     = useState<HeldDocRow | null>(null)
   const [heldEdit, setHeldEdit]           = useState<{ id: string; label: string } | null>(null)
+  const [holdDraft, setHoldDraft]         = useState<{ mode: 'new' | 'edit'; id?: string; note: string } | null>(null)
+  const [resumeHoldNote, setResumeHoldNote] = useState('')
+  const [barcodeToast, setBarcodeToast]   = useState<string | null>(null)
+  const [flashLineId, setFlashLineId]     = useState<string | null>(null)
+  const holdNoteRef                       = useRef<HTMLInputElement>(null)
+  const barcodeScanRef                    = useRef<(code: string) => void>(() => {})
   const [currentOrderNo, setCurrentOrderNo] = useState<string | null>(null)
   const [clock, setClock] = useState(() =>
     new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -1377,7 +1374,7 @@ export default function POSScreen({
   const safePage   = Math.min(page, totalPages - 1)
   const slice      = filtered.slice(safePage * PLU_PER_PAGE, (safePage + 1) * PLU_PER_PAGE)
 
-  useEffect(() => { setPage(0) }, [activeGroup, searchQ, pluCols, pluRows])
+  useEffect(() => { setPage(0) }, [activeGroup, pluCols, pluRows])
 
   function resetSlide() {
     setSwipeState(null)
@@ -1487,19 +1484,19 @@ export default function POSScreen({
         return
       }
 
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      const isProductSearch = target === searchRef.current
+      if ((tag === 'INPUT' || tag === 'TEXTAREA') && !isProductSearch) return
+      if (isProductSearch && e.key.length === 1) e.preventDefault()
 
       if (e.key === 'Enter') {
-        if (buf.length >= 2) {
-          setSearchQ(buf)
-          setNumBuf('')
-        } else if (numBuf.length >= 2) {
-          setSearchQ(numBuf)
-          setNumBuf('')
-        }
+        const code = buf.length >= 2 ? buf : (numBuf.length >= 2 ? numBuf : '')
         buf = ''
         if (timer) clearTimeout(timer)
+        if (!code) return
+        setNumBuf('')
+        barcodeScanRef.current(code)
         return
       }
 
@@ -1587,13 +1584,13 @@ export default function POSScreen({
   }, [searchQ, numBuf, allProducts, barcodeFormats, quickReturnModal?.step, scaleEnabled, parseBarcodeEAN13, showError])
 
   /* ── Sepet işlemleri ── */
-  function addToCartWithQty(product: ProductRow, qty: number) {
+  function addToCartWithQty(product: ProductRow, qty: number): string {
     if (cancelNextAdd) {
       setCancelNextAdd(false)
       cancelOneFromCart(
         cart.find(c => c.productId === product.id)?.id ?? '',
       )
-      return
+      return ''
     }
 
     if (cart.length === 0 && !currentOrderNo) {
@@ -1601,6 +1598,7 @@ export default function POSScreen({
       setLastReceipt(null)
     }
 
+    let lineId = ''
     setCart(prev => {
       const dup = settings.cashier.duplicateItemAction
 
@@ -1608,6 +1606,7 @@ export default function POSScreen({
         const exIdx = prev.findIndex(c => c.productId === product.id)
         if (exIdx !== -1) {
           const ex = prev[exIdx]
+          lineId = ex.id
           const newQty = ex.quantity + qty
           const newTotal = parseFloat((newQty * ex.price).toFixed(2))
           const netTotal = calcLineDiscount(newTotal, ex.discountRate, ex.discountAmount)
@@ -1618,9 +1617,10 @@ export default function POSScreen({
         }
       }
 
+      lineId = crypto.randomUUID()
       const lineTotal = parseFloat((product.price * qty).toFixed(2))
       return [...prev, {
-        id:          crypto.randomUUID(),
+        id:          lineId,
         productId:   product.id,
         code:        product.code ?? '',
         name:        product.name,
@@ -1636,6 +1636,70 @@ export default function POSScreen({
         barcode:     product.barcode ?? '',
       }]
     })
+    return lineId
+  }
+
+  function flashCartLine(id: string) {
+    if (!id) return
+    setFlashLineId(id)
+    window.setTimeout(() => {
+      document.getElementById(`cart-row-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }, 40)
+    window.setTimeout(() => setFlashLineId(cur => cur === id ? null : cur), 600)
+  }
+
+  function showBarcodeMiss(code: string) {
+    const msg = `Barkod bulunamadı: ${code}`
+    setBarcodeToast(msg)
+    window.setTimeout(() => setBarcodeToast(cur => cur === msg ? null : cur), 2200)
+  }
+
+  barcodeScanRef.current = (code: string) => {
+    const scanned = code.trim()
+    if (scanned.length < 2) return
+
+    if (scanned.length === 13) {
+      const flagCode = parseInt(scanned.slice(0, 2), 10)
+      if (flagCode >= 20 && flagCode <= 29) {
+        const parsed = parseBarcodeEAN13(scanned)
+        if (!parsed) {
+          showBarcodeMiss(scanned)
+          return
+        }
+        const product = matchProductByInternalBarcode(allProducts, parsed.productBarcode)
+        if (!product) {
+          showBarcodeMiss(scanned)
+          return
+        }
+        flashCartLine(addToCartWithQty(product, parsed.quantity))
+        playClickSound()
+        return
+      }
+    }
+
+    const byBarcode = allProducts.find(p => p.barcode === scanned || p.code === scanned)
+    if (!byBarcode) {
+      showBarcodeMiss(scanned)
+      return
+    }
+
+    if (isWeighedUnit(byBarcode.unit) && scaleEnabled) {
+      void window.electron.scale.getLastReading().catch(() => null).then(last => {
+        setScaleModal({
+          product: byBarcode,
+          weight: last?.weight ?? 0,
+          tare: 0,
+          stable: last?.stable ?? false,
+          raw: last?.raw ?? '',
+        })
+      })
+      return
+    }
+
+    const qty = numBuf ? Math.max(0.01, parseFloat(numBuf.replace(',', '.'))) : 1
+    setNumBuf('')
+    flashCartLine(addToCartWithQty(byBarcode, qty))
+    playClickSound()
   }
 
   async function handlePluClick(product: ProductRow) {
@@ -1871,15 +1935,33 @@ export default function POSScreen({
 
   /* ── Menü işlemleri ── */
 
-  async function holdDoc() {
+  function openHoldNote() {
     if (!cart.length) return
+    setMenuOpen(null)
+    setHoldDraft({ mode: 'new', note: resumeHoldNote.slice(0, 60) })
+  }
+
+  async function commitHoldNote(noteRaw: string, skip: boolean) {
+    if (!holdDraft) return
+    const note = (skip ? '' : noteRaw).trim().slice(0, 60)
+
+    if (holdDraft.mode === 'edit' && holdDraft.id) {
+      const idx = heldDocs.findIndex(d => d.id === holdDraft.id)
+      const label = note || defaultHeldLabel(Math.max(1, idx + 1))
+      await window.electron.db.updateHeldDocumentLabel(holdDraft.id, label)
+      setHoldDraft(null)
+      void loadHeld()
+      return
+    }
+
+    if (!cart.length) {
+      setHoldDraft(null)
+      return
+    }
 
     const orderNo = currentOrderNo
       ?? nextOrderNo(settings.terminal.terminalInfo.terminalNumber)
-
-    const label = selectedCustomer
-      ? selectedCustomer.name
-      : `Belge ${new Date().toLocaleTimeString('tr-TR')}`
+    const label = note || defaultHeldLabel(heldDocs.length + 1)
 
     await window.electron.db.holdDocument({
       companyId,
@@ -1891,9 +1973,25 @@ export default function POSScreen({
       cashierName: cashier.fullName,
       customer: selectedCustomer ?? null,
     })
+    setResumeHoldNote('')
+    setHoldDraft(null)
     clearCart()
     void loadHeld()
   }
+
+  useEffect(() => {
+    if (!holdDraft) return
+    const t = window.setTimeout(() => holdNoteRef.current?.focus(), 40)
+    if (touchEnabled) {
+      openKeyboard({
+        title: 'Not (isteğe bağlı)',
+        initial: holdDraft.note,
+        type: 'qwerty',
+        onConfirm: (v) => { void commitHoldNote(v.slice(0, 60), false) },
+      })
+    }
+    return () => window.clearTimeout(t)
+  }, [holdDraft?.mode, holdDraft?.id, touchEnabled])
 
   async function retrieveDoc(doc: HeldDocRow) {
     const items = doc.items.map(normalizeHeldCartItem)
@@ -1925,6 +2023,8 @@ export default function POSScreen({
       }
     }
     setCurrentOrderNo(doc.orderNo ?? null)
+    const kept = (doc.label ?? '').trim()
+    setResumeHoldNote(DEFAULT_HELD_LABEL.test(kept) ? '' : kept.slice(0, 60))
     await window.electron.db.deleteHeldDocument(doc.id)
     void loadHeld()
     setShowHeld(false)
@@ -1987,7 +2087,10 @@ export default function POSScreen({
 
   async function saveHeldLabel() {
     if (!heldEdit) return
-    await window.electron.db.updateHeldDocumentLabel(heldEdit.id, heldEdit.label)
+    const note = heldEdit.label.trim().slice(0, 60)
+    const idx = heldDocs.findIndex(d => d.id === heldEdit.id)
+    const label = note || defaultHeldLabel(Math.max(1, idx + 1))
+    await window.electron.db.updateHeldDocumentLabel(heldEdit.id, label)
     setHeldEdit(null)
     void loadHeld()
   }
@@ -2261,19 +2364,28 @@ export default function POSScreen({
 
     if (docDiscountCalc > 0) {
       discounts.push({
-        label: 'Belge indirimi',
+        label: docDiscountRate > 0 ? `Belge indirimi %${docDiscountRate}` : 'Belge indirimi',
         amount: docDiscountCalc,
         scope: 'document',
+        rate: docDiscountRate,
       })
     }
 
     const payload: SecondScreenPayload = {
       mode: 'cart_and_btpos_gif',
-      items: cart.map(item => ({
-        name: item.name,
-        qty: item.quantity,
-        lineTotal: item.netTotal,
-      })),
+      items: cart.map(item => {
+        const gross = parseFloat((item.price * item.quantity).toFixed(2))
+        const lineDisc = Math.max(0, parseFloat((gross - item.netTotal).toFixed(2)))
+        return {
+          name: item.name,
+          qty: item.quantity,
+          lineTotal: item.netTotal,
+          unitPrice: item.price,
+          gross,
+          discountAmount: lineDisc,
+          discountRate: item.discountRate ?? 0,
+        }
+      }),
       discounts,
       totals: {
         subtotal: lineSubtotal,
@@ -2288,7 +2400,7 @@ export default function POSScreen({
     }
 
     void window.electron.secondScreen.update(payload).catch(() => {})
-  }, [cart, customerDisplay, docDiscountCalc, grandTotal, lineSubtotal, toplamIndirim, totalQty])
+  }, [cart, customerDisplay, docDiscountCalc, docDiscountRate, grandTotal, lineSubtotal, toplamIndirim, totalQty])
 
   async function handlePavoRecovery(
     saleRef: { saleId?: number | null; saleNumber?: string | null },
@@ -4216,7 +4328,7 @@ export default function POSScreen({
 
   /* ── Renkler ── */
   const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? '#1565C0'
-  const activeSoft  = hexToSoft(activeColor)
+  const activeSoft  = hexToTint(activeColor)
   const devtoolsOn = isDevtoolsPermitActive(settings.terminal)
   const devtoolsUntil = (() => {
     const raw = settings.terminal.devtoolsExpiresAt
@@ -4257,12 +4369,12 @@ export default function POSScreen({
           to   { transform: rotate(360deg); }
         }
         @keyframes pulse-yellow {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.7; }
+          0%, 100% { transform: scale(1); }
+          50%       { transform: scale(1.04); }
         }
         @keyframes pulse-red {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%       { opacity: 0.85; transform: scale(1.03); }
+          0%, 100% { transform: scale(1); }
+          50%       { transform: scale(1.06); }
         }
       `}</style>
 
@@ -4313,18 +4425,11 @@ export default function POSScreen({
                 fontSize:       11,
                 fontWeight:     700,
                 transition:     'all 0.2s',
-                ...(heldDocs.length <= 3 ? {
-                  background: '#E8F5E9',
-                  color:      '#2E7D32',
-                } : heldDocs.length <= 6 ? {
-                  background: '#FFF8E1',
-                  color:      '#F57F17',
-                  animation:  'pulse-yellow 2s infinite',
-                } : {
-                  background: '#FFEBEE',
-                  color:      '#C62828',
-                  animation:  'pulse-red 1s infinite',
-                }),
+                ...(heldDocs.length <= 3
+                  ? solidBtn(C.success)
+                  : heldDocs.length <= 6
+                    ? { ...solidBtn(C.warning), animation: 'pulse-yellow 2s infinite' }
+                    : { ...solidBtn(C.danger), animation: 'pulse-red 1s infinite' }),
               }}
             >
               <span style={{ fontSize: 14 }}>
@@ -4357,12 +4462,12 @@ export default function POSScreen({
             </button>
           )}
           {currentOrderNo && cart.length > 0 && (
-            <span style={{ background: '#EFF6FF', color: '#1565C0', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 600 }}>
+            <span style={{ background: C.primary, color: '#FFFFFF', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 700 }}>
               # {currentOrderNo}
             </span>
           )}
           {lastReceipt && cart.length === 0 && (
-            <span style={{ background: '#E8F5E9', color: '#2E7D32', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 500 }}>
+            <span style={{ background: C.success, color: '#FFFFFF', borderRadius: 6, padding: '3px 8px', fontSize: 10, fontWeight: 700 }}>
               ✓ {lastReceipt}
             </span>
           )}
@@ -4515,7 +4620,7 @@ export default function POSScreen({
         const targetItem = cart.find(c => c.id === lineDiscountTarget)
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-            <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
+            <div className="pos-modal" style={{ background: 'white', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Satır İndirimi</div>
@@ -4529,7 +4634,7 @@ export default function POSScreen({
                 {[{ key: 'rate', label: 'Yüzde (%)' }, { key: 'amt', label: 'Tutar (₺)' }].map(m => (
                   <button key={m.key} type="button"
                     onClick={() => { setDiscMode(m.key as 'rate' | 'amt'); setLineDiscRateIn(''); setLineDiscAmtIn('') }}
-                    style={{ flex: 1, padding: '8px', borderRadius: 8, border: '2px solid', borderColor: discMode === m.key ? '#E65100' : '#E0E0E0', background: discMode === m.key ? '#FFF3E0' : 'white', color: discMode === m.key ? '#E65100' : '#6B7280', fontWeight: discMode === m.key ? 700 : 400, fontSize: 13, cursor: 'pointer' }}>
+                    style={{ ...(discMode === m.key ? solidBtn(C.discountBar, false, true) : solidBtn(C.neutral)), flex: 1, padding: '8px', borderRadius: 8, fontSize: 13 }}>
                     {m.label}
                   </button>
                 ))}
@@ -4539,7 +4644,7 @@ export default function POSScreen({
                 {discMode === 'rate' ? `${lineDiscRateIn || '0'} %` : `${lineDiscAmtIn || '0'} ₺`}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                   <button key={k} type="button"
                     onClick={() => {
@@ -4588,12 +4693,12 @@ export default function POSScreen({
             alignItems:     'flex-end',
             justifyContent: 'center',
           }}>
-            <div style={{
+            <div className="pos-modal" style={{
               background:   'white',
-              borderRadius: '16px 16px 0 0',
+              borderRadius: 16,
               padding:      '20px 16px 32px',
-              width:        '100%',
-              maxWidth:     420,
+              width:        'min(720px, 92vw)',
+              maxWidth:     '92vw',
             }}>
               <div style={{
                 display:        'flex',
@@ -4642,7 +4747,7 @@ export default function POSScreen({
                 {priceEditInput || '0'} ₺
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                   <button
                     key={k}
@@ -4722,9 +4827,9 @@ export default function POSScreen({
             background: 'rgba(0,0,0,0.5)',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
           }}>
-            <div style={{
-              background: 'white', borderRadius: '16px 16px 0 0',
-              padding: '20px 16px 32px', width: '100%', maxWidth: 420,
+            <div className="pos-modal" style={{
+              background: 'white', borderRadius: 16,
+              padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw',
             }}>
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
@@ -4761,7 +4866,7 @@ export default function POSScreen({
                 {weightEditInput || '0'} kg
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
                 {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                   <button
                     key={k}
@@ -4821,7 +4926,7 @@ export default function POSScreen({
 
       {docDiscountMode && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px', width: '100%', maxWidth: 420 }}>
+          <div className="pos-modal" style={{ background: 'white', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>Belge İndirimi</div>
@@ -4846,7 +4951,7 @@ export default function POSScreen({
                     setDocDiscountRate(0)
                     setDocDiscountAmt(0)
                   }}
-                  style={{ flex: 1, padding: '8px', borderRadius: 8, border: '2px solid', borderColor: docDiscMode === m.key ? '#E65100' : '#E0E0E0', background: docDiscMode === m.key ? '#FFF3E0' : 'white', color: docDiscMode === m.key ? '#E65100' : '#6B7280', fontWeight: docDiscMode === m.key ? 700 : 400, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ ...(docDiscMode === m.key ? solidBtn(C.discountBar, false, true) : solidBtn(C.neutral)), flex: 1, padding: '8px', borderRadius: 8, fontSize: 13 }}>
                   {m.label}
                 </button>
               ))}
@@ -4856,7 +4961,7 @@ export default function POSScreen({
               {docDiscMode === 'rate' ? `${docDiscInput || '0'} %` : `${docDiscInput || '0'} ₺`}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                 <button key={k} type="button"
                   onClick={() => {
@@ -4921,9 +5026,9 @@ export default function POSScreen({
           background: 'rgba(0,0,0,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <div style={{
+          <div className="pos-modal" style={{
             background: 'white', borderRadius: 16, padding: '20px 16px 24px',
-            width: 'min(360px, 94vw)',
+            width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 10,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -4946,7 +5051,7 @@ export default function POSScreen({
               {formatTrMobileSmsDisplay(smsPhoneDraft) || '—'}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {['7', '8', '9', '4', '5', '6', '1', '2', '3'].map(k => {
                 const firstEmpty = smsPhoneDraft.replace(/\D/g, '').length === 0
                 const disabledFirst = firstEmpty && k !== '5'
@@ -4965,7 +5070,7 @@ export default function POSScreen({
                 )
               })}
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               <button type="button" onClick={() => setSmsPhoneDraft('')}
                 style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
                   background: '#F5F5F5', fontSize: 15, fontWeight: 600,
@@ -5028,9 +5133,9 @@ export default function POSScreen({
           background: 'rgba(0,0,0,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <div style={{
+          <div className="pos-modal" style={{
             background: 'white', borderRadius: 16, padding: '20px 16px 24px',
-            width: 'min(360px, 94vw)',
+            width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 10,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between',
@@ -5298,9 +5403,9 @@ export default function POSScreen({
           background: 'rgba(0,0,0,0.5)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <div style={{
+          <div className="pos-modal" style={{
             background: 'white', borderRadius: 16, padding: 24,
-            width: 'min(380px, 94vw)',
+            width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 14,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -5363,9 +5468,8 @@ export default function POSScreen({
                 void window.electron.scale.write('T')
               }}
               style={{
-                padding: '12px 10px', borderRadius: 10,
-                border: '1px solid #BFDBFE', background: '#EFF6FF',
-                color: '#1D4ED8', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                ...solidBtn(C.primary),
+                padding: '12px 10px', borderRadius: 10, fontSize: 13,
               }}
             >
               Dara Al
@@ -5469,11 +5573,12 @@ export default function POSScreen({
           onClick={() => setShowHeld(false)}
         >
           <div
+            className="pos-modal"
             onClick={e => e.stopPropagation()}
             style={{
               background:    'white',
               borderRadius:  18,
-              width:         'min(560px, 96vw)',
+              width:         'min(960px, 92vw)',
               maxHeight:     '88vh',
               display:       'flex',
               flexDirection: 'column',
@@ -5622,9 +5727,9 @@ export default function POSScreen({
                     </div>
 
                     <div style={{
-                      fontSize:     12,
-                      color:        '#374151',
-                      fontWeight:   500,
+                      fontSize:     20,
+                      color:        C.text,
+                      fontWeight:   700,
                       overflow:     'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace:   'nowrap',
@@ -5661,7 +5766,14 @@ export default function POSScreen({
 
                     <button
                       type="button"
-                      onClick={() => setHeldEdit({ id: doc.id, label: doc.label ?? '' })}
+                      onClick={() => {
+                        const raw = (doc.label ?? '').trim()
+                        setHoldDraft({
+                          mode: 'edit',
+                          id: doc.id,
+                          note: DEFAULT_HELD_LABEL.test(raw) ? '' : raw.slice(0, 60),
+                        })
+                      }}
                       style={{
                         padding:      '6px 10px',
                         borderRadius: 7,
@@ -5678,14 +5790,10 @@ export default function POSScreen({
                       type="button"
                       onClick={() => void retrieveDoc(doc)}
                       style={{
+                        ...solidBtn(C.primary),
                         padding:      '6px 14px',
                         borderRadius: 7,
-                        border:       '1px solid #BFDBFE',
-                        background:   '#EFF6FF',
                         fontSize:     11,
-                        fontWeight:   700,
-                        color:        '#1D4ED8',
-                        cursor:       'pointer',
                       }}
                     >📂 Getir</button>
                   </div>
@@ -5988,9 +6096,9 @@ export default function POSScreen({
 
             <div style={{ display: 'flex', justifyContent: 'space-between',
               padding: '10px 12px', borderRadius: 8,
-              background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Toplam</span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#1565C0' }}>
+              background: C.bg, border: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Toplam</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: C.primary }}>
                 {fmt(heldPreview.totalAmount ?? 0)}
               </span>
             </div>
@@ -6000,70 +6108,75 @@ export default function POSScreen({
                 void retrieveDoc(heldPreview)
                 setHeldPreview(null)
               }}
-              style={{ padding: '12px', borderRadius: 10, border: 'none',
-                background: '#1565C0', color: 'white', fontWeight: 700,
-                fontSize: 14, cursor: 'pointer' }}>
+                style={{ ...solidBtn(C.primary), padding: '12px', borderRadius: 10, fontSize: 14 }}>
               📂 Belgeyi Getir
             </button>
           </div>
         </div>
       )}
 
-      {heldEdit && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.5)', display: 'flex',
-          alignItems: 'center', justifyContent: 'center' }}
-          onClick={() => setHeldEdit(null)}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 14, padding: 24,
-              width: 'min(360px, 94vw)', display: 'flex',
-              flexDirection: 'column', gap: 14 }}>
-
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Belge İsmini Düzenle</div>
-
-            <input
-              autoFocus={!touchEnabled}
-              readOnly={touchEnabled}
-              value={heldEdit.label}
-              onChange={e => setHeldEdit(prev => prev ? { ...prev, label: e.target.value } : prev)}
-              onClick={() => {
-                if (!touchEnabled) return
-                openKeyboard({
-                  title:    'Belge İsmi',
-                  initial:  heldEdit?.label ?? '',
-                  type:     'qwerty',
-                  onConfirm: (v) => setHeldEdit(prev => prev ? { ...prev, label: v } : prev),
-                })
-              }}
-              placeholder="Belge ismi (örn: Masa 3, Ali Bey)"
-              style={{ padding: '12px 14px', borderRadius: 10,
-                border: '1.5px solid #E5E7EB', fontSize: 14,
-                outline: 'none', width: '100%', boxSizing: 'border-box' }}
-              onKeyDown={e => { if (e.key === 'Enter') void saveHeldLabel() }}
-            />
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={() => setHeldEdit(null)}
-                style={{ flex: 1, padding: '11px', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: '#F9FAFB',
-                  fontSize: 14, cursor: 'pointer', color: '#6B7280' }}>
-                Vazgeç
-              </button>
-              <button type="button" onClick={() => void saveHeldLabel()}
-                style={{ flex: 1, padding: '11px', borderRadius: 10,
-                  border: 'none', background: '#1565C0', color: 'white',
-                  fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>
-                Kaydet
-              </button>
-            </div>
-          </div>
-        </div>
+      {holdDraft && (
+        <PosModal
+          title="Beklemeye Al"
+          size="sm"
+          zIndex={10000}
+          onClose={() => setHoldDraft(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (holdDraft.mode === 'edit') setHoldDraft(null)
+                  else void commitHoldNote('', true)
+                }}
+                style={modalActionStyle(C.neutral)}
+              >Atla</button>
+              <button
+                type="button"
+                onClick={() => void commitHoldNote(holdDraft.note, false)}
+                style={modalActionStyle(C.success)}
+              >Kaydet</button>
+            </>
+          }
+        >
+          <label style={{ display: 'block', fontSize: 20, fontWeight: 600, marginBottom: 12, color: C.text }}>
+            Not (isteğe bağlı)
+          </label>
+          <input
+            ref={holdNoteRef}
+            autoFocus={!touchEnabled}
+            readOnly={touchEnabled}
+            maxLength={60}
+            value={holdDraft.note}
+            onChange={e => setHoldDraft(prev => prev ? { ...prev, note: e.target.value.slice(0, 60) } : prev)}
+            onClick={() => {
+              if (!touchEnabled) return
+              openKeyboard({
+                title: 'Not (isteğe bağlı)',
+                initial: holdDraft.note,
+                type: 'qwerty',
+                onConfirm: (v) => { void commitHoldNote(v.slice(0, 60), false) },
+              })
+            }}
+            onKeyDown={e => { if (e.key === 'Enter') void commitHoldNote(holdDraft.note, false) }}
+            placeholder="Masa 4 – Ahmet bey, paket bekliyor"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              borderRadius: 12,
+              border: `1px solid ${C.border}`,
+              padding: '0 16px',
+              outline: 'none',
+              color: C.text,
+            }}
+          />
+        </PosModal>
       )}
 
       {/* Müşteri seç */}
       {showCustomer && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 14, padding: 24, width: 460, maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="pos-modal" style={{ background: 'white', borderRadius: 14, padding: 24, width: 'min(720px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ fontWeight: 600, fontSize: 15 }}>Müşteri Seç</span>
               <button onClick={() => setShowCustomer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
@@ -6298,67 +6411,33 @@ export default function POSScreen({
               </div>
             ) : cart.map((item, rowIdx) => {
               const dr = item.discountRate ?? 0
-              const da = item.discountAmount ?? 0
+              const gross = parseFloat((item.price * item.quantity).toFixed(2))
+              const lineDiscTl = Math.max(0, parseFloat((gross - item.netTotal).toFixed(2)))
+              const hasLineDisc = lineDiscTl > 0.009
+              const discLabel = dr > 0 ? `İndirim %${dr}` : 'İndirim'
               const rowBg = returnMode
                 ? '#FFF5F5'
                 : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
+              const metaPill = (key: string, text: string, mono = false) => (
+                <span key={key} style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  padding: '0 5px', height: 16, borderRadius: 3,
+                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
+                  background: C.bg, color: C.textMuted, border: `1px solid ${C.border}`,
+                  fontFamily: mono ? 'monospace' : undefined,
+                }}>{text}</span>
+              )
               const pills: ReactNode[] = []
-              if (settings.cashier.showCode && item.code?.trim()) pills.push(
-                <span key="kod" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#F3F4F6', color: '#4B5563', border: '1px solid #E5E7EB',
-                  fontFamily: 'monospace',
-                }}>{item.code}</span>,
-              )
-              if (cartSettings.showBarkod && item.barcode?.trim()) pills.push(
-                <span key="bar" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#F3E5F5', color: '#4A148C', border: '1px solid #E1BEE7',
-                  fontFamily: 'monospace',
-                }}>{item.barcode}</span>,
-              )
-              if (cartSettings.showBirim) pills.push(
-                <span key="birim" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#E8F5E9', color: '#1B5E20', border: '1px solid #A5D6A7',
-                }}>{item.unit ?? 'Adet'}</span>,
-              )
-              if (cartSettings.showFiyat) pills.push(
-                <span key="fp" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#E3F2FD', color: '#0D47A1', border: '1px solid #BBDEFB',
-                }}>{fmt(item.price)}</span>,
-              )
-              if (cartSettings.showIskonto && (dr > 0 || da > 0)) pills.push(
-                <span key="dis" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#FCE4EC', color: '#880E4F', border: '1px solid #F8BBD0',
-                }}>
-                  {dr > 0 ? `-%${dr} indirim` : `-${fmt(da)} indirim`}
-                </span>,
-              )
-              if (cartSettings.showKdv) pills.push(
-                <span key="kdv" style={{
-                  display: 'inline-flex', alignItems: 'center',
-                  padding: '0 5px', height: 16, borderRadius: 3,
-                  fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: '#FFF3E0', color: '#BF360C', border: '1px solid #FFCCBC',
-                }}>KDV %{item.vatRate}</span>,
-              )
+              if (settings.cashier.showCode && item.code?.trim()) pills.push(metaPill('kod', item.code, true))
+              if (cartSettings.showBarkod && item.barcode?.trim()) pills.push(metaPill('bar', item.barcode, true))
+              if (cartSettings.showBirim) pills.push(metaPill('birim', item.unit ?? 'Adet'))
+              if (cartSettings.showFiyat) pills.push(metaPill('fp', fmt(item.price)))
+              if (cartSettings.showKdv) pills.push(metaPill('kdv', `KDV %${item.vatRate}`))
 
               return (
                 <div
                   key={item.id}
+                  id={`cart-row-${item.id}`}
                   style={{
                     position:     'relative',
                     overflow:     'hidden',
@@ -6424,10 +6503,8 @@ export default function POSScreen({
                       (e.currentTarget as HTMLDivElement).style.background = rowBg
                     }}
                     style={{
-                      display:             'grid',
-                      gridTemplateColumns: CART_GRID,
-                      padding:             '8px 12px',
-                      alignItems:          'start',
+                      display:             'flex',
+                      flexDirection:       'column',
                       background:          rowBg,
                       borderRadius:        11,
                       border:              '1px solid #e8eaef',
@@ -6443,11 +6520,18 @@ export default function POSScreen({
                       zIndex:              1,
                       userSelect:          'none',
                       touchAction:         'pan-y',
+                      animation:           flashLineId === item.id ? 'cartLineFlash 0.6s ease' : undefined,
                     }}
                     onMouseEnter={e => {
                       (e.currentTarget as HTMLDivElement).style.background = '#f2f4f7'
                     }}
                   >
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: CART_GRID,
+                    padding: '8px 12px',
+                    alignItems: 'start',
+                  }}>
                   <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                       <div style={{
@@ -6468,19 +6552,17 @@ export default function POSScreen({
                           setLineDiscountTarget(item.id)
                         }}
                         style={{
+                          ...solidBtn(C.discountBar),
                           minWidth: 38,
                           height: 34,
                           borderRadius: 8,
-                          border: '1px solid #FFE0B2',
-                          background: '#FFF8E1',
-                          color: '#E65100',
                           padding: '3px 5px',
                           display: 'inline-flex',
                           flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          cursor: 'pointer',
                           lineHeight: 1,
+                          fontSize: 9,
                         }}
                         title="Satır indirimi"
                       >
@@ -6574,9 +6656,17 @@ export default function POSScreen({
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
+                    {hasLineDisc && (
+                      <div style={{
+                        fontSize: cartSettings.fsTutarSub,
+                        color: C.textMuted,
+                        textDecoration: 'line-through',
+                        fontWeight: 500,
+                      }}>{fmt(gross)}</div>
+                    )}
                     <div style={{
-                      fontSize: cartSettings.fsTutar, fontWeight: 600,
-                      color: '#111',
+                      fontSize: cartSettings.fsTutar, fontWeight: 700,
+                      color: C.text,
                     }}>{fmt(item.netTotal)}</div>
                     <div
                       role="button"
@@ -6587,13 +6677,23 @@ export default function POSScreen({
                       }}
                       onMouseDown={e => e.stopPropagation()}
                       style={{
-                      fontSize: cartSettings.fsTutarSub, color: '#9ca3af', marginTop: 1,
+                      fontSize: cartSettings.fsTutarSub, color: C.textMuted, marginTop: 1,
                       cursor: paymentMode ? 'default' : 'pointer',
-                      borderBottom: paymentMode ? 'none' : '1px dashed #D1D5DB',
+                      borderBottom: paymentMode ? 'none' : `1px dashed ${C.border}`,
                       display: 'inline-block',
-                    }}>{fmt(item.price)}×{fmtQty(item.quantity)}</div>
+                    }}>{fmtQty(item.quantity)} × {fmt(item.price)}</div>
                   </div>
                   </div>
+                  {hasLineDisc && (
+                    <div style={{ padding: '0 8px 8px' }}>
+                      <DiscountLine
+                        label={discLabel}
+                        amount={`−${fmt(lineDiscTl)}`}
+                        fontSize={cartSettings.fsUrunKod}
+                      />
+                    </div>
+                  )}
+                </div>
                 </div>
               )
             })}
@@ -6610,33 +6710,20 @@ export default function POSScreen({
             flexShrink: 0,
           }}>
             <div style={{ padding: '8px 14px 0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', padding: '2px 0' }}>
-                <span>Ara Toplam</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMuted, padding: '2px 0' }}>
+                <span>Ara toplam</span>
                 <span>{fmt(araToplamBrut)}</span>
               </div>
-              {satirIndirimi > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#AD1457', padding: '2px 0' }}>
-                  <span>Satır İndirimi</span>
-                  <span>-{fmt(satirIndirimi)}</span>
-                </div>
-              )}
               {belgeIndirimi > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#AD1457', padding: '2px 0' }}>
-                  <span>Belge İndirimi</span>
-                  <span>-{fmt(belgeIndirimi)}</span>
+                <div style={{ margin: '4px 0' }}>
+                  <DiscountLine
+                    label={docDiscountRate > 0 ? `Belge indirimi %${docDiscountRate}` : 'Belge indirimi'}
+                    amount={`−${fmt(belgeIndirimi)}`}
+                    fontSize={cartSettings.fsUrunKod}
+                  />
                 </div>
               )}
-              {satirIndirimi > 0 && belgeIndirimi > 0 && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between',
-                  fontSize: 12, color: '#880E4F', padding: '2px 0',
-                  borderTop: '1px dashed #F8BBD0', marginTop: 2,
-                }}>
-                  <span>Toplam İndirim</span>
-                  <span>-{fmt(toplamIndirim)}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', padding: '2px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMuted, padding: '2px 0' }}>
                 <span>KDV Tutarı</span>
                 <span>{fmt(toplamKdv)}</span>
               </div>
@@ -6646,13 +6733,13 @@ export default function POSScreen({
               justifyContent: 'space-between',
               alignItems: 'baseline',
               padding: '10px 14px 12px',
-              borderTop: '1px solid #eceef2',
+              borderTop: `1px solid ${C.border}`,
               marginTop: 2,
-              background: '#ffffff',
+              background: C.surface,
               borderRadius: '0 0 11px 11px',
             }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>Genel Toplam</span>
-              <span style={{ fontSize: 28, fontWeight: 700, color: '#1565C0' }}>{fmt(grandTotal)}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>TOPLAM</span>
+              <span style={{ fontSize: 28, fontWeight: 700, color: C.primary }}>{fmt(grandTotal)}</span>
             </div>
           </div>
         </div>
@@ -6697,17 +6784,13 @@ export default function POSScreen({
                 setSmsPhoneDraft(smsPhone || '')
                 setSmsPhonePanelOpen(true)
               }}
-              style={{ borderRadius: 8, border: '1.5px solid',
-                borderColor: smsPhone ? '#1565C0' : '#E5E7EB',
-                background: smsPhone ? '#EFF6FF' : '#FAFAFA',
+              style={{ ...(smsPhone ? solidBtn(C.primary, !pavoSettings, true) : solidBtn(C.neutral, !pavoSettings)),
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 justifyContent: 'center',
-                gap: 4, padding: '4%', overflow: 'hidden', height: '100%',
-                cursor: pavoSettings ? 'pointer' : 'default',
-                opacity: pavoSettings ? 1 : 0.55 }}>
+                gap: 4, padding: '4%', overflow: 'hidden', height: '100%' }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>📱</span>
               <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                color: smsPhone ? '#1565C0' : '#9CA3AF',
+                color: '#FFFFFF',
                 whiteSpace: 'nowrap', overflow: 'hidden',
                 textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
                 {smsPhone ? formatTrMobileSmsDisplay(smsPhone) : 'SMS'}
@@ -6717,16 +6800,13 @@ export default function POSScreen({
             {/* Mail */}
             <button type="button"
               onClick={() => setMailModalOpen(true)}
-              style={{ borderRadius: 8, border: '1.5px solid',
-                borderColor: mailAddr ? '#1565C0' : '#E5E7EB',
-                background: mailAddr ? '#EFF6FF' : '#FAFAFA',
+              style={{ ...(mailAddr ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
                 display: 'flex', flexDirection: 'column', alignItems: 'center',
                 justifyContent: 'center',
-                gap: 4, padding: '4%', overflow: 'hidden', height: '100%',
-                cursor: 'pointer' }}>
+                gap: 4, padding: '4%', overflow: 'hidden', height: '100%' }}>
               <span style={{ fontSize: 'clamp(12px, 1.2vw, 18px)' }}>✉️</span>
               <span style={{ fontSize: 'clamp(8px, 0.7vw, 11px)', fontWeight: 600,
-                color: mailAddr ? '#1565C0' : '#9CA3AF',
+                color: '#FFFFFF',
                 whiteSpace: 'nowrap', overflow: 'hidden',
                 textOverflow: 'ellipsis', display: 'block', width: '100%', textAlign: 'center' as const }}>
                 {mailAddr || 'Mail'}
@@ -6741,34 +6821,26 @@ export default function POSScreen({
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
-              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
-                border: `1.5px solid ${menuOpen === 'islemler' ? '#1565C0' : '#BBDEFB'}`,
-                background: menuOpen === 'islemler' ? '#E3F2FD' : '#F3F8FE',
-                color: '#1565C0', fontWeight: 600, cursor: 'pointer',
+              style={{ ...solidBtn(C.primary, false, menuOpen === 'islemler'),
+                padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>☰</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Menü</span>
             </button>
 
-            {/* 2 — Belge: mor tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
-              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
-                border: `1.5px solid ${menuOpen === 'belge' ? '#7C3AED' : '#DDD6FE'}`,
-                background: menuOpen === 'belge' ? '#EDE9FE' : '#F5F3FF',
-                color: '#7C3AED', fontWeight: 600, cursor: 'pointer',
+              style={{ ...solidBtn(C.online, false, menuOpen === 'belge'),
+                padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>📄</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Belge</span>
             </button>
 
-            {/* 3 — Müşteri: yeşil tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
-              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
-                border: `1.5px solid ${menuOpen === 'musteri' || selectedCustomer ? '#2E7D32' : '#C8E6C9'}`,
-                background: menuOpen === 'musteri' ? '#E8F5E9' : selectedCustomer ? '#F1F8F1' : '#F4FBF4',
-                color: '#2E7D32', fontWeight: 600, cursor: 'pointer',
+              style={{ ...solidBtn(C.success, false, menuOpen === 'musteri' || !!selectedCustomer),
+                padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>👤</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)',
@@ -6778,13 +6850,10 @@ export default function POSScreen({
               </span>
             </button>
 
-            {/* 4 — Fiyat Gör: amber tonu */}
             <button type="button"
               onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
-              style={{ padding: '4% 2%', height: '100%', borderRadius: 8,
-                border: `1.5px solid ${menuOpen === 'fiyatgor' ? '#D97706' : '#FDE68A'}`,
-                background: menuOpen === 'fiyatgor' ? '#FEF3C7' : '#FFFBEB',
-                color: '#D97706', fontWeight: 600, cursor: 'pointer',
+              style={{ ...solidBtn(C.warning, false, menuOpen === 'fiyatgor'),
+                padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
               <span style={{ fontSize: 'clamp(8px,0.7vw,11px)' }}>Fiyat Gör</span>
@@ -6811,8 +6880,8 @@ export default function POSScreen({
               flexShrink:     0,
               height:         40,
               borderRadius:   9,
-              border:         `1.5px solid ${numBuf ? '#a5d6a7' : '#e5e7eb'}`,
-              background:     numBuf ? '#e8f5e9' : '#f9fafb',
+              border:         `1.5px solid ${numBuf ? C.success : C.border}`,
+              background:     C.surface,
               display:        'flex',
               alignItems:     'center',
               justifyContent: 'center',
@@ -6831,7 +6900,7 @@ export default function POSScreen({
                         ? 'clamp(10px, 0.95vw + 1px, 16px)'
                         : 'clamp(8px, 0.8vw, 14px)',
                 fontWeight:    700,
-                color:         numBuf ? '#2e7d32' : '#9ca3af',
+                color:         numBuf ? C.text : C.textMuted,
                 letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
                 whiteSpace:    'nowrap',
                 overflow:      'hidden',
@@ -6850,14 +6919,10 @@ export default function POSScreen({
                 type="button"
                 onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
                 style={{
+                  ...solidBtn(C.danger),
                   flex:           1,
                   borderRadius:   9,
-                  border:         '1.5px solid #fecdd3',
-                  background:     '#fff5f5',
-                  color:          '#dc2626',
                   fontSize:       13,
-                  fontWeight:     700,
-                  cursor:         'pointer',
                   display:        'flex',
                   alignItems:     'center',
                   justifyContent: 'center',
@@ -6869,14 +6934,10 @@ export default function POSScreen({
                 type="button"
                 onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
                 style={{
+                  ...solidBtn(C.warning),
                   flex:           1,
                   borderRadius:   9,
-                  border:         '1.5px solid #fde68a',
-                  background:     '#fffbeb',
-                  color:          '#d97706',
                   fontSize:       20,
-                  fontWeight:     700,
-                  cursor:         'pointer',
                   display:        'flex',
                   alignItems:     'center',
                   justifyContent: 'center',
@@ -6928,19 +6989,15 @@ export default function POSScreen({
                   setNumBuf('')
                 }}
                 style={{
+                  ...solidBtn(C.primary, !numBuf),
                   width:          '100%',
                   height:         '100%',
                   boxSizing:      'border-box',
-                  border:         `1.5px solid ${numBuf ? '#BFDBFE' : '#e5e7eb'}`,
                   borderRadius:   9,
-                  cursor:         numBuf ? 'pointer' : 'default',
-                  fontWeight:     700,
                   display:        'flex',
                   alignItems:     'center',
                   justifyContent: 'center',
                   userSelect:     'none' as const,
-                  background:     numBuf ? '#EFF6FF' : '#f9fafb',
-                  color:          numBuf ? '#1565C0' : '#9ca3af',
                   fontSize:       'clamp(10px, 0.9vw + 3px, 14px)',
                 }}
               >enter</button>
@@ -6951,67 +7008,13 @@ export default function POSScreen({
           </div>
 
           {menuOpen && menuOpen !== 'fiyatgor' && (
-            <>
-              <div
-                role="presentation"
-                style={{ position: 'fixed', inset: 0, zIndex: 9990, background: 'rgba(0,0,0,0.35)' }}
-                onClick={() => setMenuOpen(null)}
-              />
-              <div
-                style={{
-                  position: 'fixed',
-                  top: '50%', left: '50%',
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 9991,
-                  background: 'white',
-                  border: '0.5px solid #E5E7EB',
-                  borderRadius: 20,
-                  boxShadow: '0 12px 48px rgba(0,0,0,0.2)',
-                  width: 'min(92vw, 520px)',
-                  maxHeight: '85vh',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-                onClick={e => e.stopPropagation()}
-              >
-                <div style={{
-                  padding: '18px 20px 16px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  borderBottom: '1px solid #F3F4F6',
-                  flexShrink: 0,
-                  background: `${MENU_ACCENT[menuOpen]}08`,
-                }}>
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>
-                      {{ islemler: 'İşlemler', belge: 'Belge İşlemleri', musteri: 'Müşteri İşlemleri' }[menuOpen]}
-                    </div>
-                    <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 3 }}>
-                      {{ islemler: 'Tahsilat, ödeme ve belge yönetimi', belge: 'İade işlemleri', musteri: 'Müşteri seçimi ve düzenleme' }[menuOpen]}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMenuOpen(null)}
-                    style={{
-                      width: 40, height: 40, borderRadius: 10,
-                      border: '1px solid #E5E7EB', background: 'white',
-                      fontSize: 18, color: '#6B7280', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >✕</button>
-                </div>
-
-                <div style={{
-                  padding: 16,
-                  overflowY: 'auto',
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: 10,
-                }}>
+            <PosModal
+              title={{ islemler: 'İşlemler', belge: 'Belge İşlemleri', musteri: 'Müşteri İşlemleri' }[menuOpen]}
+              size="md"
+              zIndex={9991}
+              onClose={() => setMenuOpen(null)}
+            >
+                <div className="pos-menu-grid">
 
                 {menuOpen === 'islemler' && [
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
@@ -7047,7 +7050,7 @@ export default function POSScreen({
                         setMenuOpen(null)
                         return
                       }
-                      if (item.label.startsWith('Beklemeye')) { void holdDoc(); return }
+                      if (item.label.startsWith('Beklemeye')) { openHoldNote(); return }
                       if (item.label.startsWith('Belge getir')) { openHeldModal(); setMenuOpen(null); return }
                       if (item.label.startsWith('Belge iptal')) {
                         void confirm({
@@ -7140,8 +7143,7 @@ export default function POSScreen({
                 ))}
 
                 </div>
-              </div>
-            </>
+            </PosModal>
           )}
 
           {menuOpen === 'fiyatgor' && (
@@ -7149,9 +7151,9 @@ export default function POSScreen({
               background: 'rgba(0,0,0,0.4)', display: 'flex',
               alignItems: 'center', justifyContent: 'center' }}
               onClick={() => setMenuOpen(null)}>
-              <div onClick={e => e.stopPropagation()}
+              <div className="pos-modal" onClick={e => e.stopPropagation()}
                 style={{ background: 'white', borderRadius: 16, padding: 24,
-                  width: 'min(520px, 94vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  width: 'min(720px, 92vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ fontSize: 16, fontWeight: 500, color: '#111',
@@ -7420,10 +7422,8 @@ export default function POSScreen({
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                       {([
-                        { method: 'cash' as const, icon: '💵', label: 'Nakit',
-                          bg: '#E8F5E9', border: '#A5D6A7', color: '#2E7D32' },
-                        { method: 'card' as const, icon: '💳', label: 'Kart',
-                          bg: '#EFF6FF', border: '#BFDBFE', color: '#1565C0' },
+                        { method: 'cash' as const, icon: '💵', label: 'Nakit', color: C.cash },
+                        { method: 'card' as const, icon: '💳', label: 'Kart', color: C.card },
                       ]).map(btn => (
                         <button
                           key={btn.method}
@@ -7432,14 +7432,10 @@ export default function POSScreen({
                             cariPaymentMethod === btn.method ? null : btn.method
                           )}
                           style={{
-                            padding:      '10px',
+                            ...solidBtn(btn.color, false, cariPaymentMethod === btn.method),
+                            padding: '10px',
                             borderRadius: 9,
-                            border:       `1.5px solid ${cariPaymentMethod === btn.method ? btn.border : '#E5E7EB'}`,
-                            background:   cariPaymentMethod === btn.method ? btn.bg : '#F9FAFB',
-                            color:        cariPaymentMethod === btn.method ? btn.color : '#374151',
-                            fontWeight:   700,
-                            fontSize:     13,
-                            cursor:       'pointer',
+                            fontSize: 13,
                           }}
                         >
                           {btn.icon} {btn.label}
@@ -7775,7 +7771,7 @@ export default function POSScreen({
                     style={{
                       height:        84,
                       border:        'none',
-                      background:    isActive ? g.color : '#f8f9fa',
+                      background:    isActive ? g.color : hexToTint(g.color),
                       cursor:        'pointer',
                       position:      'relative',
                       display:       'flex',
@@ -7783,7 +7779,7 @@ export default function POSScreen({
                       alignItems:    'center',
                       justifyContent:'center',
                       gap:           4,
-                      color:         isActive ? 'white' : '#6b7280',
+                      color:         isActive ? 'white' : '#1f2937',
                       fontSize:      10,
                       fontWeight:    600,
                       textTransform: 'uppercase' as const,
@@ -7808,7 +7804,7 @@ export default function POSScreen({
                     <div style={{
                       width: isActive ? 12 : 10, height: isActive ? 12 : 10,
                       borderRadius: '50%', background: isActive ? 'white' : g.color,
-                      opacity: isActive ? 1 : 0.4, transition: 'all 0.15s',
+                      opacity: 1, transition: 'all 0.15s',
                     }} />
                     <span>{g.name}</span>
                   </button>
@@ -7842,16 +7838,10 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
+                    ...solidBtn(returnMode ? C.danger : C.cash, cart.length === 0),
                     padding: '13px 4px',
                     borderRadius: 7,
-                    border: cart.length === 0
-                      ? 'none'
-                      : `1.5px solid ${returnMode ? '#FECACA' : '#A5D6A7'}`,
-                    background: cart.length === 0 ? '#f5f5f5' : returnMode ? '#FEF2F2' : '#e8f5e9',
-                    color: cart.length === 0 ? '#bdbdbd' : returnMode ? '#DC2626' : '#2e7d32',
-                    fontWeight: 600,
                     fontSize: 13,
-                    cursor: cart.length === 0 ? 'default' : 'pointer',
                   }}
                 >
                   {returnMode ? '💵 Nakit İade' : '💵 Nakit'}
@@ -7871,16 +7861,10 @@ export default function POSScreen({
                   disabled={cart.length === 0 || (!returnMode && !pavoSettings)}
                   title={!returnMode && !pavoSettings ? 'Pavo cihazı ayarlı değil' : undefined}
                   style={{
+                    ...solidBtn(returnMode ? C.danger : C.card, cart.length === 0 || (!returnMode && !pavoSettings)),
                     padding: '13px 4px',
                     borderRadius: 7,
-                    border: cart.length === 0 || (!returnMode && !pavoSettings)
-                      ? 'none'
-                      : `1.5px solid ${returnMode ? '#FECACA' : '#90CAF9'}`,
-                    background: cart.length === 0 || (!returnMode && !pavoSettings) ? '#f5f5f5' : returnMode ? '#FEF2F2' : '#e3f2fd',
-                    color: cart.length === 0 || (!returnMode && !pavoSettings) ? '#bdbdbd' : returnMode ? '#DC2626' : '#1565C0',
-                    fontWeight: 600,
                     fontSize: 13,
-                    cursor: cart.length === 0 || (!returnMode && !pavoSettings) ? 'default' : 'pointer',
                   }}
                 >
                   {returnMode ? '💳 Kart İade' : '💳 Kart'}
@@ -7895,15 +7879,11 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
+                    ...solidBtn(C.split, cart.length === 0),
                     gridColumn: otherVisibleBrands.length > 0 ? undefined : 'span 2',
                     padding: '11px 4px',
                     borderRadius: 7,
-                    border: 'none',
-                    background: cart.length === 0 ? '#f5f5f5' : '#fff8e1',
-                    color: cart.length === 0 ? '#bdbdbd' : '#e65100',
-                    fontWeight: 600,
                     fontSize: 13,
-                    cursor: cart.length === 0 ? 'default' : 'pointer',
                   }}
                 >
                   🔀 Parçalı Ödeme
@@ -7918,14 +7898,10 @@ export default function POSScreen({
                     }}
                     disabled={cart.length === 0}
                     style={{
+                      ...solidBtn(C.neutral, cart.length === 0),
                       padding: '11px 4px',
                       borderRadius: 7,
-                      border: cart.length === 0 ? 'none' : '1.5px solid #E5E7EB',
-                      background: cart.length === 0 ? '#f5f5f5' : '#F9FAFB',
-                      color: cart.length === 0 ? '#bdbdbd' : '#374151',
-                      fontWeight: 700,
                       fontSize: 13,
-                      cursor: cart.length === 0 ? 'default' : 'pointer',
                     }}
                   >
                     🔖 Diğer
@@ -7944,7 +7920,7 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: '2vh 2vw',
         }}>
-          <div style={{
+          <div className="pos-modal" style={{
             width: '96%', maxWidth: 1200,
             height: 'auto',
             maxHeight: '80vh',
@@ -8033,7 +8009,7 @@ export default function POSScreen({
                   </div>
                   {pavoPendingSaleRef && pavoPendingSaleRef.paidAmount > 0 && (
                     <div style={{ display: 'flex', alignItems: 'center',
-                      gap: '3%', padding: '1vh 4%', opacity: 0.85 }}>
+                      gap: '3%', padding: '1vh 4%' }}>
                       <div style={{ width: 32, height: 24, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700,
                         borderRadius: 7, flexShrink: 0, background: '#ECFDF5', color: '#047857' }}>PV</div>
@@ -8110,10 +8086,9 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
                       disabled={remaining <= 0}
-                      style={{ padding: '0.5vh 0.8vw', borderRadius: 6, border: '1px solid #E3E5E9',
-                        background: 'white', color: '#61656D', fontSize: 'clamp(10px, 1.2vh, 11px)',
-                        fontWeight: 600, cursor: remaining > 0 ? 'pointer' : 'default',
-                        opacity: remaining > 0 ? 1 : 0.4 }}>
+                      style={{ ...solidBtn(C.neutral, remaining <= 0),
+                        padding: '0.5vh 0.8vw', borderRadius: 6,
+                        fontSize: 'clamp(10px, 1.2vh, 11px)' }}>
                       Kalanı
                     </button>
                   </div>
@@ -8128,62 +8103,47 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('cash', null, pendingAmount ? undefined : remaining)}
                       style={{
+                        ...solidBtn(C.cash, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'cash'),
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
                         alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                        borderRadius: 12, cursor: 'pointer', padding: '12%',
-                        border:     '1.5px solid #E3E5E9',
-                        background: 'white',
-                        color:      '#232733',
-                        transition: 'all 0.12s',
+                        padding: '12%',
                       }}>
-                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
-                        background: '#FDF1DE', color: '#A8620A', borderRadius: 6, padding: '3px 8px' }}>NK</span>
-                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
-                        fontWeight: 600 }}>Nakit</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>NK</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Nakit</span>
                     </button>
 
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('card', null, pendingAmount ? undefined : remaining)}
                       style={{
+                        ...solidBtn(C.card, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'card' && paymentLines[paymentLines.length - 1]?.brand == null),
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
                         alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                        borderRadius: 12, cursor: 'pointer', padding: '12%',
-                        border:     '1.5px solid #E3E5E9',
-                        background: 'white',
-                        color:      '#232733',
-                        transition: 'all 0.12s',
+                        padding: '12%',
                       }}>
-                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
-                        background: '#ECF0FD', color: '#3457D5', borderRadius: 6, padding: '3px 8px' }}>KK</span>
-                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
-                        fontWeight: 600 }}>Kart</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>KK</span>
+                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Kart</span>
                     </button>
 
                     {karmaVisibleBrands.map(brand => {
                       const isTaksit = brand.payment_provider_brand_id === 999
-                      const brandBg  = isTaksit ? '#E8F5E9' : '#F3E9FB'
-                      const brandFg  = isTaksit ? '#2E7D32' : '#7A3AAB'
+                      const color = payBrandColor(brand.payment_provider_brand_id, brand.payment_provider_brand_nm)
                       const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
+                      const selected = paymentLines[paymentLines.length - 1]?.brand === brand.payment_provider_brand_id
                       return (
                         <button key={brand.payment_provider_brand_id} type="button"
                           onClick={() => addPaymentLineWithMethod('other', brand, pendingAmount ? undefined : remaining)}
                           style={{
+                            ...solidBtn(color, remaining <= 0, selected),
                             aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
                             alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                            borderRadius: 12, cursor: 'pointer', padding: '12%',
-                            border:     '1.5px solid #E3E5E9',
-                            background: 'white',
-                            color:      '#232733',
-                            transition: 'all 0.12s',
+                            padding: '12%',
                           }}>
-                          <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700,
-                            background: brandBg, color: brandFg, borderRadius: 6, padding: '3px 8px' }}>
+                          <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>
                             {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
                           </span>
                           <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
                             overflow: 'hidden', display: '-webkit-box',
-                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%',
-                            fontWeight: 600 }}>
+                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%' }}>
                             {label}
                           </span>
                         </button>
@@ -8209,8 +8169,8 @@ export default function POSScreen({
 
                   <div style={{
                     flexShrink: 0, height: 40, borderRadius: 9,
-                    border: `1.5px solid ${pendingAmount ? '#a5d6a7' : '#e5e7eb'}`,
-                    background: pendingAmount ? '#e8f5e9' : '#f9fafb',
+                    border: `1.5px solid ${pendingAmount ? C.success : C.border}`,
+                    background: C.surface,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     padding: '0 8px', overflow: 'hidden', userSelect: 'none' as const,
                   }}>
@@ -8219,7 +8179,7 @@ export default function POSScreen({
                         : pendingAmount.length <= 14 ? 'clamp(12px, 1.1vw + 2px, 18px)'
                         : 'clamp(10px, 0.95vw + 1px, 16px)',
                       fontWeight: 700,
-                      color: pendingAmount ? '#2e7d32' : '#9ca3af',
+                      color: pendingAmount ? C.text : C.textMuted,
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       maxWidth: '100%', lineHeight: 1, textAlign: 'center' as const,
                     }}>
@@ -8231,9 +8191,8 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => setPendingAmount('')}
                       style={{
-                        flex: 1, borderRadius: 9,
-                        border: '1.5px solid #fecdd3', background: '#fff5f5', color: '#dc2626',
-                        fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                        ...solidBtn(C.danger),
+                        flex: 1, borderRadius: 9, fontSize: 13,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
                       }}>TEMİZLE</button>
@@ -8241,9 +8200,8 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => setPendingAmount(v => v.slice(0, -1))}
                       style={{
-                        flex: 1, borderRadius: 9,
-                        border: '1.5px solid #fde68a', background: '#fffbeb', color: '#d97706',
-                        fontSize: 20, fontWeight: 700, cursor: 'pointer',
+                        ...solidBtn(C.warning),
+                        flex: 1, borderRadius: 9, fontSize: 20,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
                       }}>⌫</button>
@@ -8279,15 +8237,11 @@ export default function POSScreen({
                       disabled={remaining <= 0}
                       onClick={() => setPendingAmount((remaining / 2).toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
                       style={{
+                        ...solidBtn(C.primary, remaining <= 0),
                         width: '100%', height: '100%', boxSizing: 'border-box' as const,
-                        border: remaining <= 0 ? '1.5px solid #e5e7eb' : '1.5px solid #BFDBFE',
                         borderRadius: 9,
-                        cursor: remaining <= 0 ? 'default' : 'pointer',
-                        fontWeight: 700,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
-                        background: remaining <= 0 ? '#f9fafb' : '#EFF6FF',
-                        color: remaining <= 0 ? '#9ca3af' : '#1565C0',
                         fontSize: 'clamp(10px, 0.9vw + 3px, 14px)',
                       }}>Yarısı</button>
                   </div>
@@ -8335,9 +8289,9 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           padding: '2vh 2vw',
         }}>
-          <div style={{
+          <div className="pos-modal" style={{
             background: 'white', borderRadius: 16, padding: '2.2vh 2vw',
-            width: 'min(560px, 94vw)', maxHeight: '86vh',
+            width: 'min(960px, 92vw)', maxHeight: '86vh',
             display: 'flex', flexDirection: 'column', gap: '1.6vh',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -8365,8 +8319,7 @@ export default function POSScreen({
             }}>
               {otherVisibleBrands.map(brand => {
                 const isTaksit = brand.payment_provider_brand_id === 999
-                const brandBg = isTaksit ? '#E8F5E9' : '#F3E9FB'
-                const brandFg = isTaksit ? '#2E7D32' : '#7A3AAB'
+                const color = payBrandColor(brand.payment_provider_brand_id, brand.payment_provider_brand_nm)
                 const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
                 const initials = isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()
                 return (
@@ -8394,47 +8347,26 @@ export default function POSScreen({
                     void completeSale([line])
                   }}
                   style={{
+                    ...solidBtn(color),
                     aspectRatio: '1',
-                    borderRadius: 12,
-                    cursor: 'pointer',
-                    border: `1.5px solid ${brandBg}`,
-                    background: 'white',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: 10,
                     padding: 12,
-                    transition: 'border-color 0.15s, box-shadow 0.15s',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = brandFg
-                    e.currentTarget.style.boxShadow = `0 0 0 1px ${brandFg}`
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = brandBg
-                    e.currentTarget.style.boxShadow = 'none'
                   }}
                 >
                   <span style={{
-                    width: '42%',
-                    aspectRatio: '1',
-                    maxWidth: 56,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
                     fontSize: 14,
                     fontWeight: 800,
-                    borderRadius: 12,
-                    background: brandBg,
-                    color: brandFg,
                   }}>
                     {initials}
                   </span>
                   <span style={{
                     fontSize: 12,
                     fontWeight: 700,
-                    color: '#232733',
+                    color: '#FFFFFF',
                     textAlign: 'center' as const,
                     lineHeight: 1.25,
                     overflow: 'hidden',
@@ -8490,10 +8422,9 @@ export default function POSScreen({
                 }}
                 style={{
                   padding: '12px 16px', borderRadius: 10,
-                  border: `1.5px solid ${t.is_default ? '#1565C0' : '#E5E7EB'}`,
-                  background: t.is_default ? '#EFF6FF' : 'white',
+                  ...(t.is_default ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
                   cursor: 'pointer', textAlign: 'left',
-                  display: 'flex', alignItems: 'center', gap: 10,
+                  display: 'flex', alignItems: 'center', gap: 10, fontSize: 13,
                 }}
               >
                 <span style={{ fontSize: 18 }}>
@@ -8502,12 +8433,12 @@ export default function POSScreen({
                 <div>
                   <div style={{
                     fontSize: 13, fontWeight: 600,
-                    color: t.is_default ? '#1565C0' : '#111',
+                    color: '#FFFFFF',
                   }}>
                     {t.name}
                   </div>
                   {t.is_default && (
-                    <div style={{ fontSize: 11, color: '#1565C0' }}>Varsayılan</div>
+                    <div style={{ fontSize: 11, color: '#FFFFFF' }}>Varsayılan</div>
                   )}
                 </div>
               </button>
@@ -8562,15 +8493,11 @@ export default function POSScreen({
               type="button"
               onClick={() => void handleDurumSorgula()}
               style={{
+                ...solidBtn(C.primary),
                 marginTop: 18,
                 padding: '10px 16px',
                 borderRadius: 8,
-                border: '1px solid #BBDEFB',
-                background: '#E3F2FD',
-                color: '#1565C0',
-                fontWeight: 700,
                 fontSize: 13,
-                cursor: 'pointer',
               }}
             >
               Durumu Sorgula
@@ -8594,8 +8521,8 @@ export default function POSScreen({
             </div>
 
             <div style={{
-              background: '#FEF3C7', borderRadius: 9, padding: '12px 14px',
-              border: '1px solid #FCD34D', fontSize: 13,
+              background: C.bg, borderRadius: 9, padding: '12px 14px',
+              border: `1px solid ${C.warning}`, fontSize: 13, color: C.text,
             }}>
               <div>Sipariş No: <strong>{pavoRecoveryState.orderNo}</strong></div>
               <div style={{ marginTop: 6 }}>
@@ -8682,15 +8609,35 @@ export default function POSScreen({
         </div>
       )}
 
+      {barcodeToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: 24,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10003,
+          background: C.danger,
+          color: '#FFFFFF',
+          borderRadius: 12,
+          padding: '14px 22px',
+          fontSize: 20,
+          fontWeight: 700,
+          boxShadow: '0 8px 24px rgba(0,0,0,.25)',
+          maxWidth: '92vw',
+        }}>
+          {barcodeToast}
+        </div>
+      )}
+
       {pavoError && !pavoLoading && (
         <div style={{
           position: 'fixed',
           bottom: merkezToast ? 72 : 24,
           right: 24,
           zIndex: 10002,
-          background: '#FFEBEE',
-          color: '#B71C1C',
-          border: '1px solid #FFCDD2',
+          background: C.danger,
+          color: '#FFFFFF',
+          border: 'none',
           borderRadius: 8,
           padding: '8px 12px',
           fontSize: 12,
@@ -8745,16 +8692,16 @@ export default function POSScreen({
             key={`${t.id}-${t.shownAt}`}
             style={{
               pointerEvents: 'auto',
-              background: t.status === 'success' ? '#E8F5E9' : '#FFEBEE',
-              border: `1px solid ${t.status === 'success' ? '#A5D6A7' : '#FFCDD2'}`,
+              background: t.status === 'success' ? C.success : C.danger,
+              border: 'none',
               borderRadius: 10, padding: '10px 14px',
-              fontSize: 13, fontWeight: 500,
-              color: t.status === 'success' ? '#2E7D32' : '#C62828',
+              fontSize: 13, fontWeight: 700,
+              color: '#FFFFFF',
               boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
             }}
           >
             <div>{t.status === 'success' ? '✓' : '✗'} {t.label ?? t.type}</div>
-            {t.error && <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>{t.error}</div>}
+            {t.error && <div style={{ fontSize: 11, color: '#FFFFFF', marginTop: 2 }}>{t.error}</div>}
           </div>
         ))}
       </div>
@@ -8882,11 +8829,8 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
               type="button"
               onClick={() => setIsPerson(v)}
               style={{
-                flex: 1, padding: '8px', borderRadius: 8, border: '1px solid',
-                background: isPerson === v ? '#EFF6FF' : 'white',
-                borderColor: isPerson === v ? '#3B82F6' : '#E0E0E0',
-                color: isPerson === v ? '#1D4ED8' : '#6B7280',
-                fontWeight: isPerson === v ? 600 : 400, fontSize: 13, cursor: 'pointer',
+                ...(isPerson === v ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
+                flex: 1, padding: '8px', borderRadius: 8, fontSize: 13,
               }}
             >
               {l}

@@ -1,6 +1,6 @@
 {
   "name": "btpos-pos",
-  "version": "1.0.3",
+  "version": "1.0.6",
   "description": "BTPOS POS Kasa Yazılımı",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -58,11 +58,19 @@
     "tailwind-merge": "^2.2.1"
   },
   "build": {
+    "npmRebuild": false,
     "appId": "tr.bolutekno.btpos",
     "productName": "BTPOS Kasa",
     "directories": {
       "output": "release"
     },
+    "files": [
+      "**/*",
+      "!**/.claude/**",
+      "!.btpos-dev/**",
+      "!release/**",
+      "!release-*/**"
+    ],
     "asar": true,
     "asarUnpack": [
       "node_modules/serialport/**",

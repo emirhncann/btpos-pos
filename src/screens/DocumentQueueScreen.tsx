@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { C, solidBtn } from '../theme/colors'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import {
@@ -40,11 +41,11 @@ const TYPE_ICON: Record<string, string> = {
 }
 
 const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  pending:        { bg: '#FFF3E0', color: '#E65100', label: 'Bekliyor' },
-  pending_dayend: { bg: '#F3E5F5', color: '#6A1B9A', label: 'Gün Sonu Bekliyor' },
-  processing:     { bg: '#E3F2FD', color: '#1565C0', label: 'Gönderiliyor' },
-  success:        { bg: '#E8F5E9', color: '#2E7D32', label: 'Gönderildi' },
-  failed:         { bg: '#FFEBEE', color: '#C62828', label: 'Hata' },
+  pending:        { bg: C.warning, color: '#FFFFFF', label: 'Bekliyor' },
+  pending_dayend: { bg: C.online, color: '#FFFFFF', label: 'Gün Sonu Bekliyor' },
+  processing:     { bg: C.primary, color: '#FFFFFF', label: 'Gönderiliyor' },
+  success:        { bg: C.success, color: '#FFFFFF', label: 'Gönderildi' },
+  failed:         { bg: C.danger, color: '#FFFFFF', label: 'Hata' },
   done:           { bg: '#F3F4F6', color: '#6B7280', label: 'Tamamlandı' },
 }
 
@@ -299,12 +300,11 @@ export function DocumentQueueScreen({
             : counts[k as keyof typeof counts] ?? 0
           return (
             <button key={k} type="button" onClick={() => setStatusFilter(k)}
-              style={{ padding: '5px 12px', borderRadius: 20, fontSize: 12,
-                fontWeight: 500, border: '1px solid', cursor: 'pointer',
-                background: statusFilter === k ? '#1565C0' : 'white',
-                color:      statusFilter === k ? 'white'   : '#374151',
-                borderColor:statusFilter === k ? '#1565C0' : '#E5E7EB' }}>
-              {l} {count > 0 && <span style={{ opacity: 0.8 }}>({count})</span>}
+              style={{
+                ...(statusFilter === k ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
+                padding: '5px 12px', borderRadius: 20, fontSize: 12,
+              }}>
+              {l} {count > 0 && <span>({count})</span>}
             </button>
           )
         })}
@@ -313,15 +313,15 @@ export function DocumentQueueScreen({
       {pendingReturns.length > 0 && (
         <div style={{
           padding: '12px 16px', borderRadius: 10,
-          background: '#F3E5F5', border: '1px solid #CE93D8',
+          background: C.online, border: 'none',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           marginBottom: 12,
         }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#6A1B9A' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#FFFFFF' }}>
               Bekleyen İadeler
             </div>
-            <div style={{ fontSize: 12, color: '#9CA3AF' }}>
+            <div style={{ fontSize: 12, color: '#FFFFFF' }}>
               {pendingReturns.length} iade — toplu fatura olarak gönderilecek
             </div>
           </div>
@@ -329,10 +329,10 @@ export function DocumentQueueScreen({
             onClick={() => void handleSendBatchReturn()}
             disabled={sending}
             style={{
-              padding: '8px 16px', borderRadius: 8, border: 'none',
-              background: '#7B1FA2', color: 'white', fontWeight: 600,
-              fontSize: 13, cursor: sending ? 'not-allowed' : 'pointer',
-              opacity: sending ? 0.6 : 1,
+              ...solidBtn(C.surface, sending),
+              color: sending ? C.disabledFg : C.online,
+              padding: '8px 16px', borderRadius: 8, fontSize: 13,
+              cursor: sending ? 'default' : 'pointer',
             }}>
             {sending ? 'Gönderiliyor...' : 'Toplu İade Gönder'}
           </button>
@@ -341,33 +341,31 @@ export function DocumentQueueScreen({
 
       {torbaFailed.length > 0 && (
         <div style={{
-          marginBottom: 12, padding: '10px 14px', background: '#FFEBEE',
-          border: '1px solid #EF9A9A', borderRadius: 8,
+          marginBottom: 12, padding: '10px 14px', background: C.danger,
+          border: 'none', borderRadius: 8,
         }}>
-          <div style={{ fontSize: 13, color: '#C62828', fontWeight: 600, marginBottom: 8 }}>
+          <div style={{ fontSize: 13, color: '#FFFFFF', fontWeight: 700, marginBottom: 8 }}>
             {torbaFailed.length} belge torba cari tanımlı olmadığı için gönderilemedi.
             Torba cari tanımlandıktan sonra &quot;Tümünü Yeniden Dene&quot; ile tekrar deneyin.
           </div>
           <button type="button" onClick={() => void handleRetryTorbaAll()}
-            style={{ background: '#C62828', color: 'white', border: 'none',
-              borderRadius: 7, padding: '6px 14px', fontSize: 12,
-              fontWeight: 600, cursor: 'pointer' }}>
+            style={{ ...solidBtn(C.surface), color: C.danger,
+              borderRadius: 7, padding: '6px 14px', fontSize: 12 }}>
             Tümünü Yeniden Dene
           </button>
         </div>
       )}
 
       {counts.failed > 0 && (
-        <div style={{ marginBottom: 12, padding: '10px 14px', background: '#FFF3E0',
-          border: '1px solid #FFCC02', borderRadius: 8,
+        <div style={{ marginBottom: 12, padding: '10px 14px', background: C.warning,
+          border: 'none', borderRadius: 8,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 13, color: '#E65100', fontWeight: 600 }}>
+          <span style={{ fontSize: 13, color: '#FFFFFF', fontWeight: 700 }}>
             ⚠️ {counts.failed} hatalı işlem var
           </span>
           <button type="button" onClick={() => void handleRetryAll()}
-            style={{ background: '#E65100', color: 'white', border: 'none',
-              borderRadius: 7, padding: '6px 14px', fontSize: 12,
-              fontWeight: 600, cursor: 'pointer' }}>
+            style={{ ...solidBtn(C.surface), color: C.warning,
+              borderRadius: 7, padding: '6px 14px', fontSize: 12 }}>
             Tümünü Yeniden Dene
           </button>
         </div>
@@ -445,26 +443,22 @@ export function DocumentQueueScreen({
                     <button type="button"
                       onClick={() => void handleRetry(op.id)}
                       disabled={retrying === op.id}
-                      style={{ background: '#EFF6FF', border: '1px solid #BFDBFE',
-                        borderRadius: 7, padding: '5px 10px', fontSize: 11,
-                        fontWeight: 600, color: '#1D4ED8', cursor: 'pointer',
-                        opacity: retrying === op.id ? 0.5 : 1 }}>
+                      style={{ ...solidBtn(C.primary, retrying === op.id),
+                        borderRadius: 7, padding: '5px 10px', fontSize: 11 }}>
                       {retrying === op.id ? '...' : 'Yeniden Dene'}
                     </button>
                   )}
                   {op.status === 'failed' && INVOICE_TYPES.has(op.type) && (
                     <button type="button" onClick={() => { setChangeOp(op); setCustomerQuery('') }}
-                      style={{ background: '#F3E5F5', border: '1px solid #CE93D8',
-                        borderRadius: 7, padding: '5px 8px', fontSize: 11,
-                        fontWeight: 600, color: '#6A1B9A', cursor: 'pointer' }}>
+                      style={{ ...solidBtn(C.online),
+                        borderRadius: 7, padding: '5px 8px', fontSize: 11 }}>
                       Cariyi Değiştir
                     </button>
                   )}
                   {op.status === 'failed' && isManager && (
                     <button type="button" onClick={() => void handleManualSent(op)}
-                      style={{ background: '#E8F5E9', border: '1px solid #A5D6A7',
-                        borderRadius: 7, padding: '5px 8px', fontSize: 11,
-                        fontWeight: 600, color: '#2E7D32', cursor: 'pointer' }}>
+                      style={{ ...solidBtn(C.success),
+                        borderRadius: 7, padding: '5px 8px', fontSize: 11 }}>
                       Gönderildi İşaretle
                     </button>
                   )}
@@ -559,9 +553,8 @@ export function DocumentQueueScreen({
             <button type="button"
               onClick={() => void applyCustomerRef(changeOp, customerRefTorba())}
               style={{
-                width: '100%', padding: '10px', borderRadius: 8, marginBottom: 8,
-                border: '1px solid #CE93D8', background: '#F3E5F5', fontWeight: 600,
-                cursor: 'pointer', color: '#6A1B9A',
+                ...solidBtn(C.online),
+                width: '100%', padding: '10px', borderRadius: 8, marginBottom: 8, fontSize: 14,
               }}>
               Torba cari kullan (gönderimde ayarlardan çözülür)
             </button>

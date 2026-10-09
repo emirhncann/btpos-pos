@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { C } from '../theme/colors'
 
 interface PaymentRow {
   method:       string
@@ -42,9 +43,9 @@ const METHOD_LABEL: Record<string, string> = {
 }
 
 const INVOICE_STATUS = (sent: number, error: string | null) => {
-  if (sent === 1) return { label: '✓ Gönderildi', color: '#2E7D32', bg: '#E8F5E9' }
-  if (sent === 2 || error) return { label: '✗ Hata', color: '#C62828', bg: '#FFEBEE' }
-  return { label: '⏳ Bekliyor', color: '#E65100', bg: '#FFF3E0' }
+  if (sent === 1) return { label: '✓ Gönderildi', color: '#FFFFFF', bg: C.success }
+  if (sent === 2 || error) return { label: '✗ Hata', color: '#FFFFFF', bg: C.danger }
+  return { label: '⏳ Bekliyor', color: '#FFFFFF', bg: C.warning }
 }
 
 function todayStr() { return new Date().toISOString().slice(0, 10) }
@@ -154,14 +155,14 @@ export function SalesReportScreen({ companyId }: { companyId: string }) {
         gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
         gap: 8, marginBottom: 16 }}>
         {[
-          { label: 'Toplam Satış',  value: fmt(totalSales),    color: '#1565C0', bg: '#EFF6FF' },
-          { label: 'Toplam İade',   value: fmt(totalReturns),  color: '#C62828', bg: '#FEF2F2' },
-          { label: 'Nakit',         value: fmt(totalCash),     color: '#2E7D32', bg: '#E8F5E9' },
-          { label: 'Kart',          value: fmt(totalCard),     color: '#6A1B9A', bg: '#F3E5F5' },
-          { label: 'Tahsilat',      value: fmt(totalTahsilat), color: '#2E7D32', bg: '#E8F5E9' },
-          { label: 'Ödeme',         value: fmt(totalOdeme),    color: '#C62828', bg: '#FEF2F2' },
+          { label: 'Toplam Satış',  value: fmt(totalSales),    color: C.primary },
+          { label: 'Toplam İade',   value: fmt(totalReturns),  color: C.danger },
+          { label: 'Nakit',         value: fmt(totalCash),     color: C.success },
+          { label: 'Kart',          value: fmt(totalCard),     color: C.online },
+          { label: 'Tahsilat',      value: fmt(totalTahsilat), color: C.success },
+          { label: 'Ödeme',         value: fmt(totalOdeme),    color: C.danger },
         ].map(c => (
-          <div key={c.label} style={{ background: c.bg, borderRadius: 10,
+          <div key={c.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderTop: `4px solid ${c.color}`, borderRadius: 10,
             padding: '10px 14px', textAlign: 'center' }}>
             <div style={{ fontSize: 11, color: c.color, marginBottom: 4 }}>{c.label}</div>
             <div style={{ fontSize: 15, fontWeight: 700, color: c.color }}>{c.value}</div>

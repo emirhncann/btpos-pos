@@ -6,5 +6,5 @@ require("fs");
 require("path");
 require("os");
 require("electron-store");
-const main = require("./main-Bk2UmepR.js");
+const main = require("./main-CAQzf4ug.js");
 exports.applyCustomerDisplay = main.applyCustomerDisplay;

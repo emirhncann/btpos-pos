@@ -1,4 +1,5 @@
 import { useState, useCallback, type CSSProperties } from 'react'
+import { C, solidBtn } from '../theme/colors'
 
 export type KeyboardType = 'qwerty' | 'numeric'
 
@@ -78,11 +79,8 @@ export function TouchKeyboard({
             <div style={{ display: 'flex', gap: 4 }}>
               {(['abc','123'] as const).map(t => (
                 <button key={t} type="button" onClick={() => setTab(t)}
-                  style={{ padding: '4px 12px', fontSize: 12, borderRadius: 6,
-                    border: '0.5px solid',
-                    borderColor: tab === t ? '#1565C0' : '#E5E7EB',
-                    background: tab === t ? '#EFF6FF' : '#F9FAFB',
-                    color: tab === t ? '#1565C0' : '#6B7280', cursor: 'pointer' }}>
+                  style={{ ...(tab === t ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
+                    padding: '4px 12px', fontSize: 12, borderRadius: 6 }}>
                   {t.toUpperCase()}
                 </button>
               ))}
@@ -157,8 +155,9 @@ export function TouchKeyboard({
             ))}
             <div style={{ display: 'flex', gap: 4 }}>
               <button type="button" onMouseDown={e => { e.preventDefault(); setShift(s => !s) }}
-                style={{ ...keyStyle({ flex: 1.5, background: shift ? '#EFF6FF' : 'white',
-                  color: shift ? '#1565C0' : '#374151' }), fontSize: 16 }}>
+                style={{ ...keyStyle(shift
+                  ? { flex: 1.5, background: C.primary, color: '#FFFFFF' }
+                  : { flex: 1.5, background: C.surface, color: C.text }), fontSize: 16 }}>
                 ⇧
               </button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('123') }}

@@ -375,8 +375,8 @@ export default function CashierLoginScreen({ companyId, terminalId, onLogin }: P
               type="button"
               onClick={() => void handleLogin()}
               disabled={loggingIn}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white font-semibold py-3 rounded-lg transition-colors text-sm"
-              style={{ opacity: loggingIn ? 0.7 : 1 }}
+              className="w-full text-white font-semibold py-3 rounded-lg text-sm"
+              style={{ background: loggingIn ? '#E2E8F0' : '#1D4ED8', color: loggingIn ? '#94A3B8' : '#FFFFFF', cursor: loggingIn ? 'default' : 'pointer' }}
             >
               {loggingIn ? loadingLabel : 'Giriş Yap'}
             </button>

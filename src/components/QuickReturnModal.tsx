@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { C, solidBtn } from '../theme/colors'
 
 export interface ReturnableSaleItem {
   Id:                 number
@@ -514,15 +515,15 @@ export default function QuickReturnModal({
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" onClick={onSelectAll}
             style={{
+              ...solidBtn(C.primary),
               flex: 1, padding: '8px', borderRadius: 8, fontSize: 12,
-              border: '1px solid #BFDBFE', background: '#EFF6FF', color: '#1565C0', cursor: 'pointer',
             }}>
             Tümünü Seç
           </button>
           <button type="button" onClick={onClearAll}
             style={{
+              ...solidBtn(C.neutral),
               flex: 1, padding: '8px', borderRadius: 8, fontSize: 12,
-              border: '1px solid #E5E7EB', background: '#F9FAFB', color: '#6B7280', cursor: 'pointer',
             }}>
             Tümünü Temizle
           </button>
@@ -539,9 +540,9 @@ export default function QuickReturnModal({
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 12px', borderRadius: 10,
-                  border: `1.5px solid ${checked ? '#BFDBFE' : '#E5E7EB'}`,
-                  background: checked ? '#EFF6FF' : isReturnable ? 'white' : '#F9FAFB',
-                  opacity: isReturnable ? 1 : 0.5,
+                  border: `1.5px solid ${checked ? C.primary : C.border}`,
+                  background: !isReturnable ? C.disabledBg : checked ? C.bg : C.surface,
+                  color: isReturnable ? C.text : C.disabledFg,
                 }}>
 
                 <input type="checkbox"
@@ -637,14 +638,10 @@ export default function QuickReturnModal({
                       type="button"
                       onClick={() => onOpenPaymentNumpad(p.PaymentId, p.ReturnableAmount, currentAmt)}
                       style={{
+                        ...solidBtn(C.primary),
                         padding:      '6px 12px',
                         borderRadius: 8,
-                        border:       '1.5px solid #BFDBFE',
-                        background:   '#EFF6FF',
-                        color:        '#1565C0',
                         fontSize:     14,
-                        fontWeight:   700,
-                        cursor:       'pointer',
                         minWidth:     80,
                         textAlign:    'right',
                       }}

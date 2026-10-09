@@ -1,4 +1,5 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { C, solidBtn } from '../theme/colors'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -113,12 +114,8 @@ export default function PrinterSettingsPanel({ onDraft }: Props) {
           ]).map(({ v, l }) => (
             <button key={v} type="button"
               onClick={() => setPrinterType(v)}
-              style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1.5px solid',
-                borderColor: printerType === v ? '#2E7D32' : '#E0E0E0',
-                background:  printerType === v ? '#E8F5E9' : 'white',
-                color:       printerType === v ? '#2E7D32' : '#6B7280',
-                fontWeight:  printerType === v ? 600 : 400,
-                fontSize: 13, cursor: 'pointer' }}>
+              style={{ ...(printerType === v ? solidBtn(C.success, false, true) : solidBtn(C.neutral)),
+                flex: 1, padding: '8px', borderRadius: 8, fontSize: 13 }}>
               {l}
             </button>
           ))}
@@ -171,12 +168,8 @@ export default function PrinterSettingsPanel({ onDraft }: Props) {
           {[58, 80].map(w => (
             <button key={w} type="button"
               onClick={() => setPaperWidth(w)}
-              style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1.5px solid',
-                borderColor: paperWidth === w ? '#2E7D32' : '#E0E0E0',
-                background:  paperWidth === w ? '#E8F5E9' : 'white',
-                color:       paperWidth === w ? '#2E7D32' : '#6B7280',
-                fontWeight:  paperWidth === w ? 600 : 400,
-                fontSize: 13, cursor: 'pointer' }}>
+              style={{ ...(paperWidth === w ? solidBtn(C.success, false, true) : solidBtn(C.neutral)),
+                flex: 1, padding: '8px', borderRadius: 8, fontSize: 13 }}>
               {w} mm
             </button>
           ))}

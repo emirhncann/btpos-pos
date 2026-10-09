@@ -174,8 +174,8 @@ export default function PluDashboardPage() {
                     style={{
                       fontSize: 10,
                       fontFamily: 'monospace',
-                      background: '#EFF6FF',
-                      color: '#1D4ED8',
+                      background: '#F1F5F9',
+                      color: '#475569',
                       padding: '1px 6px',
                       borderRadius: 3,
                     }}

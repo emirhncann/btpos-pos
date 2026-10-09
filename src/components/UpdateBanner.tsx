@@ -6,6 +6,7 @@ import {
   runUpdate,
   type AdminUpdatePayload,
 } from '../lib/appUpdate'
+import { C, solidBtn } from '../theme/colors'
 
 export default function UpdateBanner({
   cartActive,
@@ -79,8 +80,9 @@ export default function UpdateBanner({
       {showBanner && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9000,
-          background: downgrade ? '#FFF3E0' : '#E3F2FD',
-          borderBottom: '1px solid #BBDEFB',
+          background: downgrade ? C.warning : C.primary,
+          color: '#FFFFFF',
+          borderBottom: 'none',
           padding: '10px 16px',
           display: 'flex', alignItems: 'center', gap: 12, fontSize: 14,
         }}>
@@ -96,16 +98,16 @@ export default function UpdateBanner({
             disabled={incompatible}
             onClick={() => void start('admin')}
             style={{
-              border: 'none', borderRadius: 8, padding: '6px 12px',
-              background: incompatible ? '#E5E7EB' : '#1565C0', color: 'white',
-              cursor: incompatible ? 'not-allowed' : 'pointer', fontWeight: 600,
+              ...solidBtn(downgrade ? C.neutral : C.surface, incompatible),
+              color: incompatible ? C.disabledFg : (downgrade ? '#FFFFFF' : C.primary),
+              borderRadius: 8, padding: '6px 12px', fontSize: 14,
             }}
           >Şimdi güncelle</button>
           {!pending.is_mandatory && (
             <button
               type="button"
               onClick={() => setHidden(true)}
-              style={{ border: 'none', background: 'transparent', color: '#374151', cursor: 'pointer' }}
+              style={{ border: 'none', background: 'transparent', color: '#FFFFFF', cursor: 'pointer', fontWeight: 700 }}
             >Sonra</button>
           )}
         </div>
@@ -113,11 +115,11 @@ export default function UpdateBanner({
       {lastError && status?.phase === 'error' && (
         <div style={{
           position: 'fixed', top: showBanner ? 48 : 0, left: 0, right: 0, zIndex: 9000,
-          background: '#FFEBEE', color: '#C62828', padding: '8px 16px', fontSize: 13,
+          background: C.danger, color: '#FFFFFF', padding: '8px 16px', fontSize: 13,
           display: 'flex', gap: 12,
         }}>
           <span style={{ flex: 1 }}>{lastError}</span>
-          <button type="button" onClick={() => void start('admin')} style={{ border: 'none', background: 'transparent', color: '#1565C0', fontWeight: 600, cursor: 'pointer' }}>Tekrar dene</button>
+          <button type="button" onClick={() => void start('admin')} style={{ border: 'none', background: 'transparent', color: '#FFFFFF', fontWeight: 700, cursor: 'pointer' }}>Tekrar dene</button>
         </div>
       )}
       {status && status.phase !== 'error' && phaseText && (

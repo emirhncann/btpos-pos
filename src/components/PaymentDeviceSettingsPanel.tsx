@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { C, solidBtn } from '../theme/colors'
 import { pavoPair, pavoTestConnection } from '../lib/pavoService'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 
@@ -217,10 +218,8 @@ export default function PaymentDeviceSettingsPanel({ companyId, terminalId, sale
               type="button"
               onClick={() => setWidth(w)}
               style={{
-                padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
-                border: width === w ? '1px solid #1565C0' : '1px solid #E0E0E0',
-                background: width === w ? '#E3F2FD' : 'white',
-                color: width === w ? '#1565C0' : '#374151',
+                ...(width === w ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
+                padding: '6px 12px', borderRadius: 8, fontSize: 13,
               }}
             >{w}</button>
           ))}

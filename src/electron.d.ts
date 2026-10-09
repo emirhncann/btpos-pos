@@ -5,12 +5,17 @@ declare global {
     name: string
     qty: number
     lineTotal: number
+    unitPrice?: number
+    gross?: number
+    discountAmount?: number
+    discountRate?: number
   }
 
   interface SecondScreenDiscount {
     label: string
     amount: number
     scope: 'line' | 'document'
+    rate?: number
   }
 
   interface SecondScreenPayload {

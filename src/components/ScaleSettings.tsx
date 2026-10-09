@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { C } from '../theme/colors'
 
 export interface ScaleDraft {
   portPath: string
@@ -165,11 +166,9 @@ export default function ScaleSettings({ onDraft }: Props) {
         <div style={{
           padding: '8px 12px', borderRadius: 8, marginBottom: 10,
           background: testValue.startsWith('✓') || testValue.startsWith('~') || testValue.startsWith('Ham')
-            ? '#E8F5E9'
-            : '#FEF2F2',
-          color: testValue.startsWith('✓') || testValue.startsWith('~') || testValue.startsWith('Ham')
-            ? '#2E7D32'
-            : '#DC2626',
+            ? C.success
+            : C.danger,
+          color: '#FFFFFF',
           fontSize: 12, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
         }}>
           {testValue}

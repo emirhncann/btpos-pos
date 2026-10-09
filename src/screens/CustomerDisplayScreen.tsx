@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import logoGif from '../assets/logo.gif'
+import { DiscountLine } from '../components/DiscountLine'
+import { C } from '../theme/colors'
 
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
@@ -23,8 +25,7 @@ const DEFAULT_PAYLOAD: SecondScreenPayload = {
 export default function CustomerDisplayScreen() {
   const [payload, setPayload] = useState<SecondScreenPayload>(DEFAULT_PAYLOAD)
   const listRef = useRef<HTMLDivElement>(null)
-  const hasDiscounts = payload.discounts.length > 0
-  const showDiscountTotal = payload.totals.discountTotal > 0
+  const docDiscounts = payload.discounts.filter(d => d.scope === 'document')
 
   useEffect(() => {
     void window.electron.secondScreen.getLatest()
@@ -96,7 +97,7 @@ export default function CustomerDisplayScreen() {
           >
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 72px 120px',
+              gridTemplateColumns: '1fr 140px',
               padding: '10px 14px',
               borderBottom: '1px solid #e2e8f0',
               color: '#64748b',
@@ -109,27 +110,55 @@ export default function CustomerDisplayScreen() {
             }}
             >
               <span>Ürün</span>
-              <span style={{ textAlign: 'center' }}>Adet</span>
               <span style={{ textAlign: 'right' }}>Tutar</span>
             </div>
             {payload.items.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>Sepet bekleniyor...</div>
-            ) : payload.items.map((item, idx) => (
-              <div
-                key={`${item.name}-${idx}`}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 72px 120px',
-                  padding: '10px 14px',
-                  borderBottom: idx === payload.items.length - 1 ? 'none' : '1px solid #f1f5f9',
-                  background: idx % 2 === 0 ? '#ffffff' : '#fafbfc',
-                }}
-              >
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#0f172a', fontWeight: 700 }}>{item.name}</span>
-                <span style={{ textAlign: 'center', color: '#2563eb', fontWeight: 600 }}>{item.qty}</span>
-                <span style={{ textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fmt(item.lineTotal)}</span>
-              </div>
-            ))}
+              <div style={{ padding: 24, textAlign: 'center', color: C.disabledFg }}>Sepet bekleniyor...</div>
+            ) : payload.items.map((item, idx) => {
+              const gross = item.gross ?? item.lineTotal
+              const disc = item.discountAmount ?? 0
+              const hasDisc = disc > 0.009
+              const rate = item.discountRate ?? 0
+              return (
+                <div
+                  key={`${item.name}-${idx}`}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: idx === payload.items.length - 1 ? 'none' : '1px solid #f1f5f9',
+                    background: idx % 2 === 0 ? C.surface : '#fafbfc',
+                  }}
+                >
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 140px',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: C.text, fontWeight: 700 }}>{item.name}</span>
+                      <span style={{ display: 'block', color: C.textMuted, fontSize: 14, marginTop: 2 }}>
+                        {item.qty}{item.unitPrice != null ? ` × ${fmt(item.unitPrice)}` : ''}
+                      </span>
+                    </span>
+                    <span style={{ textAlign: 'right' }}>
+                      {hasDisc && (
+                        <div style={{ fontSize: 13, color: C.textMuted, textDecoration: 'line-through', fontWeight: 500 }}>{fmt(gross)}</div>
+                      )}
+                      <div style={{ fontWeight: 700, color: C.text }}>{fmt(item.lineTotal)}</div>
+                    </span>
+                  </div>
+                  {hasDisc && (
+                    <div style={{ marginTop: 6 }}>
+                      <DiscountLine
+                        label={rate > 0 ? `İndirim %${rate}` : 'İndirim'}
+                        amount={`−${fmt(disc)}`}
+                        fontSize={16}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
@@ -150,41 +179,22 @@ export default function CustomerDisplayScreen() {
             </strong>
           </div>
 
-          {hasDiscounts && (
-            <div style={{
-              borderRadius: 12,
-              border: '1px solid #fecaca',
-              background: '#fef2f2',
-              padding: 12,
-              flexShrink: 0,
-            }}
-            >
-              <div style={{ fontSize: 13, color: '#991b1b', marginBottom: 8, fontWeight: 600 }}>İndirimler</div>
-              {payload.discounts.map((discount, idx) => (
-                <div key={`${discount.label}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6, fontSize: 13 }}>
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#7f1d1d' }}>
-                    {discount.scope === 'line' ? `Satır: ${discount.label}` : discount.label}
-                  </span>
-                  <span style={{ color: '#dc2626', flexShrink: 0, fontWeight: 600 }}>- {fmt(discount.amount)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 'auto' }}>
-            <div style={{ borderRadius: 10, padding: 12, background: '#ffffff', border: '1px solid #e2e8f0' }}>
-              <div style={{ color: '#64748b', fontSize: 'clamp(10px, 0.8vw, 14px)' }}>Ara toplam</div>
-              <div style={{ fontSize: 'clamp(14px, 1.5vw, 24px)', fontWeight: 700, color: '#0f172a', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.subtotal)}</div>
+            <div style={{ borderRadius: 10, padding: 12, background: C.surface, border: `1px solid ${C.border}` }}>
+              <div style={{ color: C.textMuted, fontSize: 'clamp(10px, 0.8vw, 14px)' }}>Ara toplam</div>
+              <div style={{ fontSize: 'clamp(14px, 1.5vw, 24px)', fontWeight: 700, color: C.text, textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.subtotal)}</div>
             </div>
-            {showDiscountTotal && (
-              <div style={{ borderRadius: 10, padding: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                <div style={{ color: '#991b1b', fontSize: 'clamp(10px, 0.8vw, 14px)' }}>Toplam indirim</div>
-                <div style={{ fontSize: 'clamp(14px, 1.5vw, 24px)', fontWeight: 700, color: '#dc2626', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.discountTotal)}</div>
-              </div>
-            )}
-            <div style={{ borderRadius: 10, padding: 14, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-              <div style={{ color: '#1d4ed8', fontSize: 'clamp(10px, 0.8vw, 14px)', fontWeight: 600 }}>Genel toplam</div>
-              <div style={{ fontSize: 'clamp(18px, 2.5vw, 48px)', fontWeight: 800, color: '#1e40af', textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.grandTotal)}</div>
+            {docDiscounts.map((discount, idx) => (
+              <DiscountLine
+                key={`${discount.label}-${idx}`}
+                label={discount.rate && discount.rate > 0 ? `Belge indirimi %${discount.rate}` : (discount.label || 'Belge indirimi')}
+                amount={`−${fmt(discount.amount)}`}
+                fontSize={16}
+              />
+            ))}
+            <div style={{ borderRadius: 10, padding: 14, background: C.surface, border: `1px solid ${C.border}` }}>
+              <div style={{ color: C.primary, fontSize: 'clamp(10px, 0.8vw, 14px)', fontWeight: 700 }}>TOPLAM</div>
+              <div style={{ fontSize: 'clamp(18px, 2.5vw, 48px)', fontWeight: 800, color: C.primary, textAlign: 'right', whiteSpace: 'nowrap' }}>{fmt(payload.totals.grandTotal)}</div>
             </div>
           </div>
         </aside>

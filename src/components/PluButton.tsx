@@ -88,6 +88,7 @@ export function PluButton({
   }, [displayName, baseFontSize, showPrice, showCode, showBarcode])
 
   const priceFontSize = Math.max(Math.round(fontSize * 0.95), 8)
+  const [pressed, setPressed] = useState(false)
 
   return (
     <div
@@ -105,8 +106,8 @@ export function PluButton({
         justifyContent: 'center',
         gap:            2,
         border:         '2px solid transparent',
-        background:     activeSoft,
-        transition:     'border-color 0.15s',
+        background:     pressed ? activeColor : activeSoft,
+        transition:     'border-color 0.15s, background 0.08s',
         overflow:       'hidden',
         minHeight:      0,
         minWidth:       0,
@@ -124,16 +125,23 @@ export function PluButton({
         const el = e.currentTarget as HTMLDivElement
         el.style.borderColor = 'transparent'
         el.style.transform   = 'scale(1)'
+        setPressed(false)
       }}
-      onMouseDown={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)' }}
-      onMouseUp={e   => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
+      onMouseDown={e => {
+        ;(e.currentTarget as HTMLDivElement).style.transform = 'scale(0.95)'
+        setPressed(true)
+      }}
+      onMouseUp={e => {
+        ;(e.currentTarget as HTMLDivElement).style.transform = 'scale(1)'
+        setPressed(false)
+      }}
     >
       <div ref={nameRef} style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none' }} />
 
       <div style={{
         fontSize:     fontSize,
         fontWeight:   600,
-        color:        '#374151',
+        color:        pressed ? '#ffffff' : '#111827',
         textAlign:    'center',
         lineHeight:   1.25,
         wordBreak:    'break-word',
@@ -149,7 +157,7 @@ export function PluButton({
       {(showCode || showBarcode) && fontSize >= 10 && (
         <div style={{
           fontSize:     9,
-          color:        '#9ca3af',
+          color:        pressed ? 'rgba(255,255,255,0.85)' : '#111827',
           textAlign:    'center',
           overflow:     'hidden',
           textOverflow: 'ellipsis',
@@ -166,7 +174,7 @@ export function PluButton({
         <div style={{
           fontSize:   priceFontSize,
           fontWeight: 700,
-          color:      activeColor,
+          color:      pressed ? '#ffffff' : '#111827',
           flexShrink: 0,
           textAlign:  'center',
         }}>
