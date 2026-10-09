@@ -28,12 +28,25 @@ import { C, solidBtn } from '../theme/colors'
 import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
+import { CmdProgressChip } from '../components/CmdProgressChip'
+import { PavoLockOverlay } from '../components/PavoLockOverlay'
+import {
+  assertCartEditable,
+  getPavoLockInfo,
+  getPavoPhase,
+  isCartLocked,
+  notifyLocked,
+  setLockNotifier,
+  setPavoPhase,
+  usePavoLock,
+} from '../store/pavoLock'
 import { TouchKeyboard } from '../components/TouchKeyboard'
 import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 import { buildSaleReceiptData } from '../lib/templateEngine'
 import { nextOrderNo } from '../lib/orderNo'
 import { useSettings } from '../hooks/useSettings'
+import { useButtonColor } from '../hooks/useButtonColor'
 import { isDevtoolsPermitActive } from '../lib/settingsModel'
 import QuickReturnModal, {
   type QuickReturnModalState,
@@ -652,7 +665,7 @@ function defaultHeldLabel(seq: number, at = new Date()): string {
   return `Bekleyen #${seq} · ${hm}`
 }
 
-function PopupItem({ icon, label, disabled, danger, accent = '#1565C0', layout = 'row', onClick }: {
+function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)', layout = 'row', onClick }: {
   icon:     string
   label:    string
   disabled?: boolean
@@ -707,6 +720,14 @@ export default function POSScreen({
   commandDeferred = false,
 }: Props) {
   const settings = useSettings()
+  const cashBtn = useButtonColor('cash')
+  const cardBtn = useButtonColor('card')
+  const splitBtn = useButtonColor('split')
+  const otherPayBtn = useButtonColor('other_payment')
+  const customerBtn = useButtonColor('customer')
+  const priceCheckBtn = useButtonColor('price_check')
+  const menuBtn = useButtonColor('menu')
+  const documentsBtn = useButtonColor('documents')
   const customerDisplay = settings.terminal.customerDisplay
 
   const touchEnabled = settings.terminal.touchKeyboard
@@ -802,6 +823,9 @@ export default function POSScreen({
   const [invoiceType, setInvoiceType] = useState<'e_archive' | 'paper'>('e_archive')
   const [pavoSettings, setPavoSettings] = useState<PavoSettings | null>(null)
   const [pavoLoading, setPavoLoading] = useState(false)
+  const pavoLock = usePavoLock()
+  const cartLocked = pavoLock.phase !== 'idle'
+  const pavoRetryRef = useRef<(() => Promise<void>) | null>(null)
   const [pavoError, setPavoError] = useState<string | null>(null)
   const [pavoRecoveryState, setPavoRecoveryState] = useState<{
     ref: { saleId?: number | null; saleNumber?: string | null }
@@ -865,6 +889,8 @@ export default function POSScreen({
     heldToastTimer.current = setTimeout(() => setHeldToast(null), 4000)
   }, [])
 
+  useEffect(() => { setLockNotifier(msg => showToast(msg, 'info')) }, [showToast])
+
   const handleQueueToast = useCallback((toast: QueueToastPayload) => {
     setQueueToasts(prev => [...prev, { ...toast, shownAt: Date.now() }])
     setTimeout(() => {
@@ -879,6 +905,7 @@ export default function POSScreen({
   })
 
   const applyCustomerSelection = useCallback((c: CustomerRow | null) => {
+    if (isCartLocked()) { notifyLocked(); return }
     setSelectedCustomer(c)
     if (!c) {
       setSmsPhone('')
@@ -1054,6 +1081,7 @@ export default function POSScreen({
 
   useEffect(() => {
     window.__btpos_exit_check = async () => {
+      if (isCartLocked()) return { canExit: false, heldCount: 0, pavoLocked: true }
       // Kapanmadan önce sepeti hemen kaydet (3 sn debounce kaçmasın)
       if (cart.length > 0) {
         try {
@@ -1091,7 +1119,11 @@ export default function POSScreen({
   ])
 
   useEffect(() => {
-    const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
+    const cleanup = window.electron.app.onExitBlocked(({ heldCount, pavoLocked }) => {
+      if (pavoLocked) {
+        showError('Çıkış Engellendi', "Pavo'da devam eden satış var. Önce satışı tamamlayın.")
+        return
+      }
       showError(
         'Çıkış Engellendi',
         `${heldCount} bekleyen belgeniz var. Belgeleri tamamlayın veya getirip iptal edin.`,
@@ -1192,6 +1224,7 @@ export default function POSScreen({
         if (!lastOrderNo) return
 
         console.log('[açılış] Son orderNo bulundu:', lastOrderNo)
+        setPavoPhase('sending', { message: 'Askıdaki satış kontrol ediliyor', orderNo: lastOrderNo })
 
         const seq    = await window.electron.db.nextPavoSequence()
         const result = await pavoGetSaleResult(pavoSettings, seq, lastOrderNo)
@@ -1298,6 +1331,9 @@ export default function POSScreen({
 
       } catch (e) {
         console.warn('[açılış] Son satış kontrolü başarısız:', e)
+        setPavoPhase('error', { message: e instanceof Error ? e.message : String(e) })
+      } finally {
+        if (getPavoPhase() === 'sending' || getPavoPhase() === 'completing') setPavoPhase('idle')
       }
     })()
   }, [pavoSettings, showError, showInfo])
@@ -1466,6 +1502,12 @@ export default function POSScreen({
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const onKey = (e: KeyboardEvent) => {
+      if (isCartLocked() && getPavoPhase() !== 'open') {
+        e.preventDefault()
+        e.stopPropagation()
+        notifyLocked()
+        return
+      }
       if (paymentMode || quickReturnModal || cariPaymentModal) return
 
       // Fiyat Gör açıksa — barkodu oraya yönlendir (input odakta olsa bile)
@@ -1515,6 +1557,7 @@ export default function POSScreen({
   useEffect(() => {
     if (searchQ.length < 2) return
     const t = setTimeout(() => {
+      if (isCartLocked()) { notifyLocked(); setSearchQ(''); return }
       if (quickReturnModal?.step === 'search') {
         const scannedCode = searchQ
         setSearchQ('')
@@ -1585,6 +1628,7 @@ export default function POSScreen({
 
   /* ── Sepet işlemleri ── */
   function addToCartWithQty(product: ProductRow, qty: number): string {
+    assertCartEditable()
     if (cancelNextAdd) {
       setCancelNextAdd(false)
       cancelOneFromCart(
@@ -1655,6 +1699,7 @@ export default function POSScreen({
   }
 
   barcodeScanRef.current = (code: string) => {
+    if (isCartLocked()) { notifyLocked(); return }
     const scanned = code.trim()
     if (scanned.length < 2) return
 
@@ -1703,6 +1748,7 @@ export default function POSScreen({
   }
 
   async function handlePluClick(product: ProductRow) {
+    if (isCartLocked()) { notifyLocked(); return }
     if (isWeighedUnit(product.unit) && scaleEnabled) {
       setNumBuf('')
       setSearchQ('')
@@ -1726,6 +1772,7 @@ export default function POSScreen({
   }
 
   function updateQty(id: string, delta: number) {
+    assertCartEditable()
     const minQty = settings.cashier.minQtyPerLine
     setCart(prev => prev.map(c => {
       if (c.id !== id) return c
@@ -1737,6 +1784,7 @@ export default function POSScreen({
   }
 
   function applyLineDiscount() {
+    assertCartEditable()
     if (!lineDiscountTarget) return
     const rate = discMode === 'rate' ? parseFloat(lineDiscRateIn.replace(',', '.')) || 0 : 0
     const amt = discMode === 'amt' ? parseFloat(lineDiscAmtIn.replace(',', '.')) || 0 : 0
@@ -1764,6 +1812,7 @@ export default function POSScreen({
   }
 
   function applyPriceEdit() {
+    assertCartEditable()
     if (!priceEditTarget) return
     const raw   = priceEditInput.replace(/\./g, '').replace(',', '.')
     const price = parseFloat(raw)
@@ -1785,6 +1834,7 @@ export default function POSScreen({
   }
 
   function openPriceEdit(itemId: string, price: number) {
+    if (isCartLocked()) { notifyLocked(); return }
     if (paymentMode) return
     setSmsPhonePanelOpen(false)
     setMenuOpen(null)
@@ -1793,6 +1843,7 @@ export default function POSScreen({
   }
 
   function applyWeightEdit() {
+    assertCartEditable()
     if (!weightEditTarget) return
     const raw = weightEditInput.replace(',', '.')
     const qty = parseFloat(raw)
@@ -1814,6 +1865,7 @@ export default function POSScreen({
   }
 
   function openWeightEdit(itemId: string, quantity: number) {
+    if (isCartLocked()) { notifyLocked(); return }
     if (paymentMode) return
     setSmsPhonePanelOpen(false)
     setMenuOpen(null)
@@ -1828,6 +1880,7 @@ export default function POSScreen({
   }
 
   function cancelOneFromCart(id: string) {
+    assertCartEditable()
     const qty = cancelQtyFromNumBuf()
 
     setCart(prev => {
@@ -1852,6 +1905,7 @@ export default function POSScreen({
   }
 
   function clearCart() {
+    assertCartEditable()
     setCart([])
     setCurrentOrderNo(null)
     setLastReceipt(null)
@@ -1936,12 +1990,14 @@ export default function POSScreen({
   /* ── Menü işlemleri ── */
 
   function openHoldNote() {
+    if (isCartLocked()) { notifyLocked(); return }
     if (!cart.length) return
     setMenuOpen(null)
     setHoldDraft({ mode: 'new', note: resumeHoldNote.slice(0, 60) })
   }
 
   async function commitHoldNote(noteRaw: string, skip: boolean) {
+    if (holdDraft?.mode !== 'edit' && isCartLocked()) { notifyLocked(); return }
     if (!holdDraft) return
     const note = (skip ? '' : noteRaw).trim().slice(0, 60)
 
@@ -1994,6 +2050,7 @@ export default function POSScreen({
   }, [holdDraft?.mode, holdDraft?.id, touchEnabled])
 
   async function retrieveDoc(doc: HeldDocRow) {
+    assertCartEditable()
     const items = doc.items.map(normalizeHeldCartItem)
     setCart(items)
     if (doc.customer) {
@@ -2477,6 +2534,7 @@ export default function POSScreen({
 
       if (saleResult.success === false) {
         const failMsg = saleResult.message ?? 'Sonuç alınamadı'
+        setPavoPhase('error', { message: failMsg })
         if (isNetworkFetchError(failMsg) || opts.reason === 'network') {
           showApiError('Bağlantı kurulamadı', failMsg)
         } else {
@@ -2523,11 +2581,13 @@ export default function POSScreen({
         opts.saleRef ?? { saleId: null, saleNumber: null },
         opts.orderNo,
       )
+      setPavoPhase('idle')
       showError(
         'Satış Tamamlanamadı',
         'Ödeme alınamadı. Aynı ödeme yöntemine tekrar tıklayarak devam edebilirsiniz.',
       )
     } catch (e) {
+      setPavoPhase('error', { message: e instanceof Error ? e.message : String(e) })
       showCaughtError('Bağlantı kurulamadı', e)
     }
   }
@@ -2624,6 +2684,7 @@ export default function POSScreen({
           paidAmount: parseFloat((total - remaining).toFixed(2)),
           remainingAmount: remaining,
         })
+        setPavoPhase('open', { orderNo: currentOrderNo, amount: total })
         setSaving(false)
         setPavoLoading(false)
         return
@@ -2705,6 +2766,7 @@ export default function POSScreen({
     cartOverride?: CartItem[]
     grandTotalOverride?: number
   }) {
+    if (getPavoPhase() !== 'idle') setPavoPhase('completing')
     const {
       orderNo, deviceResult,
       cartOverride, grandTotalOverride,
@@ -3019,6 +3081,7 @@ export default function POSScreen({
     setPavoPendingSaleRef(null)
     void window.electron.store.set('last_pavo_order_no', null).catch(() => {})
     setCurrentOrderNo(null)
+    setPavoPhase('idle')
     clearCart()
     if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
     setLastReceipt(printOrderNo)
@@ -3147,6 +3210,7 @@ export default function POSScreen({
               paidAmount: parseFloat((total - remaining).toFixed(2)),
               remainingAmount: remaining,
             })
+            setPavoPhase('open', { orderNo: currentOrderNo, amount: total })
             return
           }
         } else {
@@ -3236,6 +3300,12 @@ export default function POSScreen({
     if (!pavoSettings) return
     setSaving(true)
     setPavoError(null)
+    setPavoPhase('sending', {
+      amount: saleRef.totalPrice,
+      method: lines.length > 1 ? 'Parçalı' : (lines[0]?.method === 'cash' ? 'Nakit' : 'Kredi Kartı'),
+      orderNo: saleRef.orderNo,
+    })
+    pavoRetryRef.current = () => completeSaleWithAddPayment(lines, saleRef)
 
     try {
       for (let i = 0; i < lines.length; i++) {
@@ -3271,6 +3341,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          setPavoPhase('error', { message: addRes.message ?? 'Ödeme eklenemedi.' })
           showApiError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi.')
           return
         }
@@ -3293,6 +3364,7 @@ export default function POSScreen({
       setActiveMethod(null)
       setPendingAmount('')
       setSelectedBrand(null)
+      setPavoPhase('error', { message: e instanceof Error ? e.message : String(e) })
       showCaughtError('Hata', e)
     } finally {
       setSaving(false)
@@ -3381,6 +3453,12 @@ export default function POSScreen({
           }
 
           const seq = await window.electron.db.nextPavoSequence()
+          setPavoPhase('sending', {
+            amount: grandTotal,
+            method: cardAmt > 0 ? 'Kredi Kartı' : 'Nakit',
+            orderNo,
+          })
+          pavoRetryRef.current = () => completeSaleSingle(lines)
           deviceResult = await pavoCompleteSale(
             pavoSettings,
             seq,
@@ -3423,6 +3501,7 @@ export default function POSScreen({
             setActiveMethod(null)
             setPendingAmount('')
             setSelectedBrand(null)
+            setPavoPhase('error', { message: deviceResult?.message ?? 'Sepet korundu, tekrar deneyebilirsiniz.' })
             showError(
               'Ödeme İptal Edildi',
               deviceResult?.message ?? 'Sepet korundu, tekrar deneyebilirsiniz.',
@@ -3452,6 +3531,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          setPavoPhase('error', { message: msg })
           showApiError('Ödeme Hatası', msg)
           setPavoError(null)
           return
@@ -3477,6 +3557,7 @@ export default function POSScreen({
       setActiveMethod(null)
       setPendingAmount('')
       setSelectedBrand(null)
+      setPavoPhase('error', { message: e instanceof Error ? e.message : String(e) })
       showCaughtError('Satış Kaydedilemedi', e)
     } finally {
       if (opId === pavoOpIdRef.current) setSaving(false)
@@ -3543,6 +3624,8 @@ export default function POSScreen({
 
     try {
       const startSeq = await window.electron.db.nextPavoSequence()
+      setPavoPhase('sending', { amount: grandTotal, method: 'Parçalı', orderNo })
+      pavoRetryRef.current = () => completeSaleKarma(lines)
       const startRes = await pavoStartSaleWithItems(
         pavoSettings!,
         startSeq,
@@ -3578,6 +3661,7 @@ export default function POSScreen({
         setActiveMethod(null)
         setPendingAmount('')
         setSelectedBrand(null)
+        setPavoPhase('error', { message: startRes.message ?? 'Sepet gönderilemedi' })
         showApiError('Pavo Hatası', startRes.message ?? 'Sepet gönderilemedi')
         return
       }
@@ -3610,6 +3694,14 @@ export default function POSScreen({
         if (payAmount <= 0) continue
 
         const addSeq = await window.electron.db.nextPavoSequence()
+        const lineIdx = orderedLines.indexOf(line)
+        pavoRetryRef.current = () => completeSaleWithAddPayment(orderedLines.slice(lineIdx), {
+          saleId: pavoSaleId,
+          saleNumber: pavoSaleNumber,
+          orderNo,
+          totalPrice: grandTotal,
+          paidAmount: 0,
+        })
         const addRes = await pavoAddPayment(
           pavoSettings!,
           addSeq,
@@ -3644,6 +3736,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          setPavoPhase('error', { message: addRes.message ?? 'Ödeme eklenemedi' })
           showApiError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi')
           return
         }
@@ -3676,6 +3769,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          setPavoPhase('error', { message: finalRes.message ?? 'Satış kapatılamadı' })
           showApiError('Finalize Hatası', finalRes.message ?? 'Satış kapatılamadı')
           return
         }
@@ -4327,7 +4421,7 @@ export default function POSScreen({
   }
 
   /* ── Renkler ── */
-  const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? '#1565C0'
+  const activeColor = pluGroups.find(g => g.id === activeGroup)?.color ?? 'var(--pos-primary)'
   const activeSoft  = hexToTint(activeColor)
   const devtoolsOn = isDevtoolsPermitActive(settings.terminal)
   const devtoolsUntil = (() => {
@@ -4340,9 +4434,94 @@ export default function POSScreen({
     return `${hh}:${mm}`
   })()
 
+  function saleHasTakenPayment(data: unknown): boolean {
+    const root = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+    const inner = root.Data && typeof root.Data === 'object' ? root.Data as Record<string, unknown> : root
+    const lists = [inner.AddedPayments, inner.Payments, root.AddedPayments]
+    for (const list of lists) {
+      if (!Array.isArray(list)) continue
+      if (list.some(p => Number((p as Record<string, unknown>).StatusId) === 2)) return true
+    }
+    return false
+  }
+
+  async function queryLockedSale() {
+    const orderNo = getPavoLockInfo().orderNo || currentOrderNo
+    if (!pavoSettings || !orderNo) {
+      setPavoPhase('error', { message: 'Cihaza ulaşılamıyor' })
+      return
+    }
+    const seq = await window.electron.db.nextPavoSequence()
+    const res = await pavoGetSaleResult(pavoSettings, seq, orderNo)
+    if (!res.success) {
+      setPavoPhase('error', { message: res.message ?? 'Cihaza ulaşılamıyor' })
+      return
+    }
+    const taken = saleHasTakenPayment(res.data) || res.status === 'completed' || res.statusId === 4 || res.statusId === 8
+    if (taken) {
+      setPavoPhase('completing', { message: '' })
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+      return
+    }
+    if (res.status === 'uncompleted') {
+      setPavoPhase('completing')
+      const compSeq = await window.electron.db.nextPavoSequence()
+      const compRes = await pavoCompleteUncompletedSale(pavoSettings, compSeq, {
+        saleId: res.saleId && res.saleId > 0 ? res.saleId : null,
+        saleNumber: res.saleNumber || null,
+        orderNo,
+      })
+      if (!compRes.success) {
+        setPavoPhase('error', { message: compRes.message ?? 'Satış kapatılamadı' })
+        return
+      }
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+      return
+    }
+    setPavoPhase('sending', { message: 'Cihaz hâlâ ödeme bekliyor', orderNo })
+  }
+
+  async function cancelLockedSale() {
+    const orderNo = getPavoLockInfo().orderNo || currentOrderNo
+    if (!pavoSettings || !orderNo) {
+      setPavoPhase('idle')
+      return
+    }
+    const seq = await window.electron.db.nextPavoSequence()
+    const res = await pavoGetSaleResult(pavoSettings, seq, orderNo)
+    if (!res.success) {
+      setPavoPhase('error', { message: res.message ?? 'Cihaza ulaşılamıyor' })
+      return
+    }
+    if (saleHasTakenPayment(res.data) || res.status === 'completed' || res.statusId === 4 || res.statusId === 8) {
+      setPavoPhase('completing', { message: 'Bu satışta alınmış ödeme var, iptal edilemez. Satış tamamlanıyor.' })
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+      return
+    }
+    const ok = await confirm({
+      title: 'Satışı iptal et',
+      message: "Pavo'daki satış iptal edilecek. Emin misiniz?",
+      confirmLabel: 'İptal et',
+      cancelLabel: 'Vazgeç',
+    })
+    if (!ok) return
+    const abanSeq = await window.electron.db.nextPavoSequence()
+    const abandoned = await pavoAbandonSuspendedSale(pavoSettings, abanSeq, {
+      saleId: res.saleId && res.saleId > 0 ? res.saleId : null,
+      saleNumber: res.saleNumber || null,
+      orderNo,
+    })
+    if (abandoned.success) {
+      setPavoRecoveryState(null)
+      setPavoPendingSaleRef(null)
+      setPaymentMode(false)
+      setPavoPhase('idle')
+    } else setPavoPhase('error', { message: abandoned.message ?? 'İptal başarısız' })
+  }
+
   /* ────────── RENDER ────────── */
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#e5e7eb', overflow: 'hidden' }}>
+    <div className="pos-screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', color: 'var(--pos-text)', overflow: 'hidden' }}>
       <style>{`
         @keyframes merkezMailPulse {
           0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(37,99,235,0.35); }
@@ -4381,10 +4560,16 @@ export default function POSScreen({
       {/* Lisans banner */}
       {license?.warning && <LicenseBanner daysLeft={license.daysLeft} planName={license.planName} />}
 
+      <PavoLockOverlay
+        onQuery={() => { void queryLockedSale() }}
+        onCancel={() => { void cancelLockedSale() }}
+        onRetry={() => { void pavoRetryRef.current?.() }}
+      />
+
       {/* ── HEADER ── */}
-      <div style={{
-        background: '#030712',
-        borderBottom: '1px solid #1f2937',
+      <div className="pos-header" style={{
+        background: 'var(--pos-header-bg)',
+        borderBottom: '1px solid var(--pos-header-border)',
         height: 44,
         display: 'flex',
         alignItems: 'center',
@@ -4397,12 +4582,12 @@ export default function POSScreen({
           <AppLogo height={28} />
           <button
             type="button"
-            onClick={onBack}
+            onClick={() => { if (cartLocked) { notifyLocked(); return } onBack() }}
             style={{
               background: '#1f2937',
               border: '1px solid #374151',
               borderRadius: 6,
-              color: '#e5e7eb',
+              color: 'var(--pos-header-text)',
               padding: '4px 10px',
               cursor: 'pointer',
               fontSize: 11,
@@ -4474,7 +4659,7 @@ export default function POSScreen({
           {selectedCustomer && (
             <span style={{
               background: '#1f2937',
-              color: '#e5e7eb',
+              color: 'var(--pos-header-text)',
               border: '1px solid #374151',
               borderRadius: 6,
               padding: '3px 8px',
@@ -4488,7 +4673,7 @@ export default function POSScreen({
             </span>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="pos-header-end" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {devtoolsOn && (
             <button
               type="button"
@@ -4510,6 +4695,7 @@ export default function POSScreen({
             </button>
           )}
           <ConnectionDot status={conn} />
+          <CmdProgressChip />
           {commandListenerActive && (
             <button
               type="button"
@@ -4581,7 +4767,7 @@ export default function POSScreen({
           <div style={{
             fontSize:      13,
             fontWeight:    600,
-            color:         '#e5e7eb',
+            color:         'var(--pos-header-text)',
             fontFamily:    'monospace',
             letterSpacing: 1,
           }}>
@@ -4592,14 +4778,14 @@ export default function POSScreen({
             border: '1px solid #374151',
             borderRadius: 6,
             padding: '3px 8px',
-            color: '#d1d5db',
+            color: 'var(--pos-header-text)',
             fontSize: 11,
           }}>
             {cashier.fullName}
           </span>
           <button
             type="button"
-            onClick={onLogout}
+            onClick={() => { if (cartLocked) { notifyLocked(); return } onLogout() }}
             style={{
               background: 'rgba(127, 29, 29, 0.45)',
               border: '1px solid #7f1d1d',
@@ -4620,14 +4806,14 @@ export default function POSScreen({
         const targetItem = cart.find(c => c.id === lineDiscountTarget)
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-            <div className="pos-modal" style={{ background: 'white', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
+            <div className="pos-modal" style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Satır İndirimi</div>
-                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{targetItem?.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>{targetItem?.name}</div>
                 </div>
                 <button onClick={() => { setLineDiscountTarget(null); setLineDiscRateIn(''); setLineDiscAmtIn('') }}
-                  style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+                  style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--pos-text-muted)', cursor: 'pointer' }}>✕</button>
               </div>
 
               <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -4658,7 +4844,7 @@ export default function POSScreen({
                       }
                       if (val.replace(',', '').length < 6) setter(val + k)
                     }}
-                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 18, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
+                    style={{ padding: '14px 0', borderRadius: 10, border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)', fontSize: 18, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                     {k}
                   </button>
                 ))}
@@ -4667,7 +4853,7 @@ export default function POSScreen({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
                 <button type="button"
                   onClick={() => { setLineDiscRateIn(''); setLineDiscAmtIn('') }}
-                  style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                  style={{ padding: '14px', borderRadius: 10, border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)', fontSize: 15, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                   C
                 </button>
                 <button type="button"
@@ -4694,7 +4880,7 @@ export default function POSScreen({
             justifyContent: 'center',
           }}>
             <div className="pos-modal" style={{
-              background:   'white',
+              background: 'var(--pos-surface)',
               borderRadius: 16,
               padding:      '20px 16px 32px',
               width:        'min(720px, 92vw)',
@@ -4708,14 +4894,14 @@ export default function POSScreen({
               }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Birim Fiyat</div>
-                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                     {targetItem?.name}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => { setPriceEditTarget(null); setPriceEditInput('') }}
-                  style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--pos-text-muted)', cursor: 'pointer' }}
                 >✕</button>
               </div>
 
@@ -4724,13 +4910,13 @@ export default function POSScreen({
                 justifyContent: 'space-between',
                 padding:        '8px 12px',
                 borderRadius:   8,
-                background:     '#F9FAFB',
+                background:     'var(--pos-surface-alt)',
                 marginBottom:   12,
                 fontSize:       12,
-                color:          '#6B7280',
+                color:          'var(--pos-text-muted)',
               }}>
                 <span>Mevcut fiyat</span>
-                <span style={{ fontWeight: 700, color: '#374151' }}>
+                <span style={{ fontWeight: 700, color: 'var(--pos-text)' }}>
                   {fmt(targetItem?.price ?? 0)}
                 </span>
               </div>
@@ -4740,7 +4926,7 @@ export default function POSScreen({
                 padding:     '12px 0',
                 fontSize:    32,
                 fontWeight:  700,
-                color:       '#1565C0',
+                color:       'var(--pos-primary)',
                 letterSpacing: 2,
                 minHeight:   56,
               }}>
@@ -4773,11 +4959,11 @@ export default function POSScreen({
                     style={{
                       padding:        '14px 0',
                       borderRadius:   10,
-                      border:         '1px solid #E5E7EB',
-                      background:     k === '⌫' ? '#FEF2F2' : '#F9FAFB',
+                      border:         '1px solid var(--pos-key-border)',
+                      background:     'var(--pos-key-bg)',
                       fontSize:       18,
                       fontWeight:     600,
-                      color:          k === '⌫' ? '#EF4444' : '#111827',
+                      color:          'var(--pos-key-text)',
                       cursor:         'pointer',
                     }}
                   >{k}</button>
@@ -4791,11 +4977,11 @@ export default function POSScreen({
                   style={{
                     padding:      '14px',
                     borderRadius: 10,
-                    border:       '1px solid #E0E0E0',
-                    background:   '#F5F5F5',
+                    border:       '1px solid var(--pos-key-border)',
+                    background:   'var(--pos-key-bg)',
                     fontSize:     15,
                     fontWeight:   600,
-                    color:        '#374151',
+                    color:        'var(--pos-key-text)',
                     cursor:       'pointer',
                   }}
                 >C</button>
@@ -4806,10 +4992,10 @@ export default function POSScreen({
                     padding:      '14px',
                     borderRadius: 10,
                     border:       'none',
-                    background:   '#1565C0',
+                    background:   'var(--pos-key-action-bg)',
                     fontSize:     15,
                     fontWeight:   700,
-                    color:        'white',
+                    color:        'var(--pos-key-action-text)',
                     cursor:       'pointer',
                   }}
                 >Uygula</button>
@@ -4828,7 +5014,7 @@ export default function POSScreen({
             display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
           }}>
             <div className="pos-modal" style={{
-              background: 'white', borderRadius: 16,
+              background: 'var(--pos-surface)', borderRadius: 16,
               padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw',
             }}>
               <div style={{
@@ -4837,24 +5023,24 @@ export default function POSScreen({
               }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Ağırlık Düzenle</div>
-                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                     {targetItem?.name}
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => { setWeightEditTarget(null); setWeightEditInput('') }}
-                  style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--pos-text-muted)', cursor: 'pointer' }}
                 >✕</button>
               </div>
 
               <div style={{
                 display: 'flex', justifyContent: 'space-between',
-                padding: '8px 12px', borderRadius: 8, background: '#F9FAFB',
-                marginBottom: 12, fontSize: 12, color: '#6B7280',
+                padding: '8px 12px', borderRadius: 8, background: 'var(--pos-surface-alt)',
+                marginBottom: 12, fontSize: 12, color: 'var(--pos-text-muted)',
               }}>
                 <span>Mevcut ağırlık</span>
-                <span style={{ fontWeight: 700, color: '#374151', fontFamily: 'monospace' }}>
+                <span style={{ fontWeight: 700, color: 'var(--pos-text)', fontFamily: 'monospace' }}>
                   {(targetItem?.quantity ?? 0).toFixed(3)} kg
                 </span>
               </div>
@@ -4890,10 +5076,10 @@ export default function POSScreen({
                       })
                     }}
                     style={{
-                      padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: k === '⌫' ? '#FEF2F2' : '#F9FAFB',
+                      padding: '14px 0', borderRadius: 10, border: '1px solid var(--pos-key-border)',
+                      background: 'var(--pos-key-bg)',
                       fontSize: 18, fontWeight: 600,
-                      color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer',
+                      color: 'var(--pos-key-text)', cursor: 'pointer',
                     }}
                   >{k}</button>
                 ))}
@@ -4904,9 +5090,9 @@ export default function POSScreen({
                   type="button"
                   onClick={() => setWeightEditInput('')}
                   style={{
-                    padding: 14, borderRadius: 10, border: '1px solid #E0E0E0',
-                    background: '#F5F5F5', fontSize: 15, fontWeight: 600,
-                    color: '#374151', cursor: 'pointer',
+                    padding: 14, borderRadius: 10, border: '1px solid var(--pos-key-border)',
+                    background: 'var(--pos-key-bg)', fontSize: 15, fontWeight: 600,
+                    color: 'var(--pos-key-text)', cursor: 'pointer',
                   }}
                 >C</button>
                 <button
@@ -4914,8 +5100,8 @@ export default function POSScreen({
                   onClick={applyWeightEdit}
                   style={{
                     padding: 14, borderRadius: 10, border: 'none',
-                    background: '#1D4ED8', fontSize: 15, fontWeight: 700,
-                    color: 'white', cursor: 'pointer',
+                    background: 'var(--pos-key-action-bg)', fontSize: 15, fontWeight: 700,
+                    color: 'var(--pos-key-action-text)', cursor: 'pointer',
                   }}
                 >Uygula</button>
               </div>
@@ -4926,11 +5112,11 @@ export default function POSScreen({
 
       {docDiscountMode && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
-          <div className="pos-modal" style={{ background: 'white', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
+          <div className="pos-modal" style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: '20px 16px 32px', width: 'min(720px, 92vw)', maxWidth: '92vw' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>Belge İndirimi</div>
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>Toplam belgeye uygulanır</div>
+                <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>Toplam belgeye uygulanır</div>
               </div>
               <button
                 onClick={() => {
@@ -4938,7 +5124,7 @@ export default function POSScreen({
                   setDocDiscInput('')
                   setDocDiscMode('rate')
                 }}
-                style={{ background: 'none', border: 'none', fontSize: 20, color: '#9CA3AF', cursor: 'pointer' }}
+                style={{ background: 'none', border: 'none', fontSize: 20, color: 'var(--pos-text-muted)', cursor: 'pointer' }}
               >✕</button>
             </div>
 
@@ -4975,7 +5161,7 @@ export default function POSScreen({
                     }
                     setDocDiscInput(v => (v.replace(',', '').length < 6 ? v + k : v))
                   }}
-                  style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB', background: k === '⌫' ? '#FEF2F2' : '#F9FAFB', fontSize: 18, fontWeight: 600, color: k === '⌫' ? '#EF4444' : '#111827', cursor: 'pointer' }}>
+                  style={{ padding: '14px 0', borderRadius: 10, border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)', fontSize: 18, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                   {k}
                 </button>
               ))}
@@ -4984,11 +5170,12 @@ export default function POSScreen({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8, marginTop: 8 }}>
               <button type="button"
                 onClick={() => { setDocDiscInput(''); setDocDiscountRate(0); setDocDiscountAmt(0) }}
-                style={{ padding: '14px', borderRadius: 10, border: '1px solid #E0E0E0', background: '#F5F5F5', fontSize: 15, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                style={{ padding: '14px', borderRadius: 10, border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)', fontSize: 15, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                 C
               </button>
               <button type="button"
                 onClick={() => {
+                  assertCartEditable()
                   const val = parseFloat(docDiscInput.replace(',', '.')) || 0
                   if (docDiscMode === 'rate') {
                     const maxPct = settings.cashier.maxDocDiscountPct
@@ -5027,25 +5214,25 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="pos-modal" style={{
-            background: 'white', borderRadius: 16, padding: '20px 16px 24px',
+            background: 'var(--pos-surface)', borderRadius: 16, padding: '20px 16px 24px',
             width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 10,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>SMS Bildirimi</div>
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                   5 ile başlayan 10 hane
                 </div>
               </div>
               <button type="button" onClick={() => setSmsPhonePanelOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
-                  color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+                  color: 'var(--pos-text-muted)', cursor: 'pointer' }}>✕</button>
             </div>
 
             <div style={{
               textAlign: 'center', padding: '10px 0',
-              fontSize: 26, fontWeight: 700, color: '#1565C0',
+              fontSize: 26, fontWeight: 700, color: 'var(--pos-primary)',
               letterSpacing: 0.5, minHeight: 48, wordBreak: 'break-all',
             }}>
               {formatTrMobileSmsDisplay(smsPhoneDraft) || '—'}
@@ -5061,8 +5248,8 @@ export default function POSScreen({
                       if (!disabledFirst) setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, k))
                     }}
                     style={{ padding: '14px 0', borderRadius: 10,
-                      border: '1px solid #E5E7EB', background: '#F9FAFB',
-                      fontSize: 18, fontWeight: 600, color: '#111827',
+                      border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)',
+                      fontSize: 18, fontWeight: 600, color: 'var(--pos-key-text)',
                       cursor: disabledFirst ? 'default' : 'pointer',
                       opacity: disabledFirst ? 0.38 : 1 }}>
                     {k}
@@ -5072,25 +5259,25 @@ export default function POSScreen({
             </div>
             <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               <button type="button" onClick={() => setSmsPhoneDraft('')}
-                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid #E5E7EB',
-                  background: '#F5F5F5', fontSize: 15, fontWeight: 600,
-                  color: '#374151', cursor: 'pointer' }}>
+                style={{ padding: '14px 0', borderRadius: 10, border: '1px solid var(--pos-key-border)',
+                  background: 'var(--pos-key-bg)', fontSize: 15, fontWeight: 600,
+                  color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                 C
               </button>
               <button type="button"
                 disabled={smsPhoneDraft.replace(/\D/g, '').length === 0}
                 onClick={() => setSmsPhoneDraft(p => appendTrMobileSmsDigit(p, '0'))}
                 style={{ padding: '14px 0', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: '#F9FAFB',
-                  fontSize: 18, fontWeight: 600, color: '#111827', cursor: 'pointer',
+                  border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)',
+                  fontSize: 18, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer',
                   opacity: smsPhoneDraft.replace(/\D/g, '').length === 0 ? 0.38 : 1 }}>
                 0
               </button>
               <button type="button"
                 onClick={() => setSmsPhoneDraft(p => p.replace(/\D/g, '').slice(0, -1))}
                 style={{ padding: '14px 0', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: '#FEF2F2',
-                  fontSize: 18, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}>
+                  border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)',
+                  fontSize: 18, fontWeight: 600, color: 'var(--pos-key-text)', cursor: 'pointer' }}>
                 ⌫
               </button>
             </div>
@@ -5103,8 +5290,8 @@ export default function POSScreen({
                   setSmsPhonePanelOpen(false)
                 }}
                 style={{ padding: '14px', borderRadius: 10,
-                  border: '1px solid #E0E0E0', background: '#F5F5F5',
-                  fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                  fontSize: 13, fontWeight: 600, color: 'var(--pos-text)', cursor: 'pointer' }}>
                 Gönderme
               </button>
               <button type="button"
@@ -5118,8 +5305,8 @@ export default function POSScreen({
                   setSmsPhonePanelOpen(false)
                 }}
                 style={{ padding: '14px', borderRadius: 10, border: 'none',
-                  background: '#1565C0', fontSize: 15, fontWeight: 700,
-                  color: 'white', cursor: 'pointer' }}>
+                  background: 'var(--pos-key-action-bg)', fontSize: 15, fontWeight: 700,
+                  color: 'var(--pos-key-action-text)', cursor: 'pointer' }}>
                 Tamam
               </button>
             </div>
@@ -5134,7 +5321,7 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="pos-modal" style={{
-            background: 'white', borderRadius: 16, padding: '20px 16px 24px',
+            background: 'var(--pos-surface)', borderRadius: 16, padding: '20px 16px 24px',
             width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 10,
           }}>
@@ -5142,13 +5329,13 @@ export default function POSScreen({
               alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700 }}>Mail Bildirimi</div>
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                   ornek@mail.com
                 </div>
               </div>
               <button type="button" onClick={() => setMailModalOpen(false)}
                 style={{ background: 'none', border: 'none', fontSize: 20,
-                  color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+                  color: 'var(--pos-text-muted)', cursor: 'pointer' }}>✕</button>
             </div>
 
             <input
@@ -5168,7 +5355,7 @@ export default function POSScreen({
                 })
               }}
               style={{ width: '100%', padding: '12px 14px', borderRadius: 10,
-                border: `1.5px solid ${mailAddr && isValidNotifyEmail(mailAddr) ? '#1565C0' : '#E5E7EB'}`,
+                border: `1.5px solid ${mailAddr && isValidNotifyEmail(mailAddr) ? 'var(--pos-primary)' : 'var(--pos-border)'}`,
                 fontSize: 14, outline: 'none', boxSizing: 'border-box' as const,
                 cursor: touchEnabled ? 'default' : 'text' }}
             />
@@ -5180,8 +5367,8 @@ export default function POSScreen({
                   setMailModalOpen(false)
                 }}
                 style={{ padding: '14px', borderRadius: 10,
-                  border: '1px solid #E0E0E0', background: '#F5F5F5',
-                  fontSize: 13, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                  fontSize: 13, fontWeight: 600, color: 'var(--pos-text)', cursor: 'pointer' }}>
                 Gönderme
               </button>
               <button type="button"
@@ -5193,8 +5380,8 @@ export default function POSScreen({
                   setMailModalOpen(false)
                 }}
                 style={{ padding: '14px', borderRadius: 10, border: 'none',
-                  background: '#1565C0', fontSize: 15, fontWeight: 700,
-                  color: 'white', cursor: 'pointer' }}>
+                  background: 'var(--pos-primary)', fontSize: 15, fontWeight: 700,
+                  color: 'var(--pos-primary-text)', cursor: 'pointer' }}>
                 Tamam
               </button>
             </div>
@@ -5206,12 +5393,12 @@ export default function POSScreen({
         <div style={{ position: 'fixed', inset: 0, zIndex: 10002,
           background: 'rgba(0,0,0,0.5)', display: 'flex',
           alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 16, padding: 24,
+          <div style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
             width: 'min(380px, 92vw)', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
             <div style={{ fontSize: 16, fontWeight: 700 }}>📂 Tamamlanmamış Satış</div>
 
-            <div style={{ fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: 'var(--pos-text-muted)', lineHeight: 1.5 }}>
               <strong>{draftModal.savedAt}</strong> tarihinde kaydedilmiş
               tamamlanmamış bir satış var.<br />
               <strong>{draftModal.cart.length} kalem</strong>
@@ -5226,7 +5413,7 @@ export default function POSScreen({
                   setDraftModal(null)
                 }}
                 style={{ flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-                  background: '#1565C0', color: 'white', fontWeight: 700,
+                  background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', fontWeight: 700,
                   fontSize: 14, cursor: 'pointer' }}>
                 Geri Yükle
               </button>
@@ -5236,8 +5423,8 @@ export default function POSScreen({
                   setDraftModal(null)
                 }}
                 style={{ flex: 1, padding: '12px', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: '#F9FAFB',
-                  color: '#6B7280', fontSize: 14, cursor: 'pointer' }}>
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                  color: 'var(--pos-text-muted)', fontSize: 14, cursor: 'pointer' }}>
                 Sil
               </button>
             </div>
@@ -5313,44 +5500,44 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 16, padding: 20,
+            background: 'var(--pos-surface)', borderRadius: 16, padding: 20,
             width: 'min(300px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 12,
           }}>
             <div style={{ fontSize: 14, fontWeight: 700 }}>İade Tutarı</div>
-            <div style={{ fontSize: 11, color: '#6B7280' }}>
+            <div style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>
               Maksimum: {paymentNumpad.max.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
             </div>
 
             <div style={{
-              background:   '#F9FAFB',
-              border:       '1.5px solid #E5E7EB',
+              background:   'var(--pos-surface-alt)',
+              border:       '1.5px solid var(--pos-border)',
               borderRadius: 10,
               padding:      '12px 14px',
               textAlign:    'right',
               fontSize:     24,
               fontWeight:   700,
-              color:        '#111827',
+              color:        'var(--pos-text)',
               letterSpacing: 1,
               minHeight:    52,
             }}>
               {paymentNumpad.value === '' ? (
-                <span style={{ color: '#9CA3AF' }}>0</span>
+                <span style={{ color: 'var(--pos-text-muted)' }}>0</span>
               ) : (
                 paymentNumpad.value
               )} ₺
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+            <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
               {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                 <button key={k} type="button"
                   onClick={() => handlePaymentNumpadKey(k)}
                   style={{
                     padding:        '13px 0',
                     borderRadius:   9,
-                    border:         '1.5px solid #E5E7EB',
-                    background:     k === '⌫' ? '#FEF2F2' : 'white',
-                    color:          k === '⌫' ? '#DC2626' : '#111827',
+                    border:         '1.5px solid var(--pos-key-border)',
+                    background:     'var(--pos-key-bg)',
+                    color:          'var(--pos-key-text)',
                     fontSize:       18,
                     fontWeight:     600,
                     cursor:         'pointer',
@@ -5365,8 +5552,8 @@ export default function POSScreen({
                 onClick={() => setPaymentNumpad(null)}
                 style={{
                   flex: 1, padding: '11px', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: '#F9FAFB',
-                  fontSize: 14, cursor: 'pointer', color: '#6B7280',
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                  fontSize: 14, cursor: 'pointer', color: 'var(--pos-text-muted)',
                 }}>
                 Vazgeç
               </button>
@@ -5380,8 +5567,8 @@ export default function POSScreen({
                 }}
                 style={{
                   flex: 2, padding: '11px', borderRadius: 10,
-                  border: 'none', background: '#1565C0',
-                  color: 'white', fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                  border: 'none', background: 'var(--pos-key-action-bg)',
+                  color: 'var(--pos-key-action-text)', fontWeight: 700, fontSize: 14, cursor: 'pointer',
                 }}>
                 Tamam
               </button>
@@ -5404,14 +5591,14 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div className="pos-modal" style={{
-            background: 'white', borderRadius: 16, padding: 24,
+            background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
             width: 'min(720px, 92vw)',
             display: 'flex', flexDirection: 'column', gap: 14,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 700 }}>Terazi</div>
-                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                   {scaleModal.product.name}
                 </div>
               </div>
@@ -5420,17 +5607,17 @@ export default function POSScreen({
                 onClick={() => setScaleModal(null)}
                 style={{
                   background: 'none', border: 'none', fontSize: 20,
-                  color: '#9CA3AF', cursor: 'pointer',
+                  color: 'var(--pos-text-muted)', cursor: 'pointer',
                 }}
               >✕</button>
             </div>
 
             <div style={{
-              background: scaleModal.stable ? '#F0FDF4' : scaleDisconnected ? '#FEF2F2' : '#FFF8E1',
+              background: scaleModal.stable ? 'var(--pos-soft-success)' : scaleDisconnected ? 'var(--pos-soft-danger)' : 'var(--pos-soft-warning)',
               border: `2px solid ${scaleModal.stable ? '#86EFAC' : scaleDisconnected ? '#FECACA' : '#FDE68A'}`,
               borderRadius: 12, padding: 16, textAlign: 'center',
             }}>
-              <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginBottom: 4 }}>
                 {scaleModal.stable ? 'Stabil (S)' : scaleDisconnected ? 'Bağlantı kurulamadı' : 'Ölçülüyor (U)...'}
                 {scaleModal.tare > 0 ? ' · net' : ''}
               </div>
@@ -5443,19 +5630,19 @@ export default function POSScreen({
                 <span style={{ fontSize: 20, marginLeft: 6 }}>kg</span>
               </div>
               {scaleModal.tare > 0 && (
-                <div style={{ marginTop: 4, fontSize: 11, color: '#6B7280', fontFamily: 'monospace' }}>
+                <div style={{ marginTop: 4, fontSize: 11, color: 'var(--pos-text-muted)', fontFamily: 'monospace' }}>
                   Brüt {(scaleModal.weight / 1000).toFixed(3)} − Dara {(scaleModal.tare / 1000).toFixed(3)}
                 </div>
               )}
               {scaleModal.raw ? (
                 <div style={{
                   marginTop: 8, fontSize: 12, fontFamily: 'monospace',
-                  color: '#6B7280', wordBreak: 'break-all',
+                  color: 'var(--pos-text-muted)', wordBreak: 'break-all',
                 }}>
                   {scaleModal.raw}
                 </div>
               ) : (
-                <div style={{ marginTop: 8, fontSize: 11, color: scaleDisconnected ? '#DC2626' : '#9CA3AF' }}>
+                <div style={{ marginTop: 8, fontSize: 11, color: scaleDisconnected ? '#DC2626' : 'var(--pos-text-muted)' }}>
                   {scaleDisconnected ? 'Terazi bağlantısı kurulamadı. Lütfen yeniden deneyin.' : 'Teraziden veri bekleniyor...'}
                 </div>
               )}
@@ -5479,17 +5666,17 @@ export default function POSScreen({
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '8px 12px', borderRadius: 8,
-                background: '#F9FAFB', border: '1px solid #E5E7EB',
+                background: 'var(--pos-surface-alt)', border: '1px solid var(--pos-border)',
               }}>
-                <span style={{ fontSize: 12, color: '#6B7280' }}>Birim Fiyat (kg)</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#374151' }}>
+                <span style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>Birim Fiyat (kg)</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--pos-text)' }}>
                   {fmt(scaleModal.product.price)}
                 </span>
               </div>
 
               <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 12px', borderRadius: 8, background: '#111827',
+                padding: '10px 12px', borderRadius: 8, background: 'var(--pos-text)',
               }}>
                 <span style={{ fontSize: 13, color: 'white', fontWeight: 600 }}>Tutar</span>
                 <span style={{ fontSize: 18, fontWeight: 800, color: 'white' }}>
@@ -5530,8 +5717,9 @@ export default function POSScreen({
               }}
               style={{
                 padding: 14, borderRadius: 10, border: 'none',
-                background: scaleDisconnected ? '#2563EB' : scaleModal.stable ? '#15803D' : '#D1D5DB',
-                color: 'white', fontSize: 15, fontWeight: 700,
+                background: scaleDisconnected ? 'var(--pos-primary)' : scaleModal.stable ? 'var(--pos-success)' : 'var(--pos-disabled-bg)',
+                color: scaleDisconnected || scaleModal.stable ? 'var(--pos-primary-text)' : 'var(--pos-disabled-fg)',
+                fontSize: 15, fontWeight: 700,
                 cursor: 'pointer',
               }}
             >
@@ -5547,11 +5735,11 @@ export default function POSScreen({
       {/* Mesaj popup */}
       {pendingMessage && onMessageClose && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: 'white', borderRadius: 16, padding: '36px 40px', maxWidth: 480, width: '90%', textAlign: 'center' }}>
+          <div style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: '36px 40px', maxWidth: 480, width: '90%', textAlign: 'center' }}>
             <div style={{ fontSize: 40, marginBottom: 16 }}>💬</div>
             <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Yönetici Mesajı</div>
             <div style={{ fontSize: 14, color: '#424242', lineHeight: 1.7, marginBottom: 28 }}>{pendingMessage.text}</div>
-            <button onClick={onMessageClose} style={{ background: '#1565C0', color: 'white', border: 'none', borderRadius: 10, padding: '12px 40px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            <button onClick={onMessageClose} style={{ background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none', borderRadius: 10, padding: '12px 40px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
               Tamam, Anlaşıldı
             </button>
           </div>
@@ -5576,7 +5764,7 @@ export default function POSScreen({
             className="pos-modal"
             onClick={e => e.stopPropagation()}
             style={{
-              background:    'white',
+              background: 'var(--pos-surface)',
               borderRadius:  18,
               width:         'min(960px, 92vw)',
               maxHeight:     '88vh',
@@ -5588,17 +5776,17 @@ export default function POSScreen({
           >
             <div style={{
               padding:        '16px 20px',
-              borderBottom:   '1px solid #F3F4F6',
+              borderBottom:   '1px solid var(--pos-border)',
               display:        'flex',
               alignItems:     'center',
               justifyContent: 'space-between',
               flexShrink:     0,
             }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--pos-text)' }}>
                   {heldActiveTab === 'held' ? 'Bekletilen Belgeler' : 'Askıdaki Ödemeler'}
                 </div>
-                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                   {heldActiveTab === 'held'
                     ? `${heldDocs.length} belge`
                     : `${pendingSales.length} askıdaki ödeme`}
@@ -5609,14 +5797,14 @@ export default function POSScreen({
                 onClick={() => setShowHeld(false)}
                 style={{
                   background: 'none', border: 'none',
-                  cursor: 'pointer', fontSize: 20, color: '#9CA3AF',
+                  cursor: 'pointer', fontSize: 20, color: 'var(--pos-text-muted)',
                 }}
               >✕</button>
             </div>
 
             <div style={{
               display:      'flex',
-              borderBottom: '2px solid #F3F4F6',
+              borderBottom: '2px solid var(--pos-border)',
               flexShrink:   0,
             }}>
               {[
@@ -5637,8 +5825,8 @@ export default function POSScreen({
                     background:   'transparent',
                     fontSize:     13,
                     fontWeight:   heldActiveTab === tab.id ? 700 : 500,
-                    color:        heldActiveTab === tab.id ? '#111827' : '#9CA3AF',
-                    borderBottom: heldActiveTab === tab.id ? '2px solid #111827' : '2px solid transparent',
+                    color:        heldActiveTab === tab.id ? 'var(--pos-text)' : 'var(--pos-text-muted)',
+                    borderBottom: heldActiveTab === tab.id ? '2px solid var(--pos-text)' : '2px solid transparent',
                     marginBottom: -2,
                     cursor:       'pointer',
                     display:      'flex',
@@ -5652,8 +5840,8 @@ export default function POSScreen({
                     <span style={{
                       fontSize:     10,
                       fontWeight:   700,
-                      background:   heldActiveTab === tab.id ? '#111827' : '#E5E7EB',
-                      color:        heldActiveTab === tab.id ? 'white' : '#6B7280',
+                      background:   heldActiveTab === tab.id ? 'var(--pos-text)' : 'var(--pos-surface-alt)',
+                      color:        heldActiveTab === tab.id ? 'var(--pos-surface)' : 'var(--pos-text-muted)',
                       borderRadius: 99,
                       padding:      '1px 6px',
                     }}>{tab.count}</span>
@@ -5668,7 +5856,7 @@ export default function POSScreen({
               {heldDocs.length === 0 ? (
                 <div style={{
                   textAlign: 'center', padding: '48px 0',
-                  color: '#9CA3AF', fontSize: 13,
+                  color: 'var(--pos-text-muted)', fontSize: 13,
                 }}>
                   <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
                   Bekletilen belge yok
@@ -5677,8 +5865,8 @@ export default function POSScreen({
                 <div
                   key={doc.id}
                   style={{
-                    background:   idx % 2 === 0 ? 'white' : '#F9FAFB',
-                    borderBottom: '1px solid #F3F4F6',
+                    background:   idx % 2 === 0 ? 'var(--pos-surface)' : 'var(--pos-surface-alt)',
+                    borderBottom: '1px solid var(--pos-border)',
                     padding:      '14px 20px',
                     display:      'flex',
                     gap:          14,
@@ -5689,15 +5877,15 @@ export default function POSScreen({
                     width:          28,
                     height:         28,
                     borderRadius:   7,
-                    background:     idx % 2 === 0 ? '#F3F4F6' : 'white',
-                    color:          '#6B7280',
+                    background:     idx % 2 === 0 ? 'var(--pos-surface-alt)' : 'var(--pos-surface)',
+                    color:          'var(--pos-text-muted)',
                     fontSize:       11,
                     fontWeight:     700,
                     display:        'flex',
                     alignItems:     'center',
                     justifyContent: 'center',
                     flexShrink:     0,
-                    border:         '1px solid #E5E7EB',
+                    border:         '1px solid var(--pos-border)',
                   }}>
                     {idx + 1}
                   </div>
@@ -5712,7 +5900,7 @@ export default function POSScreen({
                       <span style={{
                         fontSize:   13,
                         fontWeight: 700,
-                        color:      '#111827',
+                        color:      'var(--pos-text)',
                         fontFamily: 'monospace',
                       }}>
                         {doc.orderNo || (doc.receiptNo ? `#${doc.receiptNo}` : doc.id.slice(0, 8).toUpperCase())}
@@ -5720,7 +5908,7 @@ export default function POSScreen({
                       <span style={{
                         fontSize:   14,
                         fontWeight: 700,
-                        color:      '#111827',
+                        color:      'var(--pos-text)',
                       }}>
                         {fmt(doc.totalAmount ?? 0)}
                       </span>
@@ -5728,7 +5916,7 @@ export default function POSScreen({
 
                     <div style={{
                       fontSize:     20,
-                      color:        C.text,
+                      color:        'var(--pos-text)',
                       fontWeight:   700,
                       overflow:     'hidden',
                       textOverflow: 'ellipsis',
@@ -5738,7 +5926,7 @@ export default function POSScreen({
                       {doc.label || '—'}
                     </div>
 
-                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                    <div style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>
                       {doc.items.length} kalem
                       {doc.customerName && ` · ${doc.customerName}`}
                       {doc.cashierName  && ` · ${doc.cashierName}`}
@@ -5755,11 +5943,11 @@ export default function POSScreen({
                       style={{
                         padding:      '6px 10px',
                         borderRadius: 7,
-                        border:       '1px solid #E5E7EB',
-                        background:   idx % 2 === 0 ? '#F9FAFB' : 'white',
+                        border:       '1px solid var(--pos-border)',
+                        background:   idx % 2 === 0 ? 'var(--pos-surface-alt)' : 'var(--pos-surface)',
                         fontSize:     11,
                         fontWeight:   600,
-                        color:        '#374151',
+                        color:        'var(--pos-text)',
                         cursor:       'pointer',
                       }}
                     >🔍 İncele</button>
@@ -5777,11 +5965,11 @@ export default function POSScreen({
                       style={{
                         padding:      '6px 10px',
                         borderRadius: 7,
-                        border:       '1px solid #E5E7EB',
-                        background:   idx % 2 === 0 ? '#F9FAFB' : 'white',
+                        border:       '1px solid var(--pos-border)',
+                        background:   idx % 2 === 0 ? 'var(--pos-surface-alt)' : 'var(--pos-surface)',
                         fontSize:     11,
                         fontWeight:   600,
-                        color:        '#374151',
+                        color:        'var(--pos-text)',
                         cursor:       'pointer',
                       }}
                     >✏️ İsim</button>
@@ -5805,7 +5993,7 @@ export default function POSScreen({
               {heldActiveTab === 'pending' && (
                 <>
                   {pendingLoading ? (
-                    <div style={{ textAlign: 'center', padding: '48px 0', color: '#9CA3AF', fontSize: 13 }}>
+                    <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--pos-text-muted)', fontSize: 13 }}>
                       <div style={{ fontSize: 24, marginBottom: 8 }}>⟳</div>
                       Yükleniyor...
                     </div>
@@ -5815,13 +6003,13 @@ export default function POSScreen({
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>
                         {isNetworkFetchError(pendingError) ? 'Bağlantı kurulamadı' : 'Liste alınamadı'}
                       </div>
-                      <div style={{ color: '#6B7280', fontSize: 12 }}>{pendingError}</div>
+                      <div style={{ color: 'var(--pos-text-muted)', fontSize: 12 }}>{pendingError}</div>
                       <button
                         type="button"
                         onClick={() => void loadPendingSales()}
                         style={{
                           marginTop: 14, padding: '8px 14px', borderRadius: 8,
-                          border: '1px solid #FECACA', background: '#FEF2F2',
+                          border: '1px solid #FECACA', background: 'var(--pos-soft-danger)',
                           color: '#B91C1C', fontWeight: 700, fontSize: 12, cursor: 'pointer',
                         }}
                       >
@@ -5829,46 +6017,46 @@ export default function POSScreen({
                       </button>
                     </div>
                   ) : pendingSales.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '48px 0', color: '#9CA3AF', fontSize: 13 }}>
+                    <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--pos-text-muted)', fontSize: 13 }}>
                       <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
                       Askıdaki ödeme yok
                     </div>
                   ) : pendingSales.map(sale => (
                     <div key={sale.saleNumber || sale.orderNo || sale.saleId} style={{
-                      borderBottom: '1px solid #F3F4F6',
+                      borderBottom: '1px solid var(--pos-border)',
                       padding:      '14px 20px',
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between',
                         alignItems: 'flex-start', marginBottom: 10 }}>
                         <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pos-text)' }}>
                             {sale.orderNo}
                           </div>
-                          <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                             Satış No: {sale.saleNumber}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pos-text)' }}>
                             {fmt(sale.totalPrice)}
                           </div>
-                          <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                             Toplam
                           </div>
                         </div>
                       </div>
 
                       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                        <div style={{ flex: 1, background: '#F0FDF4', borderRadius: 7,
+                        <div style={{ flex: 1, background: 'var(--pos-soft-success)', borderRadius: 7,
                           padding: '6px 10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: 10, color: '#6B7280' }}>Ödenen</div>
+                          <div style={{ fontSize: 10, color: 'var(--pos-text-muted)' }}>Ödenen</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#16A34A' }}>
                             {fmt(sale.paidAmount)}
                           </div>
                         </div>
-                        <div style={{ flex: 1, background: '#FEF2F2', borderRadius: 7,
+                        <div style={{ flex: 1, background: 'var(--pos-soft-danger)', borderRadius: 7,
                           padding: '6px 10px', textAlign: 'center' }}>
-                          <div style={{ fontSize: 10, color: '#6B7280' }}>Kalan</div>
+                          <div style={{ fontSize: 10, color: 'var(--pos-text-muted)' }}>Kalan</div>
                           <div style={{ fontSize: 13, fontWeight: 700, color: '#DC2626' }}>
                             {fmt(sale.remainingPaymentAmount)}
                           </div>
@@ -5904,7 +6092,7 @@ export default function POSScreen({
                           }}
                           style={{
                             flex: 1, padding: '8px 0', borderRadius: 8,
-                            border: '1px solid #FECACA', background: '#FEF2F2',
+                            border: '1px solid #FECACA', background: 'var(--pos-soft-danger)',
                             color: '#DC2626', fontWeight: 600, fontSize: 12, cursor: 'pointer',
                           }}
                         >
@@ -5958,7 +6146,7 @@ export default function POSScreen({
                             }}
                             style={{
                               flex: 2, padding: '8px 0', borderRadius: 8,
-                              border: 'none', background: '#111827',
+                              border: 'none', background: 'var(--pos-text)',
                               color: 'white', fontWeight: 700, fontSize: 12, cursor: 'pointer',
                             }}
                           >
@@ -6045,7 +6233,7 @@ export default function POSScreen({
           alignItems: 'center', justifyContent: 'center' }}
           onClick={() => setHeldPreview(null)}>
           <div onClick={e => e.stopPropagation()}
-            style={{ background: 'white', borderRadius: 14, padding: 20,
+            style={{ background: 'var(--pos-surface)', borderRadius: 14, padding: 20,
               width: 'min(420px, 94vw)', maxHeight: '80vh',
               display: 'flex', flexDirection: 'column', gap: 12 }}>
 
@@ -6054,18 +6242,18 @@ export default function POSScreen({
                 <div style={{ fontSize: 15, fontWeight: 700 }}>
                   {heldPreview.orderNo || (heldPreview.receiptNo ? `#${heldPreview.receiptNo}` : heldPreview.id.slice(0, 8).toUpperCase())}
                 </div>
-                <div style={{ fontSize: 12, color: '#6B7280' }}>
+                <div style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
                   {heldPreview.label ?? '—'}
                 </div>
               </div>
               <button type="button" onClick={() => setHeldPreview(null)}
                 style={{ background: 'none', border: 'none',
-                  cursor: 'pointer', fontSize: 18, color: '#9CA3AF' }}>✕</button>
+                  cursor: 'pointer', fontSize: 18, color: 'var(--pos-text-muted)' }}>✕</button>
             </div>
 
             {heldPreview.customerName && (
               <div style={{ padding: '8px 12px', borderRadius: 8,
-                background: '#F0F9FF', fontSize: 12, color: '#0369A1' }}>
+                background: 'var(--pos-hover)', fontSize: 12, color: '#0369A1' }}>
                 👤 {heldPreview.customerName}
               </div>
             )}
@@ -6075,18 +6263,18 @@ export default function POSScreen({
               {heldPreview.items.map((item, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: 'space-between',
                   alignItems: 'center', padding: '8px 10px', borderRadius: 8,
-                  background: i % 2 === 0 ? '#F9FAFB' : 'white',
-                  border: '1px solid #F3F4F6' }}>
+                  background: i % 2 === 0 ? 'var(--pos-surface-alt)' : 'var(--pos-surface)',
+                  border: '1px solid var(--pos-border)' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pos-text)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {item.name}
                     </div>
-                    <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                    <div style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>
                       {fmtQty(item.quantity)} {item.unit ?? 'Adet'} × {fmt(item.price)}
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#111827',
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pos-text)',
                     flexShrink: 0, marginLeft: 8 }}>
                     {fmt(item.netTotal ?? item.lineTotal ?? item.price * item.quantity)}
                   </div>
@@ -6096,8 +6284,8 @@ export default function POSScreen({
 
             <div style={{ display: 'flex', justifyContent: 'space-between',
               padding: '10px 12px', borderRadius: 8,
-              background: C.bg, border: `1px solid ${C.border}` }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Toplam</span>
+              background: 'var(--pos-bg)', border: `1px solid var(--pos-border)` }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--pos-text)' }}>Toplam</span>
               <span style={{ fontSize: 15, fontWeight: 700, color: C.primary }}>
                 {fmt(heldPreview.totalAmount ?? 0)}
               </span>
@@ -6139,7 +6327,7 @@ export default function POSScreen({
             </>
           }
         >
-          <label style={{ display: 'block', fontSize: 20, fontWeight: 600, marginBottom: 12, color: C.text }}>
+          <label style={{ display: 'block', fontSize: 20, fontWeight: 600, marginBottom: 12, color: 'var(--pos-text)' }}>
             Not (isteğe bağlı)
           </label>
           <input
@@ -6164,10 +6352,10 @@ export default function POSScreen({
               width: '100%',
               boxSizing: 'border-box',
               borderRadius: 12,
-              border: `1px solid ${C.border}`,
+              border: `1px solid var(--pos-border)`,
               padding: '0 16px',
               outline: 'none',
-              color: C.text,
+              color: 'var(--pos-text)',
             }}
           />
         </PosModal>
@@ -6176,7 +6364,7 @@ export default function POSScreen({
       {/* Müşteri seç */}
       {showCustomer && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="pos-modal" style={{ background: 'white', borderRadius: 14, padding: 24, width: 'min(720px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="pos-modal" style={{ background: 'var(--pos-surface)', borderRadius: 14, padding: 24, width: 'min(720px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ fontWeight: 600, fontSize: 15 }}>Müşteri Seç</span>
               <button onClick={() => setShowCustomer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
@@ -6206,7 +6394,7 @@ export default function POSScreen({
                 }
               }}
               placeholder="Ad veya kod ile ara..."
-              style={{ border: '1px solid #E0E0E0', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12,
+              style={{ border: '1px solid var(--pos-border)', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12,
                 cursor: touchEnabled ? 'pointer' : 'text' }}
             />
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -6216,8 +6404,8 @@ export default function POSScreen({
                     tabIndex={0}
                     onClick={() => { selectCustomer(c); setCustomerQ('') }}
                     style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF'}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'white'}
+                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)'}
                   >
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{c.name}</div>
@@ -6243,7 +6431,7 @@ export default function POSScreen({
                       setShowCustomer(false)
                     }}
                     style={{
-                      background: '#1565C0', color: 'white', border: 'none',
+                      background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none',
                       borderRadius: 8, padding: '8px 18px', fontSize: 13,
                       fontWeight: 600, cursor: 'pointer',
                     }}
@@ -6268,7 +6456,7 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
         }}>
           <div style={{
-            background: 'white', borderRadius: 14, width: '100%', maxWidth: 480,
+            background: 'var(--pos-surface)', borderRadius: 14, width: '100%', maxWidth: 480,
             maxHeight: '90vh', overflowY: 'auto', padding: 24,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -6341,16 +6529,16 @@ export default function POSScreen({
       )}
 
       {/* ── 4 PANEL — toplam %100 ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0, minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0, minWidth: 0, background: 'transparent' }}>
 
         {/* ① SEPET — %42 */}
-        <div style={{ width: '42%', flexShrink: 0, minWidth: 280, boxSizing: 'border-box', background: '#f6f7f9', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e8eaef' }}>
+        <div className="pos-cart" style={{ width: '42%', flexShrink: 0, minWidth: 280, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--pos-border)', ...(cartLocked ? { pointerEvents: 'none', opacity: 0.55 } : {}) }}>
 
           {/* Sepet header */}
           <div style={{
             padding: '6px 12px',
-            background: returnMode ? '#FEF2F2' : '#fafafa',
-            borderBottom: `2px solid ${returnMode ? '#DC2626' : '#e8eaef'}`,
+            background: returnMode ? 'var(--pos-soft-danger)' : 'var(--pos-surface)',
+            borderBottom: `2px solid ${returnMode ? '#DC2626' : 'var(--pos-border)'}`,
             display: 'flex', alignItems: 'center', gap: 8,
             flexShrink: 0,
           }}>
@@ -6364,12 +6552,12 @@ export default function POSScreen({
             )}
             <span style={{
               fontSize: 13, fontWeight: 600,
-              color: returnMode ? '#DC2626' : '#111',
+              color: returnMode ? '#DC2626' : 'var(--pos-text)',
             }}>
               {returnMode ? 'İade Belgesi' : 'Satış Belgesi'}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-              <span style={{ fontSize: 11, color: '#9ca3af' }}>
+              <span style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>
                 {cart.length > 0 ? `${cart.length} kalem` : 'Boş'}
               </span>
               {returnMode && (
@@ -6377,7 +6565,7 @@ export default function POSScreen({
                   type="button"
                   onClick={() => { setReturnMode(false); clearCart() }}
                   style={{ background: 'none', border: 'none',
-                    cursor: 'pointer', color: '#9CA3AF', fontSize: 12 }}>
+                    cursor: 'pointer', color: 'var(--pos-text-muted)', fontSize: 12 }}>
                   İptal
                 </button>
               )}
@@ -6386,13 +6574,13 @@ export default function POSScreen({
 
           <div style={{
             display: 'grid', gridTemplateColumns: CART_GRID,
-            padding: '8px 14px', background: '#f0f1f4',
-            borderBottom: '1px solid #e2e5eb', flexShrink: 0,
+            padding: '8px 14px', background: 'var(--pos-surface)',
+            borderBottom: '1px solid var(--pos-border)', flexShrink: 0,
           }}>
-            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }} />
-            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px' }}>Ürün Adı</span>
-            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'center' }}>Miktar</span>
-            <span style={{ fontSize: 9, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Tutar</span>
+            <span style={{ fontSize: 9, color: 'var(--pos-text-muted)', fontWeight: 600, textTransform: 'uppercase' }} />
+            <span style={{ fontSize: 9, color: 'var(--pos-text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.3px' }}>Ürün Adı</span>
+            <span style={{ fontSize: 9, color: 'var(--pos-text-muted)', fontWeight: 600, textTransform: 'uppercase', textAlign: 'center' }}>Miktar</span>
+            <span style={{ fontSize: 9, color: 'var(--pos-text-muted)', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Tutar</span>
           </div>
 
           <div ref={cartListRef}
@@ -6401,11 +6589,11 @@ export default function POSScreen({
             flex: 1,
             overflowY: 'auto',
             minHeight: 0,
-            background: '#f3f4f6',
+            background: 'transparent',
             padding: '6px 10px 10px',
           }}>
             {cart.length === 0 ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#d1d5db', fontSize: 13, flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--pos-text-muted)', fontSize: 13, flexDirection: 'column', gap: 8 }}>
                 <span style={{ fontSize: 32 }}>🛒</span>
                 <span>Sepet boş — ürün seçin veya barkod okutun</span>
               </div>
@@ -6416,14 +6604,14 @@ export default function POSScreen({
               const hasLineDisc = lineDiscTl > 0.009
               const discLabel = dr > 0 ? `İndirim %${dr}` : 'İndirim'
               const rowBg = returnMode
-                ? '#FFF5F5'
-                : (rowIdx % 2 === 0 ? '#ffffff' : '#fafbfc')
+                ? 'var(--pos-soft-blush)'
+                : (rowIdx % 2 === 0 ? 'var(--pos-surface)' : 'var(--pos-row-alt)')
               const metaPill = (key: string, text: string, mono = false) => (
                 <span key={key} style={{
                   display: 'inline-flex', alignItems: 'center',
                   padding: '0 5px', height: 16, borderRadius: 3,
                   fontSize: cartSettings.fsPill, whiteSpace: 'nowrap', flexShrink: 0,
-                  background: C.bg, color: C.textMuted, border: `1px solid ${C.border}`,
+                  background: 'var(--pos-bg)', color: 'var(--pos-text-muted)', border: `1px solid var(--pos-border)`,
                   fontFamily: mono ? 'monospace' : undefined,
                 }}>{text}</span>
               )
@@ -6507,8 +6695,8 @@ export default function POSScreen({
                       flexDirection:       'column',
                       background:          rowBg,
                       borderRadius:        11,
-                      border:              '1px solid #e8eaef',
-                      borderLeft:          returnMode ? '3px solid #DC2626' : '1px solid #e8eaef',
+                      border:              '1px solid var(--pos-border)',
+                      borderLeft:          returnMode ? '3px solid #DC2626' : '1px solid var(--pos-border)',
                       cursor:              'default',
                       transform:           swipeState?.id === item.id
                         ? `translateX(-${swipeState.currentX}px)`
@@ -6523,7 +6711,7 @@ export default function POSScreen({
                       animation:           flashLineId === item.id ? 'cartLineFlash 0.6s ease' : undefined,
                     }}
                     onMouseEnter={e => {
-                      (e.currentTarget as HTMLDivElement).style.background = '#f2f4f7'
+                      (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-row-hover)'
                     }}
                   >
                   <div style={{
@@ -6536,7 +6724,7 @@ export default function POSScreen({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
                       <div style={{
                         minWidth: 14,
-                        color: '#6b7280',
+                        color: 'var(--pos-text-muted)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 13, fontWeight: 700,
                       }}>
@@ -6575,7 +6763,7 @@ export default function POSScreen({
                   <div style={{ minWidth: 0 }}>
                     <div style={{
                       fontSize: cartSettings.fsUrunAdi, fontWeight: 600,
-                      color: '#111',
+                      color: 'var(--pos-text)',
                       whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip',
                       wordBreak: 'break-word',
                       lineHeight: 1.3, marginBottom: 3,
@@ -6598,7 +6786,7 @@ export default function POSScreen({
                         style={{
                           fontSize: cartSettings.fsMiktar,
                           fontWeight: 700,
-                          color: paymentMode ? '#374151' : '#1D4ED8',
+                          color: paymentMode ? 'var(--pos-text)' : '#1D4ED8',
                           cursor: paymentMode ? 'default' : 'pointer',
                           border: 'none',
                           background: 'transparent',
@@ -6617,10 +6805,10 @@ export default function POSScreen({
                           type="button"
                           onClick={e => { e.stopPropagation(); updateQty(item.id, -1) }}
                           style={{
-                            width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
-                            background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                            width: 24, height: 24, flexShrink: 0, border: '1px solid var(--pos-border)',
+                            background: 'var(--pos-surface)', borderRadius: 6, cursor: 'pointer',
                             fontSize: 14, display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', color: '#374151', fontWeight: 600,
+                            justifyContent: 'center', color: 'var(--pos-text)', fontWeight: 600,
                           }}
                         >−</button>
                         <span style={{
@@ -6632,7 +6820,7 @@ export default function POSScreen({
                             return base
                           })(),
                           fontWeight: 700,
-                          color: '#374151',
+                          color: 'var(--pos-text)',
                           minWidth: 44,
                           maxWidth: 56,
                           textAlign: 'center',
@@ -6646,10 +6834,10 @@ export default function POSScreen({
                           type="button"
                           onClick={e => { e.stopPropagation(); updateQty(item.id, 1) }}
                           style={{
-                            width: 24, height: 24, flexShrink: 0, border: '1px solid #e5e7eb',
-                            background: '#ffffff', borderRadius: 6, cursor: 'pointer',
+                            width: 24, height: 24, flexShrink: 0, border: '1px solid var(--pos-border)',
+                            background: 'var(--pos-surface)', borderRadius: 6, cursor: 'pointer',
                             fontSize: 14, display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', color: '#374151', fontWeight: 600,
+                            justifyContent: 'center', color: 'var(--pos-text)', fontWeight: 600,
                           }}
                         >+</button>
                       </>
@@ -6659,14 +6847,14 @@ export default function POSScreen({
                     {hasLineDisc && (
                       <div style={{
                         fontSize: cartSettings.fsTutarSub,
-                        color: C.textMuted,
+                        color: 'var(--pos-text-muted)',
                         textDecoration: 'line-through',
                         fontWeight: 500,
                       }}>{fmt(gross)}</div>
                     )}
                     <div style={{
                       fontSize: cartSettings.fsTutar, fontWeight: 700,
-                      color: C.text,
+                      color: 'var(--pos-text)',
                     }}>{fmt(item.netTotal)}</div>
                     <div
                       role="button"
@@ -6677,9 +6865,9 @@ export default function POSScreen({
                       }}
                       onMouseDown={e => e.stopPropagation()}
                       style={{
-                      fontSize: cartSettings.fsTutarSub, color: C.textMuted, marginTop: 1,
+                      fontSize: cartSettings.fsTutarSub, color: 'var(--pos-text-muted)', marginTop: 1,
                       cursor: paymentMode ? 'default' : 'pointer',
-                      borderBottom: paymentMode ? 'none' : `1px dashed ${C.border}`,
+                      borderBottom: paymentMode ? 'none' : `1px dashed var(--pos-border)`,
                       display: 'inline-block',
                     }}>{fmtQty(item.quantity)} × {fmt(item.price)}</div>
                   </div>
@@ -6703,14 +6891,14 @@ export default function POSScreen({
           <div style={{
             margin: '4px 10px 10px',
             borderRadius: 12,
-            border: '1px solid #e8eaef',
-            background: '#fafbfc',
+            border: '1px solid var(--pos-border)',
+            background: 'var(--pos-surface)',
             boxShadow: '0 1px 3px rgba(15, 23, 42, 0.05)',
             overflow: 'hidden',
             flexShrink: 0,
           }}>
             <div style={{ padding: '8px 14px 0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMuted, padding: '2px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--pos-text-muted)', padding: '2px 0' }}>
                 <span>Ara toplam</span>
                 <span>{fmt(araToplamBrut)}</span>
               </div>
@@ -6723,7 +6911,7 @@ export default function POSScreen({
                   />
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.textMuted, padding: '2px 0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--pos-text-muted)', padding: '2px 0' }}>
                 <span>KDV Tutarı</span>
                 <span>{fmt(toplamKdv)}</span>
               </div>
@@ -6733,12 +6921,12 @@ export default function POSScreen({
               justifyContent: 'space-between',
               alignItems: 'baseline',
               padding: '10px 14px 12px',
-              borderTop: `1px solid ${C.border}`,
+              borderTop: `1px solid var(--pos-border)`,
               marginTop: 2,
-              background: C.surface,
+              background: 'var(--pos-surface)',
               borderRadius: '0 0 11px 11px',
             }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>TOPLAM</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--pos-text)' }}>TOPLAM</span>
               <span style={{ fontSize: 28, fontWeight: 700, color: C.primary }}>{fmt(grandTotal)}</span>
             </div>
           </div>
@@ -6752,10 +6940,11 @@ export default function POSScreen({
           height: '100%',
           minHeight: 0,
           boxSizing: 'border-box',
-          background: '#f8f9fa',
+          background: 'var(--pos-surface)',
           display: 'flex',
           flexDirection: 'column',
           padding: '6px 6px 0',
+          ...(cartLocked ? { pointerEvents: 'none' as const, opacity: 0.55 } : {}),
           gap: 0,
           borderRight: '2px solid #9CA3AF',
           borderLeft: '2px solid #9CA3AF',
@@ -6821,7 +7010,8 @@ export default function POSScreen({
             {/* 1 — Menü: mavi tonu */}
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'islemler' ? null : 'islemler')}
-              style={{ ...solidBtn(C.primary, false, menuOpen === 'islemler'),
+              style={{ ...solidBtn(menuBtn.bg, false, menuOpen === 'islemler'),
+                color: menuBtn.text,
                 padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>☰</span>
@@ -6830,7 +7020,8 @@ export default function POSScreen({
 
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'belge' ? null : 'belge')}
-              style={{ ...solidBtn(C.online, false, menuOpen === 'belge'),
+              style={{ ...solidBtn(documentsBtn.bg, false, menuOpen === 'belge'),
+                color: documentsBtn.text,
                 padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>📄</span>
@@ -6839,7 +7030,8 @@ export default function POSScreen({
 
             <button type="button"
               onClick={() => setMenuOpen(m => m === 'musteri' ? null : 'musteri')}
-              style={{ ...solidBtn(C.success, false, menuOpen === 'musteri' || !!selectedCustomer),
+              style={{ ...solidBtn(customerBtn.bg, false, menuOpen === 'musteri' || !!selectedCustomer),
+                color: customerBtn.text,
                 padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>👤</span>
@@ -6852,7 +7044,8 @@ export default function POSScreen({
 
             <button type="button"
               onClick={() => { setMenuOpen('fiyatgor'); setFiyatGorQ(''); setFiyatGorItem(null) }}
-              style={{ ...solidBtn(C.warning, false, menuOpen === 'fiyatgor'),
+              style={{ ...solidBtn(priceCheckBtn.bg, false, menuOpen === 'fiyatgor'),
+                color: priceCheckBtn.text,
                 padding: '4% 2%', height: '100%', borderRadius: 8,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4%' }}>
               <span style={{ fontSize: 'clamp(14px,1.4vw,22px)' }}>🔍</span>
@@ -6880,8 +7073,8 @@ export default function POSScreen({
               flexShrink:     0,
               height:         40,
               borderRadius:   9,
-              border:         `1.5px solid ${numBuf ? C.success : C.border}`,
-              background:     C.surface,
+              border:         `1.5px solid ${numBuf ? 'var(--pos-success)' : 'var(--pos-border)'}`,
+              background:     'var(--pos-surface-alt)',
               display:        'flex',
               alignItems:     'center',
               justifyContent: 'center',
@@ -6900,7 +7093,7 @@ export default function POSScreen({
                         ? 'clamp(10px, 0.95vw + 1px, 16px)'
                         : 'clamp(8px, 0.8vw, 14px)',
                 fontWeight:    700,
-                color:         numBuf ? C.text : C.textMuted,
+                color:         numBuf ? 'var(--pos-text)' : 'var(--pos-text-muted)',
                 letterSpacing: numBuf.length <= 4 ? 2 : numBuf.length <= 8 ? 1 : 0,
                 whiteSpace:    'nowrap',
                 overflow:      'hidden',
@@ -6919,7 +7112,10 @@ export default function POSScreen({
                 type="button"
                 onMouseDown={e => { e.preventDefault(); handleNumKey('C') }}
                 style={{
-                  ...solidBtn(C.danger),
+                  background:     'var(--pos-danger)',
+                  color:          '#FFFFFF',
+                  border:         'none',
+                  cursor:         'pointer',
                   flex:           1,
                   borderRadius:   9,
                   fontSize:       13,
@@ -6934,7 +7130,10 @@ export default function POSScreen({
                 type="button"
                 onMouseDown={e => { e.preventDefault(); handleNumKey('⌫') }}
                 style={{
-                  ...solidBtn(C.warning),
+                  background:     'var(--pos-warning)',
+                  color:          '#FFFFFF',
+                  border:         'none',
+                  cursor:         'pointer',
                   flex:           1,
                   borderRadius:   9,
                   fontSize:       20,
@@ -6948,7 +7147,7 @@ export default function POSScreen({
             </div>
 
             {/* Numpad grid */}
-            <div style={{
+            <div className="pos-numpad" style={{
               display:             'grid',
               gridTemplateColumns: 'repeat(3, 1fr)',
               gridTemplateRows:    'repeat(4, minmax(0, 1fr))',
@@ -6960,12 +7159,13 @@ export default function POSScreen({
                 <button
                   key={k}
                   type="button"
+                  className="pos-key"
                   onMouseDown={e => { e.preventDefault(); handleNumKey(k) }}
                   style={{
                     width:          '100%',
                     height:         '100%',
                     boxSizing:      'border-box',
-                    border:         '1.5px solid #d1d5db',
+                    border:         '1.5px solid var(--pos-key-border)',
                     borderRadius:   9,
                     cursor:         'pointer',
                     fontWeight:     700,
@@ -6973,8 +7173,8 @@ export default function POSScreen({
                     alignItems:     'center',
                     justifyContent: 'center',
                     userSelect:     'none' as const,
-                    background:     'white',
-                    color:          '#1f2937',
+                    background:     'var(--pos-key-bg)',
+                    color:          'var(--pos-key-text)',
                     fontSize:       'clamp(14px, 1.4vw + 4px, 26px)',
                   }}
                 >{k}</button>
@@ -6982,6 +7182,7 @@ export default function POSScreen({
 
               <button
                 type="button"
+                className="pos-key-action"
                 onMouseDown={e => {
                   e.preventDefault()
                   if (!numBuf) return
@@ -6989,7 +7190,9 @@ export default function POSScreen({
                   setNumBuf('')
                 }}
                 style={{
-                  ...solidBtn(C.primary, !numBuf),
+                  ...(!numBuf
+                    ? solidBtn(C.primary, true)
+                    : { background: 'var(--pos-key-action-bg)', color: 'var(--pos-key-action-text)', border: 'none', cursor: 'pointer' }),
                   width:          '100%',
                   height:         '100%',
                   boxSizing:      'border-box',
@@ -7152,17 +7355,17 @@ export default function POSScreen({
               alignItems: 'center', justifyContent: 'center' }}
               onClick={() => setMenuOpen(null)}>
               <div className="pos-modal" onClick={e => e.stopPropagation()}
-                style={{ background: 'white', borderRadius: 16, padding: 24,
+                style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
                   width: 'min(720px, 92vw)', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 16, fontWeight: 500, color: '#111',
+                  <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--pos-text)',
                     display: 'flex', alignItems: 'center', gap: 8 }}>
                     🔍 Fiyat Gör
                   </div>
                   <button type="button" onClick={() => setMenuOpen(null)}
                     style={{ background: 'none', border: 'none', fontSize: 20,
-                      cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
+                      cursor: 'pointer', color: 'var(--pos-text-muted)', padding: 0 }}>✕</button>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -7179,7 +7382,7 @@ export default function POSScreen({
                     }}
                     placeholder="Barkod okut veya ürün adı gir..."
                     style={{ flex: 1, padding: '12px 14px', fontSize: 15, borderRadius: 10,
-                      border: '1.5px solid #E5E7EB', outline: 'none',
+                      border: '1.5px solid var(--pos-border)', outline: 'none',
                       boxSizing: 'border-box' as const,
                       cursor: touchEnabled ? 'default' : 'text' }}
                   />
@@ -7192,8 +7395,8 @@ export default function POSScreen({
                       onConfirm: (v) => applyFiyatGorScan(v),
                     })}
                     style={{ padding: '12px 14px', borderRadius: 10,
-                      border: '1.5px solid #E5E7EB', background: '#F9FAFB',
-                      cursor: 'pointer', color: '#6B7280', fontSize: 18,
+                      border: '1.5px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                      cursor: 'pointer', color: 'var(--pos-text-muted)', fontSize: 18,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0 }}>
                     ⌨️
@@ -7202,7 +7405,7 @@ export default function POSScreen({
 
                 {!fiyatGorItem && fiyatGorQ.length > 1 && (
                   <div style={{ maxHeight: 240, overflowY: 'auto',
-                    border: '0.5px solid #E5E7EB', borderRadius: 10, overflow: 'hidden' }}>
+                    border: '0.5px solid var(--pos-border)', borderRadius: 10, overflow: 'hidden' }}>
                     {allProducts
                       .filter(p =>
                         (p.name?.toLowerCase().includes(fiyatGorQ.toLowerCase()) ?? false) ||
@@ -7213,14 +7416,14 @@ export default function POSScreen({
                         <div key={p.id} role="button" tabIndex={0} onClick={() => setFiyatGorItem(p)}
                           style={{ padding: '12px 16px', cursor: 'pointer',
                             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                            borderBottom: i < arr.length - 1 ? '0.5px solid #F3F4F6' : 'none' }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F9FAFB' }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
+                            borderBottom: i < arr.length - 1 ? '0.5px solid var(--pos-border)' : 'none' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface-alt)' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)' }}>
                           <div>
-                            <div style={{ fontSize: 13, fontWeight: 500, color: '#111' }}>{p.name}</div>
-                            <div style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace', marginTop: 2 }}>{p.code}</div>
+                            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--pos-text)' }}>{p.name}</div>
+                            <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', fontFamily: 'monospace', marginTop: 2 }}>{p.code}</div>
                           </div>
-                          <div style={{ fontSize: 16, fontWeight: 600, color: '#1565C0' }}>
+                          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--pos-primary)' }}>
                             {p.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                           </div>
                         </div>
@@ -7229,15 +7432,15 @@ export default function POSScreen({
                 )}
 
                 {fiyatGorItem && (
-                  <div style={{ padding: 16, borderRadius: 12, background: '#F0F9FF',
+                  <div style={{ padding: 16, borderRadius: 12, background: 'var(--pos-hover)',
                     border: '1.5px solid #BAE6FD',
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontSize: 15, fontWeight: 500, color: '#111' }}>{fiyatGorItem.name}</div>
-                      <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2, fontFamily: 'monospace' }}>{fiyatGorItem.code ?? ''}</div>
-                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>KDV %{fiyatGorItem.vatRate}</div>
+                      <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--pos-text)' }}>{fiyatGorItem.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--pos-text-muted)', marginTop: 2, fontFamily: 'monospace' }}>{fiyatGorItem.code ?? ''}</div>
+                      <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>KDV %{fiyatGorItem.vatRate}</div>
                     </div>
-                    <div style={{ fontSize: 28, fontWeight: 600, color: '#1565C0' }}>
+                    <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--pos-primary)' }}>
                       {fiyatGorItem.price.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                     </div>
                   </div>
@@ -7246,8 +7449,8 @@ export default function POSScreen({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <button type="button" onClick={() => setMenuOpen(null)}
                     style={{ padding: '14px 0', fontSize: 14, borderRadius: 10,
-                      border: '1px solid #E5E7EB', background: 'white',
-                      cursor: 'pointer', color: '#374151' }}>
+                      border: '1px solid var(--pos-border)', background: 'var(--pos-surface)',
+                      cursor: 'pointer', color: 'var(--pos-text)' }}>
                     Kapat
                   </button>
                   <button type="button"
@@ -7260,8 +7463,8 @@ export default function POSScreen({
                     }}
                     style={{ padding: '14px 0', fontSize: 14, fontWeight: 600,
                       borderRadius: 10, border: 'none',
-                      background: fiyatGorItem ? '#1565C0' : '#E5E7EB',
-                      color: fiyatGorItem ? 'white' : '#9CA3AF',
+                      background: fiyatGorItem ? 'var(--pos-primary)' : 'var(--pos-disabled-bg)',
+                      color: fiyatGorItem ? 'var(--pos-primary-text)' : 'var(--pos-disabled-fg)',
                       cursor: fiyatGorItem ? 'pointer' : 'default' }}>
                     Fişe Ekle
                   </button>
@@ -7283,11 +7486,11 @@ export default function POSScreen({
                 setCariPaymentResult(null)
               }}>
               <div onClick={e => e.stopPropagation()}
-                style={{ background: 'white', borderRadius: 16, padding: 24,
+                style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
                   width: 'min(400px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14 }}>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontSize: 16, fontWeight: 600, color: '#111' }}>
+                  <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--pos-text)' }}>
                     {cariPaymentModal === 'tahsilat' ? '💰 Cari Tahsilat' : '💸 Cari Ödeme'}
                   </div>
                   <button type="button"
@@ -7300,23 +7503,23 @@ export default function POSScreen({
                     }}
                     disabled={cariPaymentSaving}
                     style={{ background: 'none', border: 'none', fontSize: 20,
-                      cursor: 'pointer', color: '#9CA3AF', padding: 0 }}>✕</button>
+                      cursor: 'pointer', color: 'var(--pos-text-muted)', padding: 0 }}>✕</button>
                 </div>
 
                 {cariPaymentCust ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8,
                     padding: '10px 14px', borderRadius: 10,
-                    background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                    background: 'var(--pos-soft-success)', border: '1px solid #BBF7D0' }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#166534', flex: 1 }}>
                       👤 {cariPaymentCust.name}
                     </span>
-                    <span style={{ fontSize: 11, color: '#6B7280', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 11, color: 'var(--pos-text-muted)', fontFamily: 'monospace' }}>
                       {cariPaymentCust.code}
                     </span>
                     <button type="button"
                       onClick={() => { setCariPaymentCust(null); setCariPaymentQ(''); setCariPaymentResults([]) }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer',
-                        color: '#9CA3AF', fontSize: 14, padding: 0 }}>✕</button>
+                        color: 'var(--pos-text-muted)', fontSize: 14, padding: 0 }}>✕</button>
                   </div>
                 ) : (
                   <div style={{ position: 'relative' }}>
@@ -7348,17 +7551,17 @@ export default function POSScreen({
                       }}
                       placeholder="Cari ara... (ad veya kod)"
                       style={{ width: '100%', padding: '10px 14px', fontSize: 13,
-                        borderRadius: 10, border: '1px solid #E5E7EB', outline: 'none',
+                        borderRadius: 10, border: '1px solid var(--pos-border)', outline: 'none',
                         boxSizing: 'border-box' as const,
                         cursor: touchEnabled ? 'pointer' : 'text' }}
                     />
                     {cariPaymentSearching && (
                       <span style={{ position: 'absolute', right: 12, top: '50%',
-                        transform: 'translateY(-50%)', color: '#9CA3AF', fontSize: 12 }}>⟳</span>
+                        transform: 'translateY(-50%)', color: 'var(--pos-text-muted)', fontSize: 12 }}>⟳</span>
                     )}
                     {cariPaymentResults.length > 0 && (
                       <div style={{ position: 'absolute', top: '100%', left: 0, right: 0,
-                        zIndex: 100, background: 'white', border: '1px solid #E0E0E0',
+                        zIndex: 100, background: 'var(--pos-surface)', border: '1px solid var(--pos-border)',
                         borderRadius: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                         maxHeight: 180, overflowY: 'auto' }}>
                         {cariPaymentResults.map(c => (
@@ -7371,12 +7574,12 @@ export default function POSScreen({
                               setCariPaymentResults([])
                             }}
                             style={{ padding: '9px 14px', cursor: 'pointer', fontSize: 13,
-                              borderBottom: '1px solid #F9FAFB',
+                              borderBottom: '1px solid var(--pos-border)',
                               display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                            onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F5F8FF' }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
+                            onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)' }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)' }}>
                             <span style={{ fontWeight: 500 }}>{c.name}</span>
-                            <span style={{ fontSize: 11, color: '#9CA3AF', fontFamily: 'monospace' }}>{c.code}</span>
+                            <span style={{ fontSize: 11, color: 'var(--pos-text-muted)', fontFamily: 'monospace' }}>{c.code}</span>
                           </div>
                         ))}
                       </div>
@@ -7387,11 +7590,11 @@ export default function POSScreen({
                 <div style={{ textAlign: 'center', padding: '12px 0',
                   fontSize: 28, fontWeight: 600, letterSpacing: 2,
                   color: cariPaymentModal === 'tahsilat' ? '#2E7D32' : '#C62828',
-                  borderTop: '1px solid #F3F4F6', borderBottom: '1px solid #F3F4F6' }}>
+                  borderTop: '1px solid var(--pos-border)', borderBottom: '1px solid var(--pos-border)' }}>
                   {cariPaymentAmt || '—'} ₺
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)',
+                <div className="pos-numpad" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)',
                   gap: 'clamp(5px,1.2vw,8px)' }}>
                   {['7','8','9','4','5','6','1','2','3',',','0','⌫'].map(k => (
                     <button key={k} type="button"
@@ -7407,8 +7610,8 @@ export default function POSScreen({
                       style={{ padding: 'clamp(10px,2vw,14px) 0',
                         fontSize: k === '⌫' ? 'clamp(15px,2vw,20px)' : 'clamp(17px,2.2vw,22px)',
                         fontWeight: 500, borderRadius: 10,
-                        border: '1px solid #E5E7EB', background: 'white', cursor: 'pointer',
-                        color: k === '⌫' ? '#EF4444' : '#111' }}>
+                        border: '1px solid var(--pos-key-border)', background: 'var(--pos-key-bg)', cursor: 'pointer',
+                        color: 'var(--pos-key-text)' }}>
                       {k}
                     </button>
                   ))}
@@ -7417,7 +7620,7 @@ export default function POSScreen({
                 {/* Ödeme Yöntemi — sadece Pavo cari tahsilat açıksa */}
                 {settings.terminal.cariPaymentUsePavo && pavoSettings && (
                   <div style={{ marginBottom: 0 }}>
-                    <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>
+                    <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginBottom: 6, fontWeight: 600 }}>
                       Ödeme Yöntemi
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -7443,7 +7646,7 @@ export default function POSScreen({
                       ))}
                     </div>
                     {!cariPaymentMethod && (
-                      <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>
+                      <div style={{ fontSize: 10, color: 'var(--pos-text-muted)', marginTop: 4 }}>
                         Seçilmezse Pavo cihazından seçilir
                       </div>
                     )}
@@ -7466,13 +7669,13 @@ export default function POSScreen({
                     onChange={e => setCariPaymentDesc(e.target.value)}
                     placeholder="Açıklama (opsiyonel)"
                     style={{ padding: '10px 14px', fontSize: 13, borderRadius: 10,
-                      border: '1px solid #E5E7EB', outline: 'none',
+                      border: '1px solid var(--pos-border)', outline: 'none',
                       width: '100%', boxSizing: 'border-box' as const,
                       cursor: touchEnabled ? 'pointer' : 'text' }}
                   />
                   {touchEnabled && (
                     <span style={{ position: 'absolute', right: 10, top: '50%',
-                      transform: 'translateY(-50%)', color: '#9CA3AF', fontSize: 14,
+                      transform: 'translateY(-50%)', color: 'var(--pos-text-muted)', fontSize: 14,
                       pointerEvents: 'none' }}>
                       ⌨️
                     </span>
@@ -7481,7 +7684,7 @@ export default function POSScreen({
 
                 {cariPaymentResult && (
                   <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13,
-                    background: cariPaymentResult.ok ? '#F0FDF4' : '#FEF2F2',
+                    background: cariPaymentResult.ok ? 'var(--pos-soft-success)' : 'var(--pos-soft-danger)',
                     border: `1px solid ${cariPaymentResult.ok ? '#BBF7D0' : '#FECACA'}`,
                     color: cariPaymentResult.ok ? '#166534' : '#991B1B' }}>
                     {cariPaymentResult.ok ? '✓' : '✗'} {cariPaymentResult.msg}
@@ -7492,8 +7695,8 @@ export default function POSScreen({
                   <button type="button"
                     onMouseDown={e => { e.preventDefault(); setCariPaymentAmt('') }}
                     style={{ padding: '13px 0', fontSize: 14, fontWeight: 500,
-                      borderRadius: 10, border: '1px solid #E5E7EB',
-                      background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
+                      borderRadius: 10, border: '1px solid var(--pos-border)',
+                      background: 'var(--pos-surface-alt)', cursor: 'pointer', color: 'var(--pos-text)' }}>
                     C
                   </button>
                   <button type="button"
@@ -7525,15 +7728,16 @@ export default function POSScreen({
           display:       'flex',
           flexDirection: 'column',
           overflow:      'hidden',
-          background:    'white',
+          background: 'transparent',
+          ...(cartLocked ? { pointerEvents: 'none' as const, opacity: 0.55 } : {}),
         }}>
 
           {/* Arama — tam genişlik, en üstte */}
           <div style={{
             padding:      '6px 8px',
             flexShrink:   0,
-            borderBottom: '1px solid #f0f0f0',
-            background:   'white',
+            borderBottom: '1px solid var(--pos-border)',
+            background: 'var(--pos-surface)',
           }}>
             <input
               ref={searchRef}
@@ -7543,19 +7747,19 @@ export default function POSScreen({
               placeholder="Barkod veya ürün ara..."
               style={{
                 width:        '100%',
-                border:       '1px solid #E0E0E0',
+                border:       '1px solid var(--pos-border)',
                 borderRadius: 9,
                 padding:      '9px 14px',
                 fontSize:     14,
                 outline:      'none',
-                background:   'white',
+                background: 'var(--pos-surface)',
                 boxSizing:    'border-box',
               }}
             />
           </div>
 
           {/* PLU grid + Grup bar — yatay */}
-          <div style={{
+          <div data-plu="" style={{
             flex:      1,
             display:   'flex',
             minHeight: 0,
@@ -7576,16 +7780,16 @@ export default function POSScreen({
               {/* Grup adı + ürün sayısı — küçük başlık */}
               <div style={{
                 padding:      '4px 10px',
-                borderBottom: '1px solid #f3f4f6',
+                borderBottom: '1px solid var(--pos-border)',
                 display:      'flex',
                 alignItems:   'center',
                 gap:          6,
                 height:       28,
                 flexShrink:   0,
-                background:   '#fafafa',
+                background:   'var(--pos-surface)',
               }}>
                 <div style={{ width: 3, height: 12, borderRadius: 2, background: activeColor, flexShrink: 0 }} />
-                <span style={{ fontSize: 10, fontWeight: 600, color: '#111', whiteSpace: 'nowrap', flex: 1 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--pos-text)', whiteSpace: 'nowrap', flex: 1 }}>
                   {pluGroups.find(g => g.id === activeGroup)?.name ?? '—'}
                 </span>
                 <span style={{ fontSize: 9, color: '#9ca3af' }}>{filtered.length} ürün</span>
@@ -7601,7 +7805,7 @@ export default function POSScreen({
                       void window.electron.app.openKeyboard().catch(() => {})
                     }
                   }}
-                  style={{ width: 22, height: 22, background: '#efefef', border: '1px solid #e5e7eb', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}
+                  style={{ width: 22, height: 22, background: 'var(--pos-surface-alt)', border: '1px solid var(--pos-border)', color: 'var(--pos-text)', borderRadius: 5, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}
                   title="Klavye Aç"
                 >⌨</button>
               </div>
@@ -7614,14 +7818,14 @@ export default function POSScreen({
                 <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '24px 0', fontSize: 12 }}>Ürün bulunamadı</div>
               ) : filtered.map(p => (
                 <div key={`search-${p.id}-${p.code}`} role="button" tabIndex={0} onClick={() => handlePluClick(p)}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', marginBottom: 3, borderRadius: 7, background: 'white', border: '1px solid #F0F0F0', cursor: 'pointer' }}
-                  onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.background = activeSoft }}
-                  onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = '#F0F0F0'; el.style.background = 'white' }}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 10px', marginBottom: 3, borderRadius: 7, background: 'var(--pos-surface)', border: '1px solid var(--pos-border)', cursor: 'pointer' }}
+                  onMouseEnter={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = activeColor; el.style.background = 'var(--pos-row-hover)' }}
+                  onMouseLeave={e => { const el = e.currentTarget as HTMLDivElement; el.style.borderColor = 'var(--pos-border)'; el.style.background = 'var(--pos-surface)' }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: fontSizeName, fontWeight: 500, color: '#212121', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{truncatePluName(p.name)}</div>
+                    <div style={{ fontSize: fontSizeName, fontWeight: 500, color: 'var(--pos-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{truncatePluName(p.name)}</div>
                     {(settings.cashier.showCode || settings.cashier.showBarcode) && (
-                      <div style={{ fontSize: fontSizeCode, color: '#9ca3af', fontFamily: 'monospace', marginTop: 1 }}>
+                      <div style={{ fontSize: fontSizeCode, color: 'var(--pos-text-muted)', fontFamily: 'monospace', marginTop: 1 }}>
                         {settings.cashier.showCode && p.code}
                         {settings.cashier.showCode && settings.cashier.showBarcode && p.barcode && ' · '}
                         {settings.cashier.showBarcode && p.barcode}
@@ -7648,10 +7852,10 @@ export default function POSScreen({
               {Array.from({ length: PLU_PER_PAGE }).map((_, i) => {
                 const p = slice[i]
                 if (!p) return (
-                  <div key={`e${i}`} style={{
+                  <div key={`e${i}`} className="plu-key--empty" style={{
                     borderRadius: 8,
-                    background: '#fafafa',
-                    border: '1px dashed #f0f0f0',
+                    background: 'var(--pos-plu-empty-bg)',
+                    border: '1px dashed var(--pos-border)',
                   }} />
                 )
                 return (
@@ -7678,8 +7882,8 @@ export default function POSScreen({
           {!searchQ && (
             <div style={{
               padding: '6px 10px',
-              borderTop: '1px solid #e5e7eb',
-              background: '#F8FAFC',
+              borderTop: '1px solid var(--pos-border)',
+              background: 'var(--pos-surface)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -7692,14 +7896,14 @@ export default function POSScreen({
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={safePage === 0}
                 style={{
-                  background: safePage === 0 ? '#F3F4F6' : '#1565C0',
+                  background: safePage === 0 ? 'var(--pos-disabled-bg)' : 'var(--pos-primary)',
                   border: 'none',
                   borderRadius: 10,
                   padding: '10px 16px',
                   cursor: safePage === 0 ? 'default' : 'pointer',
                   fontSize: 13,
                   fontWeight: 700,
-                  color: safePage === 0 ? '#9CA3AF' : 'white',
+                  color: safePage === 0 ? 'var(--pos-disabled-fg)' : 'var(--pos-primary-text)',
                   opacity: safePage === 0 ? 0.55 : 1,
                   minWidth: 110,
                   boxShadow: safePage === 0 ? 'none' : '0 2px 6px rgba(21,101,192,0.28)',
@@ -7710,13 +7914,13 @@ export default function POSScreen({
               <span style={{
                 fontSize: 13,
                 fontWeight: 700,
-                color: '#374151',
+                color: 'var(--pos-text)',
                 letterSpacing: '0.2px',
                 textAlign: 'center',
                 flex: 1,
               }}>
                 {safePage + 1} / {totalPages}
-                <span style={{ fontWeight: 500, color: '#6B7280', marginLeft: 6 }}>
+                <span style={{ fontWeight: 500, color: 'var(--pos-text-muted)', marginLeft: 6 }}>
                   · {filtered.length} ürün
                 </span>
               </span>
@@ -7725,14 +7929,14 @@ export default function POSScreen({
                 onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
                 disabled={safePage >= totalPages - 1}
                 style={{
-                  background: safePage >= totalPages - 1 ? '#F3F4F6' : '#1565C0',
+                  background: safePage >= totalPages - 1 ? 'var(--pos-disabled-bg)' : 'var(--pos-primary)',
                   border: 'none',
                   borderRadius: 10,
                   padding: '10px 16px',
                   cursor: safePage >= totalPages - 1 ? 'default' : 'pointer',
                   fontSize: 13,
                   fontWeight: 700,
-                  color: safePage >= totalPages - 1 ? '#9CA3AF' : 'white',
+                  color: safePage >= totalPages - 1 ? 'var(--pos-disabled-fg)' : 'var(--pos-primary-text)',
                   opacity: safePage >= totalPages - 1 ? 0.55 : 1,
                   minWidth: 110,
                   boxShadow: safePage >= totalPages - 1 ? 'none' : '0 2px 6px rgba(21,101,192,0.28)',
@@ -7753,7 +7957,7 @@ export default function POSScreen({
               flexShrink:    0,
               minWidth:      84,
               boxSizing:     'border-box',
-              background:    'white',
+              background:    'var(--pos-surface)',
               display:       'flex',
               flexDirection: 'column',
               overflowX:     'hidden',
@@ -7820,7 +8024,7 @@ export default function POSScreen({
           </div>
 
           {/* Ödeme — wrapper altında, tam genişlik */}
-          <div style={{ padding: '5px 8px 8px', borderTop: '1px solid #f0f0f0', flexShrink: 0 }}>
+          <div style={{ padding: '5px 8px 8px', borderTop: '1px solid var(--pos-border)', flexShrink: 0 }}>
             {!paymentMode && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
@@ -7838,7 +8042,8 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
-                    ...solidBtn(returnMode ? C.danger : C.cash, cart.length === 0),
+                    ...solidBtn(returnMode ? C.danger : cashBtn.bg, cart.length === 0),
+                    color: cart.length === 0 ? C.disabledFg : returnMode ? '#FFFFFF' : cashBtn.text,
                     padding: '13px 4px',
                     borderRadius: 7,
                     fontSize: 13,
@@ -7861,7 +8066,8 @@ export default function POSScreen({
                   disabled={cart.length === 0 || (!returnMode && !pavoSettings)}
                   title={!returnMode && !pavoSettings ? 'Pavo cihazı ayarlı değil' : undefined}
                   style={{
-                    ...solidBtn(returnMode ? C.danger : C.card, cart.length === 0 || (!returnMode && !pavoSettings)),
+                    ...solidBtn(returnMode ? C.danger : cardBtn.bg, cart.length === 0 || (!returnMode && !pavoSettings)),
+                    color: (cart.length === 0 || (!returnMode && !pavoSettings)) ? C.disabledFg : returnMode ? '#FFFFFF' : cardBtn.text,
                     padding: '13px 4px',
                     borderRadius: 7,
                     fontSize: 13,
@@ -7879,7 +8085,8 @@ export default function POSScreen({
                   }}
                   disabled={cart.length === 0}
                   style={{
-                    ...solidBtn(C.split, cart.length === 0),
+                    ...solidBtn(splitBtn.bg, cart.length === 0),
+                    color: cart.length === 0 ? C.disabledFg : splitBtn.text,
                     gridColumn: otherVisibleBrands.length > 0 ? undefined : 'span 2',
                     padding: '11px 4px',
                     borderRadius: 7,
@@ -7898,7 +8105,8 @@ export default function POSScreen({
                     }}
                     disabled={cart.length === 0}
                     style={{
-                      ...solidBtn(C.neutral, cart.length === 0),
+                      ...solidBtn(otherPayBtn.bg, cart.length === 0),
+                      color: cart.length === 0 ? C.disabledFg : otherPayBtn.text,
                       padding: '11px 4px',
                       borderRadius: 7,
                       fontSize: 13,
@@ -7924,21 +8132,21 @@ export default function POSScreen({
             width: '96%', maxWidth: 1200,
             height: 'auto',
             maxHeight: '80vh',
-            background: 'white', border: '1px solid #E3E5E9',
+            background: 'var(--pos-surface)', border: '1px solid var(--pos-border)',
             borderRadius: 16, boxShadow: '0 20px 50px rgba(24,28,38,0.22)',
             overflow: 'hidden', display: 'flex', flexDirection: 'column',
           }}>
 
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '1.6vh 2.2vw', borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
+              padding: '1.6vh 2.2vw', borderBottom: '1px solid var(--pos-border)', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#3457D5' }} />
                 <div>
-                  <div style={{ fontSize: 'clamp(14px, 1.8vh, 17px)', fontWeight: 600, color: '#232733' }}>
+                  <div style={{ fontSize: 'clamp(14px, 1.8vh, 17px)', fontWeight: 600, color: 'var(--pos-text)' }}>
                     Parçalı Ödeme
                   </div>
-                  <div style={{ fontSize: 'clamp(11px, 1.3vh, 12px)', color: '#989BA3', marginTop: 2 }}>
+                  <div style={{ fontSize: 'clamp(11px, 1.3vh, 12px)', color: 'var(--pos-text-muted)', marginTop: 2 }}>
                     {cart.length} kalem · {fmt(grandTotal)}
                   </div>
                 </div>
@@ -7948,8 +8156,8 @@ export default function POSScreen({
                 setPendingAmount(''); setSelectedBrand(null);
               }}
                 style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: '#FAFAFB', border: '1px solid #E3E5E9', borderRadius: 8,
-                  color: '#61656D', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                  background: 'var(--pos-surface-alt)', border: '1px solid var(--pos-border)', borderRadius: 8,
+                  color: 'var(--pos-text-muted)', cursor: 'pointer', fontSize: 13 }}>✕</button>
             </div>
 
             {/* Body: 3 kolon — sol özet | orta yöntemler | sağ numpad */}
@@ -7964,24 +8172,24 @@ export default function POSScreen({
 
               {/* ── 1. KOLON: Özet + Eklenen ödemeler ── */}
               <div style={{
-                background:    '#FAFAFB',
-                borderRight:   '1px solid #E3E5E9',
+                background:    'var(--pos-pane)',
+                borderRight:   '1px solid var(--pos-border)',
                 display:       'flex',
                 flexDirection: 'column',
                 overflow:      'hidden',
                 minHeight:     0,
               }}>
-                <div style={{ padding: '2vh 4%', borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
+                <div style={{ padding: '2vh 4%', borderBottom: '1px solid var(--pos-border)', flexShrink: 0 }}>
                   <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '0.8vh' }}>
+                    textTransform: 'uppercase' as const, color: 'var(--pos-text-muted)', letterSpacing: '0.04em', marginBottom: '0.8vh' }}>
                     Kalan Tutar
                   </div>
                   <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600,
-                    fontFamily: 'monospace', color: remaining <= 0 ? '#17845A' : '#232733', lineHeight: 1.1 }}>
-                    <span style={{ fontSize: 'clamp(14px, 2.2vh, 19px)', color: '#989BA3', fontWeight: 500, marginRight: 2 }}>₺</span>
+                    fontFamily: 'monospace', color: remaining <= 0 ? 'var(--pos-success)' : 'var(--pos-text)', lineHeight: 1.1 }}>
+                    <span style={{ fontSize: 'clamp(14px, 2.2vh, 19px)', color: 'var(--pos-text-muted)', fontWeight: 500, marginRight: 2 }}>₺</span>
                     {remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   </div>
-                  <div style={{ height: '0.8vh', maxHeight: 7, background: '#F1F2F4',
+                  <div style={{ height: '0.8vh', maxHeight: 7, background: 'var(--pos-border)',
                     borderRadius: 99, marginTop: '1.5vh', overflow: 'hidden' }}>
                     <div style={{
                       height: '100%', borderRadius: 99, transition: 'width 0.35s ease',
@@ -7991,19 +8199,19 @@ export default function POSScreen({
                   </div>
                 </div>
 
-                <div style={{ borderBottom: '1px solid #E3E5E9', flexShrink: 0 }}>
+                <div style={{ borderBottom: '1px solid var(--pos-border)', flexShrink: 0 }}>
                   {[{ k: pavoPendingSaleRef ? 'Kalan Tutar' : 'Sepet Tutarı', v: fmt(dueTotal) }, { k: 'Ödenen', v: fmt(paidTotal + (pavoPendingSaleRef?.paidAmount ?? 0)) }].map(({ k, v }) => (
                     <div key={k} style={{ display: 'flex', justifyContent: 'space-between',
                       fontSize: 'clamp(11px, 1.4vh, 13px)', padding: '0.9vh 4%' }}>
-                      <span style={{ color: '#61656D' }}>{k}</span>
-                      <span style={{ fontWeight: 600, color: '#232733', fontFamily: 'monospace' }}>₺{v}</span>
+                      <span style={{ color: 'var(--pos-text-muted)' }}>{k}</span>
+                      <span style={{ fontWeight: 600, color: 'var(--pos-text)', fontFamily: 'monospace' }}>₺{v}</span>
                     </div>
                   ))}
                 </div>
 
                 <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em',
+                    textTransform: 'uppercase' as const, color: 'var(--pos-text-muted)', letterSpacing: '0.04em',
                     padding: '1.6vh 4% 1vh' }}>
                     Eklenen Ödemeler
                   </div>
@@ -8012,13 +8220,13 @@ export default function POSScreen({
                       gap: '3%', padding: '1vh 4%' }}>
                       <div style={{ width: 32, height: 24, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700,
-                        borderRadius: 7, flexShrink: 0, background: '#ECFDF5', color: '#047857' }}>PV</div>
+                        borderRadius: 7, flexShrink: 0, background: 'var(--pos-soft-success)', color: 'var(--pos-success)' }}>PV</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600,
                           color: '#047857', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           Pavo'da alınan
                         </div>
-                        <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: '#989BA3' }}>Salt okunur</div>
+                        <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: 'var(--pos-text-muted)' }}>Salt okunur</div>
                       </div>
                       <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)',
                         color: '#047857', fontFamily: 'monospace' }}>
@@ -8027,7 +8235,7 @@ export default function POSScreen({
                     </div>
                   )}
                   {paymentLines.length === 0 && !(pavoPendingSaleRef && pavoPendingSaleRef.paidAmount > 0) ? (
-                    <div style={{ color: '#989BA3', fontSize: 'clamp(11px, 1.4vh, 12.5px)',
+                    <div style={{ color: 'var(--pos-text-muted)', fontSize: 'clamp(11px, 1.4vh, 12.5px)',
                       textAlign: 'center', padding: '1vh 4%' }}>
                       Henüz ödeme eklenmedi.
                     </div>
@@ -8046,18 +8254,18 @@ export default function POSScreen({
                           borderRadius: 7, flexShrink: 0, background: b.bg, color: b.fg }}>{b.label}</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600,
-                            color: '#232733', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            color: 'var(--pos-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {line.label}
                           </div>
-                          <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: '#989BA3' }}>Ödeme {idx + 1}</div>
+                          <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: 'var(--pos-text-muted)' }}>Ödeme {idx + 1}</div>
                         </div>
                         <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)',
-                          color: '#232733', fontFamily: 'monospace' }}>
+                          color: 'var(--pos-text)', fontFamily: 'monospace' }}>
                           ₺{line.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                         </span>
                         <button type="button" onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
                           style={{ width: 22, height: 22, display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', color: '#989BA3', cursor: 'pointer',
+                            justifyContent: 'center', color: 'var(--pos-text-muted)', cursor: 'pointer',
                             border: 'none', background: 'transparent', fontSize: 12, borderRadius: 6 }}>✕</button>
                       </div>
                     )
@@ -8067,12 +8275,12 @@ export default function POSScreen({
 
               {/* ── 2. KOLON: Seçili yöntem + hızlı butonlar + Yöntemler ── */}
               <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0,
-                borderRight: '1px solid #E3E5E9' }}>
+                borderRight: '1px solid var(--pos-border)' }}>
 
-                <div style={{ padding: '1.2vh 3%', borderBottom: '1px solid #E3E5E9', flexShrink: 0,
+                <div style={{ padding: '1.2vh 3%', borderBottom: '1px solid var(--pos-border)', flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <div style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', fontWeight: 600,
-                    color: activeMethod ? '#232733' : '#989BA3',
+                    color: activeMethod ? 'var(--pos-text)' : 'var(--pos-text-muted)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                     {activeMethod === 'cash' ? '💵 Nakit'
                       : activeMethod === 'card' ? '💳 Kart'
@@ -8096,14 +8304,15 @@ export default function POSScreen({
 
                 <div style={{ flex: 1, padding: '1.5vh 3%', overflowY: 'auto' }}>
                   <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                    textTransform: 'uppercase' as const, color: '#989BA3', letterSpacing: '0.04em', marginBottom: '1.2vh' }}>
+                    textTransform: 'uppercase' as const, color: 'var(--pos-text-muted)', letterSpacing: '0.04em', marginBottom: '1.2vh' }}>
                     Ödeme Yöntemi
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', gap: '1.2vh' }}>
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('cash', null, pendingAmount ? undefined : remaining)}
                       style={{
-                        ...solidBtn(C.cash, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'cash'),
+                        ...solidBtn(cashBtn.bg, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'cash'),
+                        color: remaining <= 0 ? C.disabledFg : cashBtn.text,
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
                         alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
                         padding: '12%',
@@ -8115,7 +8324,8 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => addPaymentLineWithMethod('card', null, pendingAmount ? undefined : remaining)}
                       style={{
-                        ...solidBtn(C.card, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'card' && paymentLines[paymentLines.length - 1]?.brand == null),
+                        ...solidBtn(cardBtn.bg, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'card' && paymentLines[paymentLines.length - 1]?.brand == null),
+                        color: remaining <= 0 ? C.disabledFg : cardBtn.text,
                         aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
                         alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
                         padding: '12%',
@@ -8154,8 +8364,8 @@ export default function POSScreen({
               </div>
 
               {/* ── 3. KOLON: Numpad — satıştaki birebir ── */}
-              <div style={{
-                background:    '#f8f9fa',
+              <div className="pos-pay-numpad" style={{
+                background:    'var(--pos-surface)',
                 display:       'flex',
                 flexDirection: 'column',
                 padding:       '6px 6px 0',
@@ -8169,8 +8379,8 @@ export default function POSScreen({
 
                   <div style={{
                     flexShrink: 0, height: 40, borderRadius: 9,
-                    border: `1.5px solid ${pendingAmount ? C.success : C.border}`,
-                    background: C.surface,
+                    border: `1.5px solid ${pendingAmount ? 'var(--pos-success)' : 'var(--pos-border)'}`,
+                    background: 'var(--pos-surface-alt)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     padding: '0 8px', overflow: 'hidden', userSelect: 'none' as const,
                   }}>
@@ -8179,7 +8389,7 @@ export default function POSScreen({
                         : pendingAmount.length <= 14 ? 'clamp(12px, 1.1vw + 2px, 18px)'
                         : 'clamp(10px, 0.95vw + 1px, 16px)',
                       fontWeight: 700,
-                      color: pendingAmount ? C.text : C.textMuted,
+                      color: pendingAmount ? 'var(--pos-text)' : 'var(--pos-text-muted)',
                       whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                       maxWidth: '100%', lineHeight: 1, textAlign: 'center' as const,
                     }}>
@@ -8191,7 +8401,7 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => setPendingAmount('')}
                       style={{
-                        ...solidBtn(C.danger),
+                        background: 'var(--pos-danger)', color: '#FFFFFF', border: 'none', cursor: 'pointer',
                         flex: 1, borderRadius: 9, fontSize: 13,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
@@ -8200,7 +8410,7 @@ export default function POSScreen({
                     <button type="button"
                       onClick={() => setPendingAmount(v => v.slice(0, -1))}
                       style={{
-                        ...solidBtn(C.warning),
+                        background: 'var(--pos-warning)', color: '#FFFFFF', border: 'none', cursor: 'pointer',
                         flex: 1, borderRadius: 9, fontSize: 20,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         userSelect: 'none' as const,
@@ -8214,7 +8424,7 @@ export default function POSScreen({
                     gap: 5, flex: 1, minHeight: 0,
                   }}>
                     {['7','8','9','4','5','6','1','2','3',',','0'].map(k => (
-                      <button key={k} type="button"
+                      <button key={k} type="button" className="pos-key"
                         onClick={() => {
                           setPendingAmount(v => {
                             if (k === ',') return v.includes(',') ? v : (v === '' ? '0,' : v + ',')
@@ -8224,20 +8434,23 @@ export default function POSScreen({
                         }}
                         style={{
                           width: '100%', height: '100%', boxSizing: 'border-box' as const,
-                          border: '1.5px solid #d1d5db', borderRadius: 9,
+                          border: '1.5px solid var(--pos-key-border)', borderRadius: 9,
                           cursor: 'pointer', fontWeight: 700,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           userSelect: 'none' as const,
-                          background: 'white', color: '#1f2937',
+                          background: 'var(--pos-key-bg)', color: 'var(--pos-key-text)',
                           fontSize: 'clamp(14px, 1.4vw + 4px, 26px)',
                         }}>{k}</button>
                     ))}
 
                     <button type="button"
+                      className="pos-key-action"
                       disabled={remaining <= 0}
                       onClick={() => setPendingAmount((remaining / 2).toLocaleString('tr-TR', { minimumFractionDigits: 2 }))}
                       style={{
-                        ...solidBtn(C.primary, remaining <= 0),
+                        ...(remaining <= 0
+                          ? solidBtn(C.primary, true)
+                          : { background: 'var(--pos-key-action-bg)', color: 'var(--pos-key-action-text)', border: 'none', cursor: 'pointer' }),
                         width: '100%', height: '100%', boxSizing: 'border-box' as const,
                         borderRadius: 9,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -8252,27 +8465,32 @@ export default function POSScreen({
 
             {/* Footer */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: 10, padding: '1.4vh 2.2vw', borderTop: '1px solid #E3E5E9', flexShrink: 0 }}>
-              <span style={{ fontSize: 'clamp(11px, 1.3vh, 12px)', color: '#989BA3' }}>
-                {remaining <= 0
+              gap: 10, padding: '1.4vh 2.2vw', borderTop: '1px solid var(--pos-border)', flexShrink: 0 }}>
+              <span style={{ fontSize: 'clamp(11px, 1.3vh, 12px)', color: 'var(--pos-text-muted)' }}>
+                {cartLocked && ((pavoPendingSaleRef?.paidAmount ?? 0) > 0.009 || (pavoRecoveryState?.paidAmount ?? 0) > 0.009)
+                  ? 'Alınmış ödeme var, iptal edilemez'
+                  : remaining <= 0
                   ? 'Tutarın tamamı karşılandı, işlemi tamamlayabilirsiniz.'
                   : 'Toplam tutarın tamamı karşılanmadan işlem tamamlanamaz.'}
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={() => {
-                  setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
-                  setPendingAmount(''); setSelectedBrand(null);
-                }}
+                <button type="button"
+                  disabled={cartLocked && ((pavoPendingSaleRef?.paidAmount ?? 0) > 0.009 || (pavoRecoveryState?.paidAmount ?? 0) > 0.009)}
+                  onClick={() => {
+                    if (cartLocked) { void cancelLockedSale(); return }
+                    setPaymentMode(false); setPaymentLines([]); setActiveMethod(null);
+                    setPendingAmount(''); setSelectedBrand(null);
+                  }}
                   style={{ padding: '1vh 1.5vw', borderRadius: 8, fontSize: 'clamp(12px, 1.5vh, 13px)',
-                    fontWeight: 600, cursor: 'pointer', border: '1px solid #E3E5E9', background: 'white', color: '#61656D' }}>
-                  İptal
+                    fontWeight: 600, cursor: 'pointer', border: '1px solid var(--pos-border)', background: 'var(--pos-surface)', color: 'var(--pos-text-muted)' }}>
+                  {cartLocked ? 'Satışı iptal et' : 'İptal'}
                 </button>
                 <button type="button" disabled={!canComplete || saving} onClick={() => void completeSale()}
                   style={{
                     padding: '1vh 1.5vw', borderRadius: 8, fontSize: 'clamp(12px, 1.5vh, 13px)',
                     fontWeight: 600, border: 'none', cursor: canComplete && !saving ? 'pointer' : 'default',
-                    background: canComplete && !saving ? '#232733' : '#F1F2F4',
-                    color:      canComplete && !saving ? 'white' : '#989BA3',
+                    background: canComplete && !saving ? '#232733' : 'var(--pos-disabled-bg)',
+                    color:      canComplete && !saving ? 'white' : 'var(--pos-disabled-fg)',
                   }}>
                   {saving ? 'İşleniyor...' : 'Ödemeyi Tamamla'}
                 </button>
@@ -8290,22 +8508,22 @@ export default function POSScreen({
           padding: '2vh 2vw',
         }}>
           <div className="pos-modal" style={{
-            background: 'white', borderRadius: 16, padding: '2.2vh 2vw',
+            background: 'var(--pos-surface)', borderRadius: 16, padding: '2.2vh 2vw',
             width: 'min(960px, 92vw)', maxHeight: '86vh',
             display: 'flex', flexDirection: 'column', gap: '1.6vh',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#232733' }}>Ödeme Yöntemi Seç</div>
-                <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--pos-text)' }}>Ödeme Yöntemi Seç</div>
+                <div style={{ fontSize: 12, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                   Tutar: {fmt(grandTotal)}
                 </div>
               </div>
               <button onClick={() => { setShowOtherPayments(false); setSelectedBrand(null) }}
                 style={{
                   width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: '#FAFAFB', border: '1px solid #E3E5E9', borderRadius: 8,
-                  color: '#61656D', cursor: 'pointer', fontSize: 13,
+                  background: 'var(--pos-surface-alt)', border: '1px solid var(--pos-border)', borderRadius: 8,
+                  color: 'var(--pos-text-muted)', cursor: 'pointer', fontSize: 13,
                 }}>✕</button>
             </div>
 
@@ -8382,7 +8600,7 @@ export default function POSScreen({
               })}
             </div>
 
-            <div style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center' as const, flexShrink: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', textAlign: 'center' as const, flexShrink: 0 }}>
               Seçilen yöntemle {fmt(grandTotal)} tahsil edilecektir.
             </div>
           </div>
@@ -8396,13 +8614,13 @@ export default function POSScreen({
           alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 16, padding: 24,
+            background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
             width: 'min(360px, 94vw)', display: 'flex', flexDirection: 'column', gap: 10,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--pos-text)' }}>
               🖨️ Fiş seçin
             </div>
-            <div style={{ fontSize: 12, color: '#6B7280' }}>
+            <div style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
               Hangi fişi basmak istiyorsunuz?
             </div>
 
@@ -8449,8 +8667,8 @@ export default function POSScreen({
               onClick={() => setPrintSelectModal(null)}
               style={{
                 padding: '10px', borderRadius: 10, marginTop: 4,
-                border: '1px solid #E5E7EB', background: '#F9FAFB',
-                cursor: 'pointer', fontSize: 13, color: '#6B7280',
+                border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                cursor: 'pointer', fontSize: 13, color: 'var(--pos-text-muted)',
               }}
             >
               Fiş Basma
@@ -8473,20 +8691,20 @@ export default function POSScreen({
           }}
         >
           <div style={{
-            background: 'white',
+            background: 'var(--pos-surface)',
             borderRadius: 16,
             padding: '32px 48px',
             textAlign: 'center',
             boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
           }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>💳</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#111', marginBottom: 8 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--pos-text)', marginBottom: 8 }}>
               Kartı Okutun
             </div>
-            <div style={{ fontSize: 13, color: '#6B7280' }}>
+            <div style={{ fontSize: 13, color: 'var(--pos-text-muted)' }}>
               Pavo cihazında işlem bekleniyor...
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#1565C0', marginTop: 12 }}>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--pos-primary)', marginTop: 12 }}>
               {grandTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
             </div>
             <button
@@ -8513,7 +8731,7 @@ export default function POSScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            background: 'white', borderRadius: 16, padding: 24,
+            background: 'var(--pos-surface)', borderRadius: 16, padding: 24,
             width: 'min(420px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14,
           }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: '#D97706' }}>
@@ -8521,8 +8739,8 @@ export default function POSScreen({
             </div>
 
             <div style={{
-              background: C.bg, borderRadius: 9, padding: '12px 14px',
-              border: `1px solid ${C.warning}`, fontSize: 13, color: C.text,
+              background: 'var(--pos-bg)', borderRadius: 9, padding: '12px 14px',
+              border: `1px solid ${C.warning}`, fontSize: 13, color: 'var(--pos-text)',
             }}>
               <div>Sipariş No: <strong>{pavoRecoveryState.orderNo}</strong></div>
               <div style={{ marginTop: 6 }}>
@@ -8534,7 +8752,7 @@ export default function POSScreen({
               </div>
             </div>
 
-            <div style={{ fontSize: 12, color: '#6B7280' }}>
+            <div style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
               Bu satışın bir kısmı tahsil edilmiştir.
               Kalan tutarı tahsil edebilir veya satışı iptal edebilirsiniz.
               İptal edilirse alınan ödeme iade edilir.
@@ -8569,7 +8787,7 @@ export default function POSScreen({
                 }}
                 style={{
                   flex: 1, padding: '10px', borderRadius: 9,
-                  border: '1px solid #FECACA', background: '#FEF2F2',
+                  border: '1px solid #FECACA', background: 'var(--pos-soft-danger)',
                   color: '#DC2626', fontWeight: 600, fontSize: 13, cursor: 'pointer',
                 }}>
                 Satışı İptal Et
@@ -8599,7 +8817,7 @@ export default function POSScreen({
                 }}
                 style={{
                   flex: 1, padding: '10px', borderRadius: 9,
-                  border: 'none', background: '#111827',
+                  border: 'none', background: 'var(--pos-text)',
                   color: 'white', fontWeight: 700, fontSize: 13, cursor: 'pointer',
                 }}>
                 Kalan Ödemeyi Al
@@ -8802,7 +9020,7 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
 
   const s: CSSProperties = {
     width: '100%',
-    border: '1px solid #E0E0E0',
+    border: '1px solid var(--pos-border)',
     borderRadius: 8,
     padding: '8px 12px',
     fontSize: 13,
@@ -8812,7 +9030,7 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
   }
 
   const lbl = (txt: string, req?: boolean) => (
-    <label style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', display: 'block', marginBottom: 4 }}>
+    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--pos-text-muted)', display: 'block', marginBottom: 4 }}>
       {txt}{req && <span style={{ color: '#EF4444' }}> *</span>}
     </label>
   )
@@ -8978,8 +9196,8 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
               left: 0,
               right: 0,
               zIndex: 9999,
-              background: 'white',
-              border: '1px solid #E0E0E0',
+              background: 'var(--pos-surface)',
+              border: '1px solid var(--pos-border)',
               borderRadius: 8,
               maxHeight: 160,
               overflowY: 'auto',
@@ -8995,8 +9213,8 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
                     setShowCityDD(false)
                   }}
                   style={{ padding: '7px 12px', fontSize: 13, cursor: 'pointer' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)' }}
                 >
                   {c}
                 </div>
@@ -9043,7 +9261,7 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
 
       {error && (
         <div style={{
-          background: '#FEF2F2',
+          background: 'var(--pos-soft-danger)',
           border: '1px solid #FECACA',
           borderRadius: 8,
           padding: '8px 12px',
@@ -9064,11 +9282,11 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
             flex: 1,
             padding: '11px',
             borderRadius: 8,
-            border: '1px solid #E0E0E0',
-            background: 'white',
+            border: '1px solid var(--pos-border)',
+            background: 'var(--pos-surface)',
             cursor: 'pointer',
             fontSize: 13,
-            color: '#6B7280',
+            color: 'var(--pos-text-muted)',
           }}
         >
           İptal
@@ -9082,7 +9300,7 @@ function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, on
             padding: '11px',
             borderRadius: 8,
             border: 'none',
-            background: saving ? '#93C5FD' : '#1565C0',
+            background: saving ? '#93C5FD' : 'var(--pos-primary)',
             color: 'white',
             cursor: saving ? 'wait' : 'pointer',
             fontSize: 13,

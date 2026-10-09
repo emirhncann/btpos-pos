@@ -18,6 +18,7 @@ import UpdateBanner from './components/UpdateBanner'
 import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib/localSettings'
 import { maybeRunScheduledUpdate, reportAppVersion } from './lib/appUpdate'
 import { reloadSettings, setActiveCashierId, useSettings } from './hooks/useSettings'
+import { applyPosTheme, DEFAULT_THEME } from './theme/themes'
 
 type AppState = 'loading' | 'activation' | 'restore' | 'initial_sync' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -50,6 +51,14 @@ export default function App() {
   const [syncedEnabledBrands, setSyncedEnabledBrands] = useState<PaymentProviderBrand[] | null>(null)
   const [syncedBarcodeFormats, setSyncedBarcodeFormats] = useState<BarcodeFormatRow[] | null>(null)
   const settings = useSettings()
+
+  useEffect(() => {
+    if (state === 'cashier_login' || !cashier) {
+      applyPosTheme(DEFAULT_THEME, '{}')
+      return
+    }
+    applyPosTheme(settings.cashier.theme, settings.cashier.buttonColors)
+  }, [state, cashier, settings.cashier.theme, settings.cashier.buttonColors])
   const [popupMessage, setPopupMessage] = useState<string | null>(null)
   const [terminalLocked, setTerminalLocked] = useState(false)
   const [terminalLockReason, setTerminalLockReason] = useState<string | null>(null)

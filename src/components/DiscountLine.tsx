@@ -1,5 +1,3 @@
-import { C } from '../theme/colors'
-
 export function DiscountLine({
   label,
   amount,
@@ -16,9 +14,9 @@ export function DiscountLine({
       alignItems: 'center',
       gap: 8,
       padding: '4px 8px',
-      borderLeft: `4px solid ${C.discountBar}`,
-      background: C.discountBg,
-      color: C.discountText,
+      borderLeft: '4px solid var(--pos-discount-bar)',
+      background: 'var(--pos-discount-bg)',
+      color: 'var(--pos-discount-text)',
       fontWeight: 600,
       fontSize,
       borderRadius: 4,

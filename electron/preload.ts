@@ -16,8 +16,8 @@ contextBridge.exposeInMainWorld('electron', {
     hostname:     () => ipcRenderer.invoke('app:hostname'),
     restart:      () => ipcRenderer.invoke('app:restart'),
     requestExit:  () => ipcRenderer.invoke('app:requestExit'),
-    onExitBlocked: (cb: (data: { heldCount: number }) => void) => {
-      const handler = (_: IpcRendererEvent, data: { heldCount: number }) => cb(data)
+    onExitBlocked: (cb: (data: { heldCount: number; pavoLocked?: boolean }) => void) => {
+      const handler = (_: IpcRendererEvent, data: { heldCount: number; pavoLocked?: boolean }) => cb(data)
       ipcRenderer.on('app:exit-blocked', handler)
       return () => { ipcRenderer.removeListener('app:exit-blocked', handler) }
     },

@@ -4,6 +4,66 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+  --pos-bg: #E5E7EB;
+  --pos-screen-bg: #E5E7EB;
+  --pos-surface: #FFFFFF;
+  --pos-surface-alt: #F8FAFC;
+  --pos-text: #0F172A;
+  --pos-text-muted: #475569;
+  --pos-border: #CBD5E1;
+  --pos-primary: #1D4ED8;
+  --pos-primary-text: #FFFFFF;
+  --pos-success: #15803D;
+  --pos-warning: #D97706;
+  --pos-danger: #DC2626;
+  --pos-discount-text: #C2410C;
+  --pos-discount-bg: #FFF7ED;
+  --pos-discount-bar: #F97316;
+  --pos-disabled-bg: #E2E8F0;
+  --pos-disabled-fg: #94A3B8;
+  --pos-btn-cash-bg: #15803D;
+  --pos-btn-cash-text: #FFFFFF;
+  --pos-btn-card-bg: #1D4ED8;
+  --pos-btn-card-text: #FFFFFF;
+  --pos-btn-split-bg: #4338CA;
+  --pos-btn-split-text: #FFFFFF;
+  --pos-btn-other-payment-bg: #334155;
+  --pos-btn-other-payment-text: #FFFFFF;
+  --pos-btn-customer-bg: #15803D;
+  --pos-btn-customer-text: #FFFFFF;
+  --pos-btn-price-check-bg: #D97706;
+  --pos-btn-price-check-text: #FFFFFF;
+  --pos-btn-menu-bg: #1D4ED8;
+  --pos-btn-menu-text: #FFFFFF;
+  --pos-btn-documents-bg: #7C3AED;
+  --pos-btn-documents-text: #FFFFFF;
+  --pos-bg-image: none;
+  --pos-bg-size: auto;
+  --pos-header-bg: #030712;
+  --pos-header-text: #E5E7EB;
+  --pos-header-border: #1F2937;
+  --pos-accent-line: transparent;
+  --pos-ornament: none;
+  --pos-hover: #F0F9FF;
+  --pos-pane: #FAFAFB;
+  --pos-row-alt: #FAFBFC;
+  --pos-row-hover: #F2F4F7;
+  --pos-cart-bg: #FFFFFF;
+  --pos-key-bg: #FFFFFF;
+  --pos-key-text: #1F2937;
+  --pos-key-border: #CBD5E1;
+  --pos-key-pressed-bg: #E5E7EB;
+  --pos-key-action-bg: #1D4ED8;
+  --pos-key-action-text: #FFFFFF;
+  --pos-plu-empty-bg: #FAFAFA;
+  --pos-cart-head: #F0F1F4;
+  --pos-soft-danger: #FEF2F2;
+  --pos-soft-blush: #FFF5F5;
+  --pos-soft-success: #F0FDF4;
+  --pos-soft-warning: #FFF8E1;
+}
+
 body {
   font-family: 'Segoe UI', Inter, system-ui, sans-serif;
   background: #F0F2F5;
@@ -57,6 +117,10 @@ button:active:not(:disabled),
   min-width: 0 !important;
   font-size: 28px !important;
 }
+.pos-modal .pos-pay-numpad button {
+  min-height: 0 !important;
+  height: 100% !important;
+}
 .pos-modal .pos-menu-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -83,4 +147,22 @@ button:active:not(:disabled),
 }
 .plu-groups-bar::-webkit-scrollbar {
   display: none;
+}
+
+.pos-screen input,
+.pos-screen select,
+.pos-screen textarea,
+.pos-modal input,
+.pos-modal select,
+.pos-modal textarea,
+.pos-keyboard input,
+.pos-keyboard select,
+.pos-keyboard textarea {
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  border-color: var(--pos-border);
+}
+
+[data-pos-dark="true"] ::-webkit-scrollbar-thumb {
+  background: var(--pos-border);
 }

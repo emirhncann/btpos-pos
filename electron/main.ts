@@ -308,7 +308,7 @@ let latestSecondScreenPayload: unknown = null
 let isAppQuitting = false
 let skipScheduledUpdate = false
 
-type ExitCheckResult = { canExit: boolean; heldCount: number } | null
+type ExitCheckResult = { canExit: boolean; heldCount: number; pavoLocked?: boolean } | null
 
 async function runExitCheck(win: BrowserWindow): Promise<ExitCheckResult> {
   return win.webContents.executeJavaScript(
@@ -316,8 +316,8 @@ async function runExitCheck(win: BrowserWindow): Promise<ExitCheckResult> {
   ).catch(() => null) as Promise<ExitCheckResult>
 }
 
-function notifyExitBlocked(win: BrowserWindow, heldCount: number): void {
-  win.webContents.send('app:exit-blocked', { heldCount })
+function notifyExitBlocked(win: BrowserWindow, heldCount: number, pavoLocked = false): void {
+  win.webContents.send('app:exit-blocked', { heldCount, pavoLocked })
 }
 
 function setupMainWindowExitGuard(win: BrowserWindow) {
@@ -327,6 +327,10 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
     e.preventDefault()
     void (async () => {
       const result = await runExitCheck(win)
+      if (result?.pavoLocked) {
+        notifyExitBlocked(win, 0, true)
+        return
+      }
       if (result && !result.canExit) {
         notifyExitBlocked(win, result.heldCount)
         return
@@ -353,6 +357,10 @@ function setupMainWindowExitGuard(win: BrowserWindow) {
         void (async () => {
           if (!mainWindow || mainWindow.isDestroyed()) return
           const result = await runExitCheck(mainWindow)
+          if (result?.pavoLocked) {
+            notifyExitBlocked(mainWindow, 0, true)
+            return
+          }
           if (result?.canExit === false) {
             notifyExitBlocked(mainWindow, result.heldCount)
             return

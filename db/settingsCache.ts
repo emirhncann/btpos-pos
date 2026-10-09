@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS cashier_settings_cache (
   show_code                 INTEGER NOT NULL DEFAULT 1,
   show_barcode              INTEGER NOT NULL DEFAULT 0,
   print_behavior            TEXT    NOT NULL DEFAULT '{"satis":"ask","tahsilat":"ask","odeme":"ask","iade":"ask","gunsonu":"default","etiket":"none","manuel":"none"}',
+  button_colors             TEXT    NOT NULL DEFAULT '{}',
+  theme                     TEXT    NOT NULL DEFAULT 'klasik',
   synced_at                 TEXT
 );
 
@@ -96,6 +98,13 @@ function columnSet(sqlite: SqliteLike, name: string): Set<string> {
 
 export function ensureSettingsTables(sqlite: SqliteLike): void {
   sqlite.exec(CREATE_SQL)
+  const cashierCols = columnSet(sqlite, 'cashier_settings_cache')
+  if (!cashierCols.has('button_colors')) {
+    sqlite.exec(`ALTER TABLE cashier_settings_cache ADD COLUMN button_colors TEXT NOT NULL DEFAULT '{}'`)
+  }
+  if (!cashierCols.has('theme')) {
+    sqlite.exec(`ALTER TABLE cashier_settings_cache ADD COLUMN theme TEXT NOT NULL DEFAULT 'klasik'`)
+  }
   const cols = columnSet(sqlite, 'terminal_settings_cache')
   if (!cols.has('devtools_enabled')) {
     sqlite.exec(`ALTER TABLE terminal_settings_cache ADD COLUMN devtools_enabled INTEGER NOT NULL DEFAULT 0`)
@@ -294,6 +303,8 @@ export function readCashierSettings(sqlite: SqliteLike, cashierId: string | null
     show_code: row.show_code,
     show_barcode: row.show_barcode,
     print_behavior: row.print_behavior,
+    button_colors: row.button_colors,
+    theme: row.theme,
   })
 }
 
@@ -390,8 +401,8 @@ const INSERT_CASHIER = `
     allow_exit_with_held_docs, allow_line_discount, max_line_discount_pct,
     allow_doc_discount, max_doc_discount_pct, plu_cols, plu_rows,
     font_size_name, font_size_price, font_size_code,
-    show_price, show_code, show_barcode, print_behavior, synced_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    show_price, show_code, show_barcode, print_behavior, button_colors, theme, synced_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 /** Tek transaction. Hata fırlatır; çağıran rollback görür, eski satırlar kalır. */
@@ -443,6 +454,8 @@ export function applySettingsBundle(
         c.showCode ? 1 : 0,
         c.showBarcode ? 1 : 0,
         JSON.stringify(c.printBehavior ?? DEFAULT_PRINT_BEHAVIOR),
+        c.buttonColors && c.buttonColors.trim() ? c.buttonColors : '{}',
+        c.theme && c.theme.trim() ? c.theme.trim() : 'klasik',
         now,
       )
     }

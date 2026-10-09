@@ -106,7 +106,7 @@ const overlay: CSSProperties = {
 }
 
 const panel: CSSProperties = {
-  background: 'white',
+  background: 'var(--pos-surface)',
   borderRadius: 16,
   width: '60vw',
   maxWidth: 'calc(100vw - 32px)',
@@ -128,7 +128,7 @@ const inputSm: CSSProperties = {
   fontSize: 12,
   padding: '5px 8px',
   borderRadius: 6,
-  border: '1px solid #E5E7EB',
+  border: '1px solid var(--pos-border)',
 }
 
 const chipBtn = (active: boolean): CSSProperties => ({
@@ -138,9 +138,9 @@ const chipBtn = (active: boolean): CSSProperties => ({
   fontWeight: 500,
   border: '1px solid',
   cursor: 'pointer',
-  background: active ? '#374151' : 'white',
-  color: active ? 'white' : '#374151',
-  borderColor: active ? '#374151' : '#E5E7EB',
+  background: active ? 'var(--pos-text)' : 'var(--pos-surface)',
+  color: active ? 'var(--pos-surface)' : 'var(--pos-text)',
+  borderColor: active ? '#374151' : 'var(--pos-border)',
 })
 
 export default function QuickReturnModal({
@@ -203,7 +203,7 @@ export default function QuickReturnModal({
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>📋 Son Satışlar</div>
-              <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                 En fazla 20 kayıt · İade edilecek satışı seçin
               </div>
             </div>
@@ -258,16 +258,16 @@ export default function QuickReturnModal({
             <input type="date" value={filters.dateFrom}
               onChange={e => setFilters({ ...filters, dateFrom: e.target.value })}
               style={inputSm} />
-            <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+            <span style={{ color: 'var(--pos-text-muted)', fontSize: 12 }}>—</span>
             <input type="date" value={filters.dateTo}
               onChange={e => setFilters({ ...filters, dateTo: e.target.value })}
               style={inputSm} />
-            <span style={{ color: '#D1D5DB', fontSize: 12 }}>|</span>
-            <span style={{ fontSize: 11, color: '#6B7280' }}>Saat</span>
+            <span style={{ color: 'var(--pos-border)', fontSize: 12 }}>|</span>
+            <span style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>Saat</span>
             <input type="time" value={filters.timeFrom}
               onChange={e => setFilters({ ...filters, timeFrom: e.target.value })}
               style={inputSm} />
-            <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
+            <span style={{ color: 'var(--pos-text-muted)', fontSize: 12 }}>—</span>
             <input type="time" value={filters.timeTo}
               onChange={e => setFilters({ ...filters, timeTo: e.target.value })}
               style={inputSm} />
@@ -291,8 +291,8 @@ export default function QuickReturnModal({
                 }}
                 style={{
                   padding: '5px 10px', borderRadius: 8,
-                  border: '1px solid #E5E7EB', background: 'white',
-                  fontSize: 11, color: '#6B7280', cursor: 'pointer',
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface)',
+                  fontSize: 11, color: 'var(--pos-text-muted)', cursor: 'pointer',
                 }}>
                 Saati temizle
               </button>
@@ -302,7 +302,7 @@ export default function QuickReturnModal({
           {error && (
             <div style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13,
-              background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+              background: 'var(--pos-soft-danger)', border: '1px solid #FECACA', color: '#991B1B',
             }}>
               {error}
             </div>
@@ -310,7 +310,7 @@ export default function QuickReturnModal({
 
           <div style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
             {list.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 32, color: '#9CA3AF', fontSize: 13 }}>
+              <div style={{ textAlign: 'center', padding: 32, color: 'var(--pos-text-muted)', fontSize: 13 }}>
                 Bu filtreye uygun satış bulunamadı
               </div>
             ) : list.map(s => {
@@ -324,28 +324,28 @@ export default function QuickReturnModal({
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '12px 14px', borderRadius: 10,
-                  border: '1px solid #E5E7EB', background: 'white',
+                  border: '1px solid var(--pos-border)', background: 'var(--pos-surface)',
                   cursor: loading ? 'wait' : 'pointer', textAlign: 'left',
                   opacity: loading ? 0.6 : 1,
                 }}
               >
                 <div style={{ fontSize: 20 }}>🧾</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace', color: '#111827' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: 'monospace', color: 'var(--pos-text)' }}>
                     {searchValue}
                   </div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                     {new Date(s.createdAt).toLocaleString('tr-TR')}
                     {s.customerName && ` · ${s.customerName}`}
                     {s.cashierName && ` · ${s.cashierName}`}
                   </div>
                   {modal.searchBy === 'order' && s.pavoSaleNumber && (
-                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                    <div style={{ fontSize: 10, color: 'var(--pos-text-muted)', marginTop: 1 }}>
                       Satış: {s.pavoSaleNumber}
                     </div>
                   )}
                   {modal.searchBy === 'sale' && s.orderNo && (
-                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                    <div style={{ fontSize: 10, color: 'var(--pos-text-muted)', marginTop: 1 }}>
                       Sipariş: {s.orderNo}
                     </div>
                   )}
@@ -360,8 +360,8 @@ export default function QuickReturnModal({
           <button type="button" onClick={onBackFromRecent}
             style={{
               padding: '12px 16px', borderRadius: 10,
-              border: '1px solid #E5E7EB', background: '#F9FAFB',
-              color: '#6B7280', fontSize: 14, cursor: 'pointer',
+              border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+              color: 'var(--pos-text-muted)', fontSize: 14, cursor: 'pointer',
             }}>
             ← Geri
           </button>
@@ -380,7 +380,7 @@ export default function QuickReturnModal({
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
           </div>
 
-          <div style={{ fontSize: 12, color: '#6B7280' }}>
+          <div style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
             {searchLabel} girin veya barkod okutun
           </div>
 
@@ -414,7 +414,7 @@ export default function QuickReturnModal({
               autoFocus={!touchEnabled}
               style={{
                 flex: 1,
-                padding: '12px 14px', borderRadius: 10, border: '1.5px solid #E5E7EB',
+                padding: '12px 14px', borderRadius: 10, border: '1.5px solid var(--pos-border)',
                 fontSize: 15, fontFamily: 'monospace',
                 cursor: 'text',
                 boxSizing: 'border-box',
@@ -433,8 +433,8 @@ export default function QuickReturnModal({
                 })}
                 style={{
                   padding: '12px 14px', borderRadius: 10,
-                  border: '1.5px solid #E5E7EB', background: '#F9FAFB',
-                  cursor: 'pointer', color: '#6B7280', fontSize: 18,
+                  border: '1.5px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                  cursor: 'pointer', color: 'var(--pos-text-muted)', fontSize: 18,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                 }}
@@ -447,7 +447,7 @@ export default function QuickReturnModal({
           {error && (
             <div style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13,
-              background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+              background: 'var(--pos-soft-danger)', border: '1px solid #FECACA', color: '#991B1B',
             }}>
               {error}
             </div>
@@ -469,8 +469,8 @@ export default function QuickReturnModal({
               disabled={loading}
               style={{
                 flex: 1, padding: '12px', borderRadius: 10,
-                border: '1px solid #E5E7EB', background: '#F9FAFB',
-                color: '#374151', fontWeight: 500, fontSize: 14, cursor: 'pointer',
+                border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                color: 'var(--pos-text)', fontWeight: 500, fontSize: 14, cursor: 'pointer',
               }}>
               📋 Son Satışlar
             </button>
@@ -502,7 +502,7 @@ export default function QuickReturnModal({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>İade Önizleme</div>
-            <div style={{ fontSize: 12, color: '#6B7280', fontFamily: 'monospace' }}>
+            <div style={{ fontSize: 12, color: 'var(--pos-text-muted)', fontFamily: 'monospace' }}>
               {sale.OrderNo && <span>Sipariş: {sale.OrderNo}</span>}
               {sale.OrderNo && sale.SaleNumber && ' · '}
               {sale.SaleNumber && <span>Satış: {sale.SaleNumber}</span>}
@@ -540,9 +540,9 @@ export default function QuickReturnModal({
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 12px', borderRadius: 10,
-                  border: `1.5px solid ${checked ? C.primary : C.border}`,
-                  background: !isReturnable ? C.disabledBg : checked ? C.bg : C.surface,
-                  color: isReturnable ? C.text : C.disabledFg,
+                  border: `1.5px solid ${checked ? 'var(--pos-primary)' : 'var(--pos-border)'}`,
+                  background: !isReturnable ? 'var(--pos-disabled-bg)' : checked ? 'var(--pos-bg)' : 'var(--pos-surface)',
+                  color: isReturnable ? 'var(--pos-text)' : 'var(--pos-disabled-fg)',
                 }}>
 
                 <input type="checkbox"
@@ -554,7 +554,7 @@ export default function QuickReturnModal({
 
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{item.ProductName}</div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)' }}>
                     {item.UnitPrice.toFixed(2)} ₺ × iade edilebilir {item.ReturnableQuantity}
                   </div>
                 </div>
@@ -564,8 +564,8 @@ export default function QuickReturnModal({
                     <button type="button"
                       onClick={() => onQtyChange(item.Id, -1, item.ReturnableQuantity)}
                       style={{
-                        width: 24, height: 24, borderRadius: 6, border: '1px solid #E5E7EB',
-                        background: 'white', cursor: 'pointer', fontSize: 14,
+                        width: 24, height: 24, borderRadius: 6, border: '1px solid var(--pos-border)',
+                        background: 'var(--pos-surface)', cursor: 'pointer', fontSize: 14,
                       }}>−</button>
                     <span style={{ minWidth: 24, textAlign: 'center', fontSize: 13, fontWeight: 600 }}>
                       {qty}
@@ -573,8 +573,8 @@ export default function QuickReturnModal({
                     <button type="button"
                       onClick={() => onQtyChange(item.Id, 1, item.ReturnableQuantity)}
                       style={{
-                        width: 24, height: 24, borderRadius: 6, border: '1px solid #E5E7EB',
-                        background: 'white', cursor: 'pointer', fontSize: 14,
+                        width: 24, height: 24, borderRadius: 6, border: '1px solid var(--pos-border)',
+                        background: 'var(--pos-surface)', cursor: 'pointer', fontSize: 14,
                       }}>+</button>
                   </div>
                 )}
@@ -586,16 +586,16 @@ export default function QuickReturnModal({
         {sale.Payments.length > 0 && (
           <div style={{
             borderRadius: 10,
-            border: '1px solid #E5E7EB',
+            border: '1px solid var(--pos-border)',
             overflow: 'hidden',
           }}>
             <div style={{
               padding: '8px 12px',
-              background: '#F9FAFB',
-              borderBottom: '1px solid #E5E7EB',
+              background: 'var(--pos-surface-alt)',
+              borderBottom: '1px solid var(--pos-border)',
               fontSize: 11,
               fontWeight: 700,
-              color: '#6B7280',
+              color: 'var(--pos-text-muted)',
               textTransform: 'uppercase' as const,
               letterSpacing: 0.5,
             }}>
@@ -619,15 +619,15 @@ export default function QuickReturnModal({
                   justifyContent: 'space-between',
                   alignItems:     'center',
                   padding:        '10px 12px',
-                  borderBottom:   i < sale.Payments.length - 1 ? '1px solid #F3F4F6' : 'none',
+                  borderBottom:   i < sale.Payments.length - 1 ? '1px solid var(--pos-border)' : 'none',
                   opacity:        isReturnable ? 1 : 0.45,
                   gap:            12,
                 }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pos-text)' }}>
                       {label}
                     </div>
-                    <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                    <div style={{ fontSize: 10, color: 'var(--pos-text-muted)', marginTop: 1 }}>
                       Maks: {p.ReturnableAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                       {!isReturnable && ' · İade edilemez'}
                     </div>
@@ -649,7 +649,7 @@ export default function QuickReturnModal({
                       {currentAmt.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                     </button>
                   ) : (
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#9CA3AF' }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pos-text-muted)' }}>
                       —
                     </div>
                   )}
@@ -661,7 +661,7 @@ export default function QuickReturnModal({
 
         <div style={{
           display: 'flex', justifyContent: 'space-between',
-          padding: '12px 14px', borderRadius: 10, background: '#FFF5F5',
+          padding: '12px 14px', borderRadius: 10, background: 'var(--pos-soft-blush)',
           border: '1px solid #FECACA',
         }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>İade Toplam</span>
@@ -673,7 +673,7 @@ export default function QuickReturnModal({
         {error && (
           <div style={{
             padding: '10px 14px', borderRadius: 8, fontSize: 13,
-            background: '#FEF2F2', border: '1px solid #FECACA', color: '#991B1B',
+            background: 'var(--pos-soft-danger)', border: '1px solid #FECACA', color: '#991B1B',
           }}>
             {error}
           </div>
@@ -683,8 +683,8 @@ export default function QuickReturnModal({
           <button type="button" onClick={onBack}
             style={{
               padding: '12px 16px', borderRadius: 10,
-              border: '1px solid #E5E7EB', background: '#F9FAFB',
-              color: '#6B7280', fontSize: 14, cursor: 'pointer',
+              border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+              color: 'var(--pos-text-muted)', fontSize: 14, cursor: 'pointer',
             }}>
             ← Geri
           </button>

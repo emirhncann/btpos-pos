@@ -1,0 +1,79 @@
+html[data-pos-theme],
+html[data-pos-theme] body,
+html[data-pos-theme] #root {
+  background-color: var(--pos-bg);
+  color: var(--pos-text);
+}
+
+[data-pos-dark="true"] { color-scheme: dark; }
+
+.pos-screen input,
+.pos-screen select,
+.pos-screen textarea,
+.pos-modal input,
+.pos-modal select,
+.pos-modal textarea,
+.pos-keyboard input,
+.pos-keyboard select,
+.pos-keyboard textarea {
+  background-color: var(--pos-surface);
+  color: var(--pos-text);
+  border-color: var(--pos-border);
+}
+
+.pos-screen input::placeholder,
+.pos-screen textarea::placeholder,
+.pos-modal input::placeholder,
+.pos-modal textarea::placeholder,
+.pos-keyboard input::placeholder,
+.pos-keyboard textarea::placeholder {
+  color: var(--pos-text-muted);
+  opacity: 1;
+}
+
+[data-pos-dark="true"] ::-webkit-scrollbar-track { background: var(--pos-surface); }
+[data-pos-dark="true"] ::-webkit-scrollbar-thumb { background: var(--pos-border); border-radius: 6px; }
+
+[data-pos-theme] svg:not([data-keep-color]) { color: inherit; }
+
+.pos-screen {
+  background: var(--pos-screen-bg);
+}
+
+.pos-cart {
+  background: var(--pos-cart-bg);
+}
+
+.plu-key--empty {
+  background: var(--pos-plu-empty-bg);
+  border-color: var(--pos-border);
+}
+
+.pos-numpad button:not(.pos-key-action):active,
+.pos-key:not(.pos-key-action):active,
+.pos-keyboard button:not(.pos-key-action):active {
+  background: var(--pos-key-pressed-bg) !important;
+}
+
+.pos-header {
+  background: var(--pos-header-bg);
+  color: var(--pos-header-text);
+  box-shadow: inset 0 -3px 0 var(--pos-accent-line);
+  position: relative;
+}
+
+.pos-header::after {
+  content: var(--pos-ornament);
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+html[data-pos-ornament="1"] .pos-header-end {
+  margin-right: 28px;
+}

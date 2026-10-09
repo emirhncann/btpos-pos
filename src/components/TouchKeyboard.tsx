@@ -50,9 +50,9 @@ export function TouchKeyboard({
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     padding: 'clamp(10px,2vw,16px) 0',
     fontSize: 'clamp(14px,1.6vw,18px)', fontWeight: 400,
-    borderRadius: 8, border: '0.5px solid #D1D5DB',
-    background: 'white', cursor: 'pointer', userSelect: 'none',
-    color: '#111827', ...extra,
+    borderRadius: 8, border: '0.5px solid var(--pos-key-border)',
+    background: 'var(--pos-key-bg)', cursor: 'pointer', userSelect: 'none',
+    color: 'var(--pos-key-text)', ...extra,
   })
 
   const rows_abc = [
@@ -65,17 +65,17 @@ export function TouchKeyboard({
   const rows_123_2 = ['!','@','#','$','%','&','-','+','=','/']
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 10003,
+    <div className="pos-keyboard" style={{ position: 'fixed', inset: 0, zIndex: 10003,
       background: 'rgba(0,0,0,0.45)', display: 'flex',
       alignItems: 'center', justifyContent: 'center' }}
       onClick={onClose}>
       <div onClick={e => e.stopPropagation()}
-        style={{ background: 'white', borderRadius: 16, padding: 20,
+        style={{ background: 'var(--pos-surface)', borderRadius: 16, padding: 20,
           width: 'min(560px, 96vw)', display: 'flex', flexDirection: 'column', gap: 10 }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {title && <span style={{ fontSize: 13, color: '#6B7280' }}>{title}</span>}
+            {title && <span style={{ fontSize: 13, color: 'var(--pos-text-muted)' }}>{title}</span>}
             <div style={{ display: 'flex', gap: 4 }}>
               {(['abc','123'] as const).map(t => (
                 <button key={t} type="button" onClick={() => setTab(t)}
@@ -93,17 +93,17 @@ export function TouchKeyboard({
         </div>
 
         <div style={{ padding: '10px 14px', fontSize: 16, fontWeight: 500,
-          borderRadius: 8, border: '0.5px solid #E5E7EB',
-          background: '#F9FAFB', minHeight: 44, color: '#111',
+          borderRadius: 8, border: '0.5px solid var(--pos-border)',
+          background: 'var(--pos-surface-alt)', minHeight: 44, color: 'var(--pos-text)',
           letterSpacing: 0.5, wordBreak: 'break-all' }}>
-          {value || <span style={{ color: '#D1D5DB' }}>—</span>}
+          {value || <span style={{ color: 'var(--pos-text-muted)' }}>—</span>}
         </div>
 
         {searchResults && searchResults.length > 0 && (
           <div style={{
             maxHeight: 160, overflowY: 'auto',
-            border: '0.5px solid #E5E7EB', borderRadius: 10,
-            background: 'white',
+            border: '0.5px solid var(--pos-border)', borderRadius: 10,
+            background: 'var(--pos-surface)',
           }}>
             {searchResults.map((c, i) => (
               <div key={c.id ?? i}
@@ -116,11 +116,11 @@ export function TouchKeyboard({
                 style={{ padding: '10px 14px', cursor: 'pointer',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   borderBottom: i < searchResults.length - 1 ? '0.5px solid #F3F4F6' : 'none',
-                  background: 'white' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#F0F9FF' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'white' }}>
+                  background: 'var(--pos-surface)' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)' }}>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111' }}>{c.name}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--pos-text)' }}>{c.name}</div>
                   {c.phone && (
                     <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>{c.phone}</div>
                   )}
@@ -156,20 +156,20 @@ export function TouchKeyboard({
             <div style={{ display: 'flex', gap: 4 }}>
               <button type="button" onMouseDown={e => { e.preventDefault(); setShift(s => !s) }}
                 style={{ ...keyStyle(shift
-                  ? { flex: 1.5, background: C.primary, color: '#FFFFFF' }
-                  : { flex: 1.5, background: C.surface, color: C.text }), fontSize: 16 }}>
+                  ? { flex: 1.5, background: 'var(--pos-key-action-bg)', color: 'var(--pos-key-action-text)' }
+                  : { flex: 1.5 }), fontSize: 16 }}>
                 ⇧
               </button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('123') }}
-                style={{ ...keyStyle({ flex: 1.5, color: '#6B7280', fontSize: 12 }) }}>
+                style={{ ...keyStyle({ flex: 1.5, fontSize: 12 }) }}>
                 123
               </button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('@') }}
-                style={{ ...keyStyle({ flex: 1, color: '#E65100', borderColor: '#FED7AA', background: '#FFF7ED' }) }}>
+                style={{ ...keyStyle({ flex: 1 }) }}>
                 @
               </button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('SPACE') }}
-                style={{ ...keyStyle({ flex: 4 }), fontSize: 12, color: '#9CA3AF' }}>
+                style={{ ...keyStyle({ flex: 4 }), fontSize: 12 }}>
                 boşluk
               </button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('.') }}
@@ -177,7 +177,7 @@ export function TouchKeyboard({
               <button type="button" onMouseDown={e => { e.preventDefault(); press('_') }}
                 style={keyStyle({ flex: 1 })}>_</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('⌫') }}
-                style={{ ...keyStyle({ flex: 1.5, color: '#EF4444', borderColor: '#FECACA', background: '#FFF5F5' }), fontSize: 16 }}>
+                style={{ ...keyStyle({ flex: 1.5 }), fontSize: 16 }}>
                 ⌫
               </button>
             </div>
@@ -189,7 +189,7 @@ export function TouchKeyboard({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10,1fr)', gap: 4 }}>
               {rows_123_1.map(k => (
                 <button key={k} type="button" onMouseDown={e => { e.preventDefault(); press(k) }}
-                  style={{ ...keyStyle(), background: '#F9FAFB' }}>{k}</button>
+                  style={keyStyle()}>{k}</button>
               ))}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10,1fr)', gap: 4 }}>
@@ -200,19 +200,19 @@ export function TouchKeyboard({
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('ABC') }}
-                style={{ ...keyStyle({ flex: 1.5, color: '#6B7280', fontSize: 12 }) }}>ABC</button>
+                style={{ ...keyStyle({ flex: 1.5, fontSize: 12 }) }}>ABC</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('(') }}
                 style={keyStyle({ flex: 1 })}>(</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press(')') }}
                 style={keyStyle({ flex: 1 })}>)</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('SPACE') }}
-                style={{ ...keyStyle({ flex: 3 }), fontSize: 12, color: '#9CA3AF' }}>boşluk</button>
+                style={{ ...keyStyle({ flex: 3 }), fontSize: 12 }}>boşluk</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press(',') }}
                 style={keyStyle({ flex: 1 })}>,</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('.') }}
                 style={keyStyle({ flex: 1 })}>.</button>
               <button type="button" onMouseDown={e => { e.preventDefault(); press('⌫') }}
-                style={{ ...keyStyle({ flex: 1.5, color: '#EF4444', borderColor: '#FECACA', background: '#FFF5F5' }), fontSize: 16 }}>⌫</button>
+                style={{ ...keyStyle({ flex: 1.5 }), fontSize: 16 }}>⌫</button>
             </div>
           </div>
         )}
@@ -221,15 +221,15 @@ export function TouchKeyboard({
           <button type="button"
             onMouseDown={e => { e.preventDefault(); onChange('') }}
             style={{ padding: '12px 0', fontSize: 14, borderRadius: 10,
-              border: '0.5px solid #E5E7EB', background: '#F9FAFB',
-              cursor: 'pointer', color: '#374151' }}>
+              border: '0.5px solid var(--pos-key-border)', background: 'var(--pos-key-bg)',
+              cursor: 'pointer', color: 'var(--pos-key-text)' }}>
             Temizle
           </button>
-          <button type="button"
+          <button type="button" className="pos-key-action"
             onMouseDown={e => { e.preventDefault(); onConfirm(value) }}
             style={{ padding: '12px 0', fontSize: 14, fontWeight: 500,
               borderRadius: 10, border: 'none',
-              background: '#1565C0', color: 'white', cursor: 'pointer' }}>
+              background: 'var(--pos-key-action-bg)', color: 'var(--pos-key-action-text)', cursor: 'pointer' }}>
             Onayla
           </button>
         </div>

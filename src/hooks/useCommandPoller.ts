@@ -1,5 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { api } from '../lib/api'
+import { cmdProgress } from '../lib/cmdProgress'
+import { isBusy } from '../store/pavoLock'
 
 export type SyncMode = 'full' | 'diff'
 
@@ -100,6 +102,13 @@ export function useCommandPoller(
 
     intervalRef.current = res.poll_interval ?? 30
 
+    try {
+      cmdProgress.received((res.commands ?? []).map(c => ({
+        id: c.target_id ?? (c as { id?: string }).id ?? '',
+        command: normalizeCommandKind(c.command ?? ''),
+      })))
+    } catch { /* sayaç komut akışını bozmasın */ }
+
     const h = handlersRef.current
     if (res.is_locked) {
       h.onLock(res.lock_reason ?? undefined)
@@ -111,14 +120,16 @@ export function useCommandPoller(
       const mode = syncModeFromPayload(cmd.payload)
       console.log('[POLL] komut:', kind, '| raw:', cmd.command, '| target:', cmd.target_id)
 
-      if (SYNC_KINDS.has(kind) && isCartActiveRef.current?.()) {
+      if (isBusy() || (SYNC_KINDS.has(kind) && isCartActiveRef.current?.())) {
         console.log('[POLL] Satış aktif — komut bekleniyor:', kind)
         onDeferredRef.current?.(kind)
         continue
       }
 
       processed += 1
+      const progressId = cmd.target_id ?? (cmd as { id?: string }).id ?? ''
       try {
+        try { cmdProgress.start(progressId) } catch { /* sayaç komut akışını bozmasın */ }
         switch (kind) {
           case 'sync_all':
             await h.onSyncAll(mode)
@@ -230,8 +241,10 @@ export function useCommandPoller(
         onPersistedRef.current?.()
 
         await api.ackCommand(cmd.target_id, 'done')
+        try { cmdProgress.done(progressId) } catch { /* sayaç komut akışını bozmasın */ }
 
       } catch (cmdErr) {
+        try { cmdProgress.fail(progressId, cmdErr) } catch { /* sayaç komut akışını bozmasın */ }
         const errMsg = cmdErr instanceof Error ? cmdErr.message : 'Bilinmeyen hata'
         console.error('Komut işleme hatası:', cmd.command, errMsg)
         await window.electron.db.saveCommandHistory({

@@ -209,6 +209,8 @@ export const cashierSettingsCache = sqliteTable('cashier_settings_cache', {
   showCode:              integer('show_code', { mode: 'boolean' }).notNull().default(true),
   showBarcode:           integer('show_barcode', { mode: 'boolean' }).notNull().default(false),
   printBehavior:         text('print_behavior').notNull().default('{}'),
+  buttonColors:          text('button_colors').notNull().default('{}'),
+  theme:                 text('theme').notNull().default('klasik'),
   syncedAt:              text('synced_at'),
 })
 

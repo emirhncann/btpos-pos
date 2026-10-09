@@ -52,7 +52,7 @@ export function PosModal({
           width: narrow ? '92vw' : SIZES[size],
           maxWidth: '92vw',
           maxHeight: '90vh',
-          background: C.surface,
+          background: 'var(--pos-surface)',
           borderRadius: 16,
           boxShadow: '0 18px 50px rgba(0,0,0,.28)',
           display: 'flex',
@@ -66,10 +66,10 @@ export function PosModal({
           justifyContent: 'space-between',
           gap: 16,
           padding: '16px 20px',
-          borderBottom: `1px solid ${C.border}`,
+          borderBottom: '1px solid var(--pos-border)',
           flexShrink: 0,
         }}>
-          <div style={{ fontSize: 24, fontWeight: 700, color: C.text, lineHeight: 1.2 }}>{title}</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--pos-text)', lineHeight: 1.2 }}>{title}</div>
           <button
             type="button"
             className="pos-modal-close"
@@ -89,7 +89,7 @@ export function PosModal({
             }}
           >✕</button>
         </div>
-        <div style={{ padding: 20, overflowY: 'auto', flex: 1, fontSize: 20, color: C.text }}>
+        <div style={{ padding: 20, overflowY: 'auto', flex: 1, fontSize: 20, color: 'var(--pos-text)' }}>
           {children}
         </div>
         {footer && (

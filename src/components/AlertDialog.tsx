@@ -39,7 +39,7 @@ export default function AlertDialog({
     <PosModal
       title={title}
       size="sm"
-      zIndex={10000}
+      zIndex={10100}
       onClose={onCancel ?? onConfirm}
       footer={
         <>
@@ -54,7 +54,7 @@ export default function AlertDialog({
         </>
       }
     >
-      <div style={{ fontSize: 20, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: C.text }}>{message}</div>
+      <div style={{ fontSize: 20, lineHeight: 1.45, whiteSpace: 'pre-wrap', color: 'var(--pos-text)' }}>{message}</div>
     </PosModal>
   )
 }

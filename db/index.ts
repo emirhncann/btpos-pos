@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 7
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')

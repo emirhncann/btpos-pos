@@ -103,8 +103,8 @@ export function solidBtn(
   selected = false,
 ): Record<string, string | number> {
   return {
-    background: disabled ? C.disabledBg : selected ? darken(color) : color,
-    color: disabled ? C.disabledFg : '#FFFFFF',
+    background: disabled ? 'var(--pos-disabled-bg)' : selected ? darken(color) : color,
+    color: disabled ? 'var(--pos-disabled-fg)' : '#FFFFFF',
     border: 'none',
     borderRadius: 12,
     fontWeight: 700,

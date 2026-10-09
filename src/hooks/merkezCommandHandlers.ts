@@ -357,9 +357,6 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
           results.barcodeFormats = failResult(String(e))
         }
 
-        const vals = Object.values(results)
-        const successCount = vals.filter(r => r.success).length
-        d.showToast(`Güncelleme tamamlandı (${successCount}/${vals.length} başarılı)`)
       } finally {
         d.setCommandSyncing(false)
       }
@@ -397,7 +394,6 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         })
         const result = await window.electron.db.syncProductsAcid(merged, 'diff')
         if (!result.success) throw new Error(result.error)
-        d.showToast(`${changed.length} fiyat güncellendi`)
       }
     },
 
@@ -405,7 +401,6 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       const cashiers = await api.getCashiers(d.companyId)
       const result = await window.electron.db.syncCashiersAcid(cashiers, d.companyId, mode)
       if (!result.success) throw new Error(result.error)
-      d.showToast(`${result.inserted} kasiyer güncellendi`)
     },
 
     onLogout: () => d.onLogout(),
@@ -422,14 +417,12 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       const result = await syncPlu(d.companyId, workplaceId, d.terminalId, loggedInCashierId, mode)
       if (!result.success) throw new Error(result.error ?? 'PLU sync başarısız')
       await refreshPluDisplay(d.companyId, workplaceId, loggedInCashierId, d.onPluUpdated)
-      d.showToast('PLU güncellendi')
     },
 
     onSyncCustomers: async (mode: SyncMode = 'full') => {
       const customers = await api.getCustomers(d.companyId)
       const result = await window.electron.db.syncCustomersAcid(customers, d.companyId, mode)
       if (!result.success) throw new Error(result.error ?? 'Cari sync hatası')
-      d.showToast(`${result.inserted + result.updated} cari güncellendi`)
     },
 
     onSyncProducts: async (mode: SyncMode = 'full') => {
@@ -451,7 +444,6 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         })
         const result = await window.electron.db.syncProductsAcid(items, mode)
         if (!result.success) throw new Error(result.error)
-        d.showToast(`${result.inserted + result.updated} ürün güncellendi`)
       } finally {
         d.setCommandSyncing(false)
       }
@@ -464,7 +456,6 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated,
         d.onBarcodeFormatsUpdated,
       )
-      d.showToast('Ayarlar güncellendi')
     },
 
     onSyncPaymentBrands: async () => {
@@ -491,10 +482,8 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         if (templates.length > 0) {
           const saveResult = await window.electron.templates.save(templates)
           console.log(`[sync_templates] ${saveResult.count} şablon SQLite'a yazıldı`)
-          d.showToast(`${saveResult.count} fiş şablonu güncellendi`)
         } else {
           console.warn('[sync_templates] API boş liste döndü')
-          d.showToast('Şablon listesi boş')
         }
       } catch (e) {
         console.error('[sync_templates] hata:', e)

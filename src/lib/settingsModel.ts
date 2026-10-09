@@ -1,5 +1,7 @@
 /** Kasa ve kasiyer ayarları. İki nesne birleştirilmez. */
 
+import { buttonColorsToJson } from '../theme/buttonColors'
+
 export interface TerminalInfo {
   terminalName?: string
   terminalNumber?: string
@@ -39,6 +41,10 @@ export interface CashierSettings {
   showCode: boolean
   showBarcode: boolean
   printBehavior: Record<string, string>
+  /** cashiers[].button_colors JSON metni. Bozuksa '{}' gibi ele alınır. */
+  buttonColors: string
+  /** cashiers[].theme. Bilinmeyen değer Klasik'e düşer. */
+  theme: string
 }
 
 export interface PaymentAccountCache {
@@ -103,6 +109,8 @@ export const DEFAULT_CASHIER_SETTINGS: CashierSettings = {
   showCode: true,
   showBarcode: false,
   printBehavior: { ...DEFAULT_PRINT_BEHAVIOR },
+  buttonColors: '{}',
+  theme: 'klasik',
 }
 
 export function asBool(value: unknown, fallback: boolean): boolean {
@@ -296,6 +304,13 @@ export function parseCashierSettings(row: Record<string, unknown>): CashierSetti
     showCode: asBool(pickRow(row, 'showCode', 'show_code'), true),
     showBarcode: asBool(pickRow(row, 'showBarcode', 'show_barcode'), false),
     printBehavior: parsePrintBehavior(pickRow(row, 'printBehavior', 'print_behavior')),
+    buttonColors: buttonColorsToJson(pickRow(row, 'buttonColors', 'button_colors')),
+    theme: (() => {
+      const raw = pickRow(row, 'theme', 'theme')
+      if (typeof raw !== 'string') return 'klasik'
+      const t = raw.trim()
+      return t || 'klasik'
+    })(),
   }
 }
 

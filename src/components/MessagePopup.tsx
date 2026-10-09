@@ -11,21 +11,21 @@ export default function MessagePopup({ text, onClose }: Props) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        background: 'white', borderRadius: 16,
+        background: 'var(--pos-surface)', borderRadius: 16, color: 'var(--pos-text)',
         padding: '36px 40px', maxWidth: 480, width: '90%',
         textAlign: 'center',
       }}>
         <div style={{ fontSize: 40, marginBottom: 16 }}>💬</div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: '#212121', marginBottom: 8 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--pos-text)', marginBottom: 8 }}>
           Yönetici Mesajı
         </div>
-        <div style={{ fontSize: 14, color: '#424242', lineHeight: 1.7, marginBottom: 28 }}>
+        <div style={{ fontSize: 14, color: 'var(--pos-text-muted)', lineHeight: 1.7, marginBottom: 28 }}>
           {text}
         </div>
         <button
           onClick={onClose}
           style={{
-            background: '#1565C0', color: 'white', border: 'none',
+            background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none',
             borderRadius: 10, padding: '12px 40px', fontSize: 14,
             fontWeight: 600, cursor: 'pointer',
           }}
