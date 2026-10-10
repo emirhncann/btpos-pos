@@ -62,6 +62,15 @@
   --pos-soft-blush: #FFF5F5;
   --pos-soft-success: #F0FDF4;
   --pos-soft-warning: #FFF8E1;
+  --pos-scrim: rgba(15,23,42,.45);
+  --pos-modal-close-bg: #334155;
+  --pos-modal-close-text: #FFFFFF;
+}
+
+:root[data-pos-dark="true"] {
+  --pos-scrim: rgba(0,0,0,.6);
+  --pos-modal-close-bg: var(--pos-surface-alt);
+  --pos-modal-close-text: var(--pos-text);
 }
 
 body {

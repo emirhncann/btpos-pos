@@ -14,6 +14,7 @@ export function PosModal({
   children,
   footer,
   zIndex = 9998,
+  themed = false,
 }: {
   title: string
   size?: keyof typeof SIZES
@@ -21,6 +22,7 @@ export function PosModal({
   children: ReactNode
   footer?: ReactNode
   zIndex?: number
+  themed?: boolean
 }) {
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1280)
 
@@ -38,7 +40,7 @@ export function PosModal({
         position: 'fixed',
         inset: 0,
         zIndex,
-        background: 'rgba(15,23,42,0.45)',
+        background: themed ? 'var(--pos-scrim)' : 'rgba(15,23,42,0.45)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -80,8 +82,8 @@ export function PosModal({
               height: 56,
               borderRadius: 12,
               border: 'none',
-              background: C.neutral,
-              color: '#FFFFFF',
+              background: themed ? 'var(--pos-modal-close-bg)' : C.neutral,
+              color: themed ? 'var(--pos-modal-close-text)' : '#FFFFFF',
               fontSize: 28,
               fontWeight: 700,
               cursor: 'pointer',

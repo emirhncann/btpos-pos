@@ -30,6 +30,8 @@ import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { CmdProgressChip } from '../components/CmdProgressChip'
 import { PavoLockOverlay } from '../components/PavoLockOverlay'
+import { getRecoveryInfo, isRecoveryActive, isRecoveryInFlight, paymentTotals, primeStaleWaiting, setRecoveryRuntime, summarizeProbe, type PendingLookup, type RecoveryProbe } from '../lib/pavoRecovery'
+import { claimSaleSettle, readZNo, releaseSaleSettle, showSaleCompleted } from '../store/saleCompleted'
 import {
   assertCartEditable,
   getPavoLockInfo,
@@ -315,6 +317,20 @@ interface PendingSaleRow {
 const fmt = (n: number) =>
   n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺'
 
+function cardTailLabel(cardNo?: string): string | null {
+  if (!cardNo) return null
+  const digits = cardNo.replace(/\D/g, '')
+  if (digits.length < 4) return null
+  return `****${digits.slice(-4)}`
+}
+
+function payMethodIcon(method: string, label: string): string {
+  const n = `${method} ${label}`.toLocaleLowerCase('tr-TR')
+  if (n.includes('nakit') || n.includes('cash')) return '💵'
+  if (n.includes('yemek')) return '🍽️'
+  return '💳'
+}
+
 function payBrandColor(id: number, name: string): string {
   if (id === 999) return C.install
   const n = name.toLocaleLowerCase('tr-TR')
@@ -390,11 +406,11 @@ function isPaymentLinesOverpaid(lines: PaymentLine[], net: number): boolean {
 function pavoSaleClosedFromAddRes(addRes: { data?: unknown; remainingPaymentAmount?: number }): boolean {
   const raw = (addRes.data ?? {}) as Record<string, unknown>
   const d = ((raw.Data && typeof raw.Data === 'object') ? raw.Data : raw) as Record<string, unknown>
-  const remaining = Number(
-    d.RemainingPaymentAmount ?? addRes.remainingPaymentAmount ?? NaN,
-  )
   const statusId = Number(d.StatusId ?? 0)
-  return statusId === 4 || statusId === 8 || remaining === 0
+  if (statusId === 4 || statusId === 8) return true
+  const totals = paymentTotals(d)
+  if (totals.saleTotal <= 0) return false
+  return totals.remaining <= 0.009 && !totals.hasWaiting
 }
 
 type PavoAddedPayment = {
@@ -652,12 +668,6 @@ function localISOString(): string {
   return local.toISOString().replace('Z', '').slice(0, 26)
 }
 
-const MENU_ACCENT: Record<'islemler' | 'belge' | 'musteri', string> = {
-  islemler: C.primary,
-  belge:    C.online,
-  musteri:  C.success,
-}
-
 const DEFAULT_HELD_LABEL = /^Bekleyen #\d+ · \d{2}:\d{2}$/
 
 function defaultHeldLabel(seq: number, at = new Date()): string {
@@ -665,17 +675,21 @@ function defaultHeldLabel(seq: number, at = new Date()): string {
   return `Bekleyen #${seq} · ${hm}`
 }
 
-function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)', layout = 'row', onClick }: {
+function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)', text, layout = 'row', onClick }: {
   icon:     string
   label:    string
   disabled?: boolean
   danger?:  boolean
   accent?:  string
+  text?:    string
   layout?:  'row' | 'stack'
   onClick?: () => void
 }) {
   const tone = danger ? C.danger : accent
   const stacked = layout === 'stack'
+  const labelColor = text
+    ? (disabled ? 'var(--pos-disabled-fg)' : danger ? '#FFFFFF' : text)
+    : '#FFFFFF'
   return (
     <button
       type="button"
@@ -683,6 +697,7 @@ function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)
       onClick={onClick}
       style={{
         ...solidBtn(tone, !!disabled),
+        color: labelColor,
         display: 'flex',
         flexDirection: stacked ? 'column' : 'row',
         alignItems: 'center',
@@ -697,7 +712,7 @@ function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)
       }}
     >
       <span style={{ fontSize: stacked ? 28 : 22, lineHeight: 1 }}>{icon}</span>
-      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.25, color: '#FFFFFF' }}>{label}</span>
+      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.25, color: labelColor }}>{label}</span>
     </button>
   )
 }
@@ -826,6 +841,15 @@ export default function POSScreen({
   const pavoLock = usePavoLock()
   const cartLocked = pavoLock.phase !== 'idle'
   const pavoRetryRef = useRef<(() => Promise<void>) | null>(null)
+  const recoveryRef = useRef<{
+    probe: (orderNo: string) => Promise<RecoveryProbe>
+    settle: (orderNo: string, probe: RecoveryProbe) => Promise<void>
+    findPending: (orderNo: string) => Promise<PendingLookup>
+  }>({
+    probe: async () => ({ success: false, message: 'Kurtarma hazır değil' }),
+    settle: async () => {},
+    findPending: async () => ({ kind: 'miss' as const }),
+  })
   const [pavoError, setPavoError] = useState<string | null>(null)
   const [pavoRecoveryState, setPavoRecoveryState] = useState<{
     ref: { saleId?: number | null; saleNumber?: string | null }
@@ -1215,13 +1239,16 @@ export default function POSScreen({
 
   useEffect(() => {
     if (!pavoSettings) return
+    if (isRecoveryActive() || getPavoPhase() !== 'idle') return
 
     void (async () => {
+      let lastOrderNo: string | null = null
       try {
-        const lastOrderNo = await window.electron.store.get('last_pavo_order_no')
+        lastOrderNo = await window.electron.store.get('last_pavo_order_no')
           .catch(() => null) as string | null
 
         if (!lastOrderNo) return
+        let holdOrder = false
 
         console.log('[açılış] Son orderNo bulundu:', lastOrderNo)
         setPavoPhase('sending', { message: 'Askıdaki satış kontrol ediliyor', orderNo: lastOrderNo })
@@ -1272,13 +1299,12 @@ export default function POSScreen({
               deviceResult,
               cartOverride:       cartItems,
               grandTotalOverride: grandTotal,
+              recovered:          true,
             })
-
-            showInfo('Satış Tamamlandı',
-              'Önceki oturumda tamamlanamamış satış otomatik olarak kapatıldı.')
           } else {
-            showError('Uyarı',
-              'Önceki satış kapatılamadı. Belge ekranından kontrol ediniz.')
+            holdOrder = true
+            setPavoPhase('error', { orderNo: lastOrderNo, message: compRes.message ?? 'Önceki satış kapatılamadı' })
+            primeStaleWaiting()
           }
 
         } else if (result.status === 'completed') {
@@ -1316,22 +1342,27 @@ export default function POSScreen({
               deviceResult,
               cartOverride:       cartItems,
               grandTotalOverride: grandTotal,
+              recovered:          true,
             })
             console.log('[açılış] Tamamlanmış ama kaydedilmemiş satış bulundu, kaydedildi:', lastOrderNo)
           } else {
             console.log('[açılış] Satış zaten tamamlanmış:', lastOrderNo)
           }
 
-        } else if (result.status === 'suspended' || result.status === 'pending') {
-          showError('Bekleyen Satış',
-            `${lastOrderNo} numaralı satış tamamlanamadı. Belge ekranından kontrol ediniz.`)
+        } else if (result.status === 'suspended' || result.status === 'pending' || result.success === false) {
+          holdOrder = true
+          setPavoPhase('error', { orderNo: lastOrderNo, message: result.message ?? '' })
+          primeStaleWaiting()
         }
 
-        void window.electron.store.set('last_pavo_order_no', null).catch(() => {})
+        if (!holdOrder) void window.electron.store.set('last_pavo_order_no', null).catch(() => {})
 
       } catch (e) {
         console.warn('[açılış] Son satış kontrolü başarısız:', e)
-        setPavoPhase('error', { message: e instanceof Error ? e.message : String(e) })
+        setPavoPhase('error', {
+          orderNo: lastOrderNo ?? undefined,
+          message: e instanceof Error ? e.message : String(e),
+        })
       } finally {
         if (getPavoPhase() === 'sending' || getPavoPhase() === 'completing') setPavoPhase('idle')
       }
@@ -1490,6 +1521,20 @@ export default function POSScreen({
     }
     return parseEAN13(barcode, barcodeFormats)
   }, [barcodeFormats])
+
+  useEffect(() => {
+    setRecoveryRuntime({
+      probe: orderNo => recoveryRef.current.probe(orderNo),
+      settle: (orderNo, probe) => recoveryRef.current.settle(orderNo, probe),
+      findPending: orderNo => recoveryRef.current.findPending(orderNo),
+    })
+    const onCode = (e: Event) => {
+      const code = (e as CustomEvent<string>).detail
+      if (typeof code === 'string') barcodeScanRef.current(code)
+    }
+    window.addEventListener('btpos-completed-barcode', onCode)
+    return () => window.removeEventListener('btpos-completed-barcode', onCode)
+  }, [])
 
   /* ── POS açılınca Electron penceresine focus — barkod hemen çalışsın ── */
   useEffect(() => {
@@ -2551,6 +2596,7 @@ export default function POSScreen({
           deviceResult: finalSale
             ? deviceResultFromPavoData(finalSale.raw)
             : deviceResultFromPavoData(saleResult.data),
+          recovered: true,
         })
         return
       }
@@ -2570,6 +2616,7 @@ export default function POSScreen({
             deviceResult: finalSale
               ? deviceResultFromPavoData(finalSale.raw)
               : deviceResultFromPavoData(compRes.data ?? saleResult.data),
+            recovered: true,
           })
         } else {
           showApiError('Hata', compRes.message ?? 'Satış kapatılamadı.')
@@ -2645,10 +2692,10 @@ export default function POSScreen({
             deviceResult: finalSale
               ? deviceResultFromPavoData(finalSale.raw)
               : deviceResultFromPavoData(compRes.data ?? saleResult.data),
+            recovered: true,
           })
           setSaving(false)
           setPavoLoading(false)
-          showInfo('Satış Tamamlandı', 'Askıdaki satış başarıyla kapatıldı.')
           return
         }
 
@@ -2765,8 +2812,21 @@ export default function POSScreen({
     paidAmt?: number
     cartOverride?: CartItem[]
     grandTotalOverride?: number
+    recovered?: boolean
   }) {
-    if (getPavoPhase() !== 'idle') setPavoPhase('completing')
+    if (!claimSaleSettle(opts.orderNo)) return
+    if (getPavoPhase() !== 'idle') {
+      setPavoPhase('completing', opts.recovered
+        ? { message: 'Ödeme alınmış, satış kaydediliyor…' }
+        : undefined)
+    }
+    try {
+    const alreadySaved = await window.electron.db.getSaleByOrderNo(opts.orderNo).catch(() => null)
+    if (alreadySaved) {
+      setPavoPhase('idle')
+      void window.electron.store.set('last_pavo_order_no', null).catch(() => {})
+      return
+    }
     const {
       orderNo, deviceResult,
       cartOverride, grandTotalOverride,
@@ -3086,6 +3146,28 @@ export default function POSScreen({
     if (scaleEnabled) void window.electron.scale.write('T').catch(() => {})
     setLastReceipt(printOrderNo)
     searchRef.current?.focus()
+    const shown = effectiveLines.map(line => ({ label: line.label, amount: line.amount, method: line.method }))
+    if (changeAmount > 0.009) {
+      for (let i = shown.length - 1; i >= 0; i--) {
+        if (shown[i].method === 'cash') {
+          shown[i] = { ...shown[i], amount: parseFloat((shown[i].amount + changeAmount).toFixed(2)) }
+          break
+        }
+      }
+    }
+    showSaleCompleted({
+      total: effectiveTotal,
+      payments: shown.map(p => ({ label: p.label, amount: p.amount })),
+      changeAmount,
+      receiptNo: String(receiptNo),
+      orderNo: printOrderNo,
+      zNo: readZNo(deviceResult?.raw),
+      recovered: opts.recovered === true,
+    })
+    } catch (e) {
+      releaseSaleSettle(opts.orderNo)
+      throw e
+    }
   }
 
   function addPaymentLineWithMethod(
@@ -3341,6 +3423,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          console.error('[pavo-recovery] AddPayment reddedildi:', addRes.message ?? 'Ödeme eklenemedi.')
           setPavoPhase('error', { message: addRes.message ?? 'Ödeme eklenemedi.' })
           showApiError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi.')
           return
@@ -3736,6 +3819,7 @@ export default function POSScreen({
           setActiveMethod(null)
           setPendingAmount('')
           setSelectedBrand(null)
+          console.error('[pavo-recovery] AddPayment reddedildi:', addRes.message ?? 'Ödeme eklenemedi')
           setPavoPhase('error', { message: addRes.message ?? 'Ödeme eklenemedi' })
           showApiError('Ödeme Hatası', addRes.message ?? 'Ödeme eklenemedi')
           return
@@ -3779,8 +3863,11 @@ export default function POSScreen({
       const lastInner = (lastData?.Data as Record<string, unknown> | undefined) ?? lastData
       const statusId = Number(lastInner?.StatusId ?? 0)
 
-      // StatusId: 4 = tamamlandı, RemainingPaymentAmount: 0
-      if (statusId === 4 || statusId === 8 || (lastAddResult?.remainingPaymentAmount ?? 1) === 0) {
+      const closedTotals = paymentTotals(lastInner)
+      const paidCoversSale = closedTotals.saleTotal > 0
+        && closedTotals.remaining <= 0.009
+        && !closedTotals.hasWaiting
+      if (statusId === 4 || statusId === 8 || paidCoversSale) {
         const finalSale = await fetchFinalPavoResult(orderNo)
         await finalizeSaleToSQLite({
           lines,
@@ -4460,7 +4547,7 @@ export default function POSScreen({
     const taken = saleHasTakenPayment(res.data) || res.status === 'completed' || res.statusId === 4 || res.statusId === 8
     if (taken) {
       setPavoPhase('completing', { message: '' })
-      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo, recovered: true, deviceResult: deviceResultFromPavoData(res.data) })
       return
     }
     if (res.status === 'uncompleted') {
@@ -4475,10 +4562,112 @@ export default function POSScreen({
         setPavoPhase('error', { message: compRes.message ?? 'Satış kapatılamadı' })
         return
       }
-      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo, recovered: true, deviceResult: deviceResultFromPavoData(compRes.data ?? res.data) })
       return
     }
-    setPavoPhase('sending', { message: 'Cihaz hâlâ ödeme bekliyor', orderNo })
+    setPavoPhase('error', { orderNo, message: '' })
+  }
+
+  async function resendLockedPayment() {
+    if (isRecoveryInFlight()) return
+    const orderNo = getPavoLockInfo().orderNo || currentOrderNo
+    const snap = getRecoveryInfo()
+    if (!pavoSettings || !orderNo) return
+    setPavoPhase('sending', { orderNo, amount: snap.saleTotal || undefined, message: 'Ödeme yeniden gönderiliyor' })
+    const probe = await probePavoSale(orderNo)
+    const summary = summarizeProbe(probe)
+    if (!probe.success) {
+      setPavoPhase('error', { orderNo, message: "Pavo'ya ulaşılamadığı için ödeme gönderilemedi. Cihaz bağlantısını kontrol edin." })
+      return
+    }
+    if (summary.kind === 'completed') {
+      await settleRecoveredSale(orderNo, probe)
+      return
+    }
+    const due = paymentTotals(probe.data)
+    const saleTotal = due.saleTotal > 0
+      ? due.saleTotal
+      : (summary.saleTotal || snap.saleTotal || getPavoLockInfo().amount || 0)
+    const paidTotal = due.saleTotal > 0 ? due.paidTotal : summary.paidTotal
+    const amount = due.saleTotal > 0
+      ? due.remaining
+      : parseFloat(Math.max(0, saleTotal - paidTotal).toFixed(2))
+    if (amount <= 0.009) {
+      await settleRecoveredSale(orderNo, probe)
+      return
+    }
+    if (paidTotal + amount > saleTotal + 0.009) {
+      setPavoPhase('error', { orderNo, message: 'Ödeme tutarı satış toplamını aşamaz' })
+      return
+    }
+    const mediator = summary.mediator
+      ?? snap.mediator
+      ?? (getPavoLockInfo().method?.toLocaleLowerCase('tr-TR').includes('nakit') ? 1 : 2)
+    const seq = await window.electron.db.nextPavoSequence()
+    const addRes = await pavoAddPayment(
+      pavoSettings,
+      seq,
+      {
+        orderNo,
+        saleId: summary.kind === 'partial' ? (probe.saleId ?? snap.saleId) : (probe.saleId ?? snap.saleId),
+        saleNumber: probe.saleNumber || snap.saleNumber || null,
+      },
+      { mediator, amount },
+      { grossPrice: saleTotal, totalPrice: saleTotal },
+      'AddPaymentAndFinalizeSale',
+    )
+    if (!addRes.success) {
+      const message = addRes.message ?? 'Ödeme gönderilemedi'
+      console.error('[pavo-recovery] AddPayment reddedildi:', message)
+      setPavoPhase('error', { orderNo, message })
+      return
+    }
+    const afterPay = paymentTotals(addRes.data)
+    const stillOpen = afterPay.saleTotal > 0 && (afterPay.remaining > 0.009 || afterPay.hasWaiting)
+    if (!stillOpen && (addRes.finalized || (addRes.remainingPaymentAmount ?? 0) <= 0.009)) {
+      const finalSale = await fetchFinalPavoResult(orderNo)
+      await finalizeSaleToSQLite({
+        lines: paymentLines.length > 0 ? paymentLines : [{
+          id: crypto.randomUUID(),
+          method: mediator === 1 ? 'cash' : 'card',
+          amount: saleTotal,
+          label: mediator === 1 ? 'Nakit' : 'Kredi Kartı',
+          mediator,
+        }],
+        orderNo,
+        deviceResult: finalSale
+          ? deviceResultFromPavoData(finalSale.raw)
+          : deviceResultFromPavoData(addRes.data),
+        recovered: true,
+        grandTotalOverride: saleTotal > 0 ? saleTotal : undefined,
+      })
+      return
+    }
+    setPavoPhase('error', { orderNo, amount: saleTotal })
+  }
+
+  function collectRemainingPayment() {
+    const orderNo = getPavoLockInfo().orderNo || currentOrderNo
+    const snap = getRecoveryInfo()
+    if (!orderNo) return
+    const remaining = Math.max(0, parseFloat((snap.saleTotal - snap.paidTotal).toFixed(2)))
+    setPavoRecoveryState({
+      ref: { saleId: snap.saleId ?? null, saleNumber: snap.saleNumber ?? null },
+      orderNo,
+      totalPrice: snap.saleTotal,
+      paidAmount: snap.paidTotal,
+      remainingAmount: remaining,
+    })
+    setPavoPendingSaleRef({
+      saleId: snap.saleNumber ? null : (snap.saleId ?? null),
+      saleNumber: snap.saleNumber ?? null,
+      orderNo,
+      totalPrice: snap.saleTotal,
+      paidAmount: snap.paidTotal,
+    })
+    setPaymentMode(true)
+    setPendingAmount(remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
+    setPavoPhase('open', { orderNo, amount: snap.saleTotal })
   }
 
   async function cancelLockedSale() {
@@ -4490,17 +4679,32 @@ export default function POSScreen({
     const seq = await window.electron.db.nextPavoSequence()
     const res = await pavoGetSaleResult(pavoSettings, seq, orderNo)
     if (!res.success) {
-      setPavoPhase('error', { message: res.message ?? 'Cihaza ulaşılamıyor' })
+      setPavoPhase('error', {
+        orderNo,
+        message: "Pavo'ya ulaşılamadığı için iptal edilemedi. Cihaz bağlantısını kontrol edin.",
+      })
       return
     }
-    if (saleHasTakenPayment(res.data) || res.status === 'completed' || res.statusId === 4 || res.statusId === 8) {
-      setPavoPhase('completing', { message: 'Bu satışta alınmış ödeme var, iptal edilemez. Satış tamamlanıyor.' })
-      await finalizeSaleToSQLite({ lines: paymentLines, orderNo })
+    const summary = summarizeProbe({
+      success: true,
+      status: res.status,
+      statusId: res.statusId,
+      data: res.data,
+      saleId: res.saleId,
+      saleNumber: res.saleNumber,
+    })
+    if (summary.kind === 'completed') {
+      setPavoPhase('completing', { message: 'Bu satışta alınmış ödeme var, iptal edilemez. Satış tamamlanıyor.', orderNo })
+      await finalizeSaleToSQLite({ lines: paymentLines, orderNo, recovered: true, deviceResult: deviceResultFromPavoData(res.data) })
+      return
+    }
+    if (summary.kind === 'partial') {
+      setPavoPhase('error', { orderNo, message: 'Alınmış ödeme var, iptal edilemez.' })
       return
     }
     const ok = await confirm({
       title: 'Satışı iptal et',
-      message: "Pavo'daki satış iptal edilecek. Emin misiniz?",
+      message: "Pavo'daki satış iptal edilecek. Cihaz ekranında bekleyen bir ödeme olmadığından emin olun.",
       confirmLabel: 'İptal et',
       cancelLabel: 'Vazgeç',
     })
@@ -4516,7 +4720,87 @@ export default function POSScreen({
       setPavoPendingSaleRef(null)
       setPaymentMode(false)
       setPavoPhase('idle')
-    } else setPavoPhase('error', { message: abandoned.message ?? 'İptal başarısız' })
+    } else {
+      const msg = abandoned.message ?? ''
+      setPavoPhase('error', {
+        orderNo,
+        message: isNetworkFetchError(msg)
+          ? "Pavo'ya ulaşılamadığı için iptal edilemedi. Cihaz bağlantısını kontrol edin."
+          : (msg || 'İptal başarısız'),
+      })
+    }
+  }
+
+  async function probePavoSale(orderNo: string): Promise<RecoveryProbe> {
+    if (!pavoSettings) return { success: false, message: 'Pavo ayarı yok' }
+    const seq = await window.electron.db.nextPavoSequence()
+    const res = await pavoGetSaleResult(pavoSettings, seq, orderNo)
+    return {
+      success: res.success,
+      message: res.message,
+      status: res.status,
+      statusId: res.statusId,
+      saleId: res.saleId,
+      saleNumber: res.saleNumber,
+      data: res.data,
+    }
+  }
+
+  async function settleRecoveredSale(orderNo: string, probe: RecoveryProbe) {
+    if (!pavoSettings) throw new Error('Pavo ayarı yok')
+    let data = probe.data
+    if (probe.status === 'uncompleted' || probe.statusId === 23) {
+      const compSeq = await window.electron.db.nextPavoSequence()
+      const compRes = await pavoCompleteUncompletedSale(pavoSettings, compSeq, {
+        saleId: probe.saleId && probe.saleId > 0 ? probe.saleId : null,
+        saleNumber: probe.saleNumber || null,
+        orderNo,
+      })
+      if (!compRes.success) throw new Error(compRes.message ?? 'Satış kapatılamadı')
+      data = compRes.data ?? data
+    }
+    const finalSale = await fetchFinalPavoResult(orderNo)
+    await finalizeSaleToSQLite({
+      lines: paymentLines,
+      orderNo,
+      deviceResult: finalSale
+        ? deviceResultFromPavoData(finalSale.raw)
+        : deviceResultFromPavoData(data),
+      recovered: true,
+    })
+  }
+
+  async function findPendingSale(orderNo: string): Promise<PendingLookup> {
+    if (!pavoSettings) return { kind: 'miss' }
+    const seq = await window.electron.db.nextPavoSequence()
+    const listed = await pavoListPendingSales(pavoSettings, seq)
+    const mine = listed.sales.find(s => s.orderNo === orderNo)
+    if (!mine) return { kind: 'miss' }
+    const base = {
+      paidTotal: mine.paidAmount,
+      saleTotal: mine.totalPrice,
+      saleId: mine.saleId,
+      saleNumber: mine.saleNumber,
+    }
+    if (mine.totalPrice > 0 && mine.paidAmount + 0.009 >= mine.totalPrice) {
+      await settleRecoveredSale(orderNo, {
+        success: true,
+        status: 'uncompleted',
+        statusId: 23,
+        saleId: mine.saleId,
+        saleNumber: mine.saleNumber,
+        data: undefined,
+      })
+      return { kind: 'done', ...base }
+    }
+    if (mine.paidAmount > 0.009) return { kind: 'partial', ...base }
+    return { kind: 'waiting', ...base }
+  }
+
+  recoveryRef.current = {
+    probe: probePavoSale,
+    settle: settleRecoveredSale,
+    findPending: findPendingSale,
   }
 
   /* ────────── RENDER ────────── */
@@ -4564,6 +4848,8 @@ export default function POSScreen({
         onQuery={() => { void queryLockedSale() }}
         onCancel={() => { void cancelLockedSale() }}
         onRetry={() => { void pavoRetryRef.current?.() }}
+        onResend={() => { void resendLockedPayment() }}
+        onCollect={() => collectRemainingPayment()}
       />
 
       {/* ── HEADER ── */}
@@ -6199,10 +6485,10 @@ export default function POSScreen({
                                       : deviceResultFromPavoData(res.data),
                                     cartOverride:       effectiveCart.map(({ needsProductMatch: _, ...c }) => c as CartItem),
                                     grandTotalOverride: sale.totalPrice,
+                                    recovered:          true,
                                   })
 
                                   void loadPendingSales()
-                                  showInfo('Tamamlandı', 'Askıdaki satış kapatıldı.')
                                 } catch (e) {
                                   showCaughtError('Hata', e)
                                 }
@@ -7215,6 +7501,7 @@ export default function POSScreen({
               title={{ islemler: 'İşlemler', belge: 'Belge İşlemleri', musteri: 'Müşteri İşlemleri' }[menuOpen]}
               size="md"
               zIndex={9991}
+              themed
               onClose={() => setMenuOpen(null)}
             >
                 <div className="pos-menu-grid">
@@ -7222,11 +7509,8 @@ export default function POSScreen({
                 {menuOpen === 'islemler' && [
                   { icon: '💰', label: 'Cari tahsilat', disabled: false },
                   { icon: '💸', label: 'Cari ödeme', disabled: false },
-                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
-                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
-                  { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                 ].map((item, i) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.islemler} layout="stack"
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent="var(--pos-btn-menu-bg)" text="var(--pos-btn-menu-text)" layout="stack"
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label.startsWith('Cari tah')) {
@@ -7251,18 +7535,6 @@ export default function POSScreen({
                         setCariPaymentCust(selectedCustomer ?? null)
                         setCariPaymentMethod(null)
                         setMenuOpen(null)
-                        return
-                      }
-                      if (item.label.startsWith('Beklemeye')) { openHoldNote(); return }
-                      if (item.label.startsWith('Belge getir')) { openHeldModal(); setMenuOpen(null); return }
-                      if (item.label.startsWith('Belge iptal')) {
-                        void confirm({
-                          title:   'Belge İptal',
-                          message: 'Belgeyi iptal etmek istediğinize emin misiniz?',
-                          confirmLabel: 'Evet, İptal Et',
-                          cancelLabel:  'Vazgeç',
-                        }).then(ok => { if (ok) clearCart() })
-                        return
                       }
                     }} />
                 ))}
@@ -7275,10 +7547,24 @@ export default function POSScreen({
                       : 'Belge İndirimi',
                     disabled: cart.length === 0 || !(settings.cashier.allowDocDiscount) },
                   { icon: '✕', label: 'Ürün İptal', disabled: cart.length === 0 },
+                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
+                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
+                  { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
                 ].map((item, i) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent={MENU_ACCENT.belge} layout="stack"
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={'danger' in item && item.danger} accent="var(--pos-btn-documents-bg)" text="var(--pos-btn-documents-text)" layout="stack"
                     onClick={() => {
                       if (item.disabled) return
+                      if (item.label.startsWith('Beklemeye')) { openHoldNote(); return }
+                      if (item.label.startsWith('Belge getir')) { openHeldModal(); setMenuOpen(null); return }
+                      if (item.label.startsWith('Belge iptal')) {
+                        void confirm({
+                          title:   'Belge İptal',
+                          message: 'Belgeyi iptal etmek istediğinize emin misiniz?',
+                          confirmLabel: 'Evet, İptal Et',
+                          cancelLabel:  'Vazgeç',
+                        }).then(ok => { if (ok) clearCart() })
+                        return
+                      }
                       if (item.label.startsWith('Belge İndirimi')) {
                         setSmsPhonePanelOpen(false)
                         setMenuOpen(null)
@@ -7332,7 +7618,7 @@ export default function POSScreen({
                     danger: true,
                   },
                 ].map((item, i) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent={MENU_ACCENT.musteri} layout="stack"
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent="var(--pos-btn-customer-bg)" text="var(--pos-btn-customer-text)" layout="stack"
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label === 'Müşteri seç') { void loadCustomers(); setMenuOpen(null); return }
@@ -8163,7 +8449,7 @@ export default function POSScreen({
             {/* Body: 3 kolon — sol özet | orta yöntemler | sağ numpad */}
             <div style={{
               display:             'grid',
-              gridTemplateColumns: 'minmax(200px, 22%) 1fr clamp(200px, 24%, 280px)',
+              gridTemplateColumns: 'minmax(340px, 38%) 1fr clamp(200px, 24%, 280px)',
               flex:                1,
               minHeight:           'min(420px, calc(80vh - 12vh))',
               maxHeight:           'calc(80vh - 12vh)',
@@ -8179,97 +8465,111 @@ export default function POSScreen({
                 overflow:      'hidden',
                 minHeight:     0,
               }}>
-                <div style={{ padding: '2vh 4%', borderBottom: '1px solid var(--pos-border)', flexShrink: 0 }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                    textTransform: 'uppercase' as const, color: 'var(--pos-text-muted)', letterSpacing: '0.04em', marginBottom: '0.8vh' }}>
-                    Kalan Tutar
-                  </div>
-                  <div style={{ fontSize: 'clamp(22px, 4vh, 34px)', fontWeight: 600,
-                    fontFamily: 'monospace', color: remaining <= 0 ? 'var(--pos-success)' : 'var(--pos-text)', lineHeight: 1.1 }}>
-                    <span style={{ fontSize: 'clamp(14px, 2.2vh, 19px)', color: 'var(--pos-text-muted)', fontWeight: 500, marginRight: 2 }}>₺</span>
-                    {remaining.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  </div>
-                  <div style={{ height: '0.8vh', maxHeight: 7, background: 'var(--pos-border)',
-                    borderRadius: 99, marginTop: '1.5vh', overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%', borderRadius: 99, transition: 'width 0.35s ease',
-                      background: remaining <= 0 ? '#17845A' : '#3457D5',
-                      width: `${dueTotal > 0 ? Math.min((paidTotal / dueTotal) * 100, 100) : 0}%`,
-                    }} />
-                  </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--pos-text-muted)',
+                  letterSpacing: '0.04em', textTransform: 'uppercase' as const,
+                  padding: '12px 14px 8px', flexShrink: 0 }}>
+                  Eklenen ödemeler
                 </div>
-
-                <div style={{ borderBottom: '1px solid var(--pos-border)', flexShrink: 0 }}>
-                  {[{ k: pavoPendingSaleRef ? 'Kalan Tutar' : 'Sepet Tutarı', v: fmt(dueTotal) }, { k: 'Ödenen', v: fmt(paidTotal + (pavoPendingSaleRef?.paidAmount ?? 0)) }].map(({ k, v }) => (
-                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between',
-                      fontSize: 'clamp(11px, 1.4vh, 13px)', padding: '0.9vh 4%' }}>
-                      <span style={{ color: 'var(--pos-text-muted)' }}>{k}</span>
-                      <span style={{ fontWeight: 600, color: 'var(--pos-text)', fontFamily: 'monospace' }}>₺{v}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                  <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', fontWeight: 600,
-                    textTransform: 'uppercase' as const, color: 'var(--pos-text-muted)', letterSpacing: '0.04em',
-                    padding: '1.6vh 4% 1vh' }}>
-                    Eklenen Ödemeler
-                  </div>
-                  {pavoPendingSaleRef && pavoPendingSaleRef.paidAmount > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center',
-                      gap: '3%', padding: '1vh 4%' }}>
-                      <div style={{ width: 32, height: 24, display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700,
-                        borderRadius: 7, flexShrink: 0, background: 'var(--pos-soft-success)', color: 'var(--pos-success)' }}>PV</div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600,
-                          color: '#047857', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          Pavo'da alınan
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: 'var(--pos-surface)' }}>
+                  {(() => {
+                    const pavoRows = pavoPendingSaleRef
+                      ? (getRecoveryInfo().displayPayments ?? [])
+                      : []
+                    const showLump = pavoRows.length === 0 && (pavoPendingSaleRef?.paidAmount ?? 0) > 0
+                    const empty = pavoRows.length === 0 && !showLump && paymentLines.length === 0
+                    if (empty) {
+                      return (
+                        <div style={{ color: 'var(--pos-text-muted)', fontSize: 16, textAlign: 'center', padding: '18px 14px' }}>
+                          Henüz ödeme eklenmedi.
                         </div>
-                        <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: 'var(--pos-text-muted)' }}>Salt okunur</div>
-                      </div>
-                      <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)',
-                        color: '#047857', fontFamily: 'monospace' }}>
-                        ₺{pavoPendingSaleRef.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                  )}
-                  {paymentLines.length === 0 && !(pavoPendingSaleRef && pavoPendingSaleRef.paidAmount > 0) ? (
-                    <div style={{ color: 'var(--pos-text-muted)', fontSize: 'clamp(11px, 1.4vh, 12.5px)',
-                      textAlign: 'center', padding: '1vh 4%' }}>
-                      Henüz ödeme eklenmedi.
-                    </div>
-                  ) : paymentLines.map((line, idx) => {
-                    const badgeMap: Record<string, { bg: string; fg: string; label: string }> = {
-                      cash:  { bg: '#FDF1DE', fg: '#A8620A', label: 'NK' },
-                      card:  { bg: '#ECF0FD', fg: '#3457D5', label: 'KK' },
-                      other: { bg: '#F3E9FB', fg: '#7A3AAB', label: line.label.slice(0, 2).toUpperCase() },
+                      )
                     }
-                    const b = badgeMap[line.method] ?? badgeMap.other
+                    const statusMark = {
+                      done: { glyph: '✓', color: 'var(--pos-success)' },
+                      waiting: { glyph: '⏳', color: 'var(--pos-warning)' },
+                      failed: { glyph: '✕', color: 'var(--pos-danger)' },
+                    }
+                    const rowStyle = {
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      height: 56, padding: '0 14px', boxSizing: 'border-box' as const,
+                      borderBottom: '1px solid var(--pos-border)',
+                      background: 'var(--pos-surface)', color: 'var(--pos-text)',
+                    }
                     return (
-                      <div key={line.id} style={{ display: 'flex', alignItems: 'center',
-                        gap: '3%', padding: '1vh 4%' }}>
-                        <div style={{ width: 32, height: 24, display: 'flex', alignItems: 'center',
-                          justifyContent: 'center', fontSize: 'clamp(9px, 1.2vh, 10.5px)', fontWeight: 700,
-                          borderRadius: 7, flexShrink: 0, background: b.bg, color: b.fg }}>{b.label}</div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 'clamp(11px, 1.4vh, 12.5px)', fontWeight: 600,
-                            color: 'var(--pos-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {line.label}
+                      <>
+                        {showLump && pavoPendingSaleRef && (
+                          <div style={rowStyle}>
+                            <span style={{ fontSize: 20, width: 28, textAlign: 'center' as const }}>💳</span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 20, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              Pavo'da alınan
+                            </span>
+                            <span style={{ fontSize: 22, fontWeight: 700 }}>{fmt(pavoPendingSaleRef.paidAmount)}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: statusMark.done.color, width: 28, textAlign: 'center' as const }}>✓</span>
                           </div>
-                          <div style={{ fontSize: 'clamp(10px, 1.2vh, 11px)', color: 'var(--pos-text-muted)' }}>Ödeme {idx + 1}</div>
-                        </div>
-                        <span style={{ fontWeight: 600, fontSize: 'clamp(12px, 1.5vh, 13.5px)',
-                          color: 'var(--pos-text)', fontFamily: 'monospace' }}>
-                          ₺{line.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                        </span>
-                        <button type="button" onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
-                          style={{ width: 22, height: 22, display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', color: 'var(--pos-text-muted)', cursor: 'pointer',
-                            border: 'none', background: 'transparent', fontSize: 12, borderRadius: 6 }}>✕</button>
+                        )}
+                        {pavoRows.map((row, idx) => {
+                          const mark = statusMark[row.status]
+                          const dim = row.status !== 'done'
+                          const tail = cardTailLabel(row.cardNo)
+                          return (
+                            <div key={`pavo-${idx}`} style={rowStyle}>
+                              <span style={{ fontSize: 20, width: 28, textAlign: 'center' as const, flexShrink: 0 }}>
+                                {payMethodIcon(String(row.mediator), row.name)}
+                              </span>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 20, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {row.name}{tail ? `  ${tail}` : ''}
+                              </span>
+                              <span style={{ fontSize: 22, fontWeight: 700, opacity: dim ? 0.45 : 1 }}>{fmt(row.amount)}</span>
+                              <span style={{ fontSize: 22, fontWeight: 700, color: mark.color, width: 28, textAlign: 'center' as const, flexShrink: 0 }}>{mark.glyph}</span>
+                            </div>
+                          )
+                        })}
+                        {paymentLines.map(line => (
+                          <div key={line.id} style={rowStyle}>
+                            <span style={{ fontSize: 20, width: 28, textAlign: 'center' as const, flexShrink: 0 }}>
+                              {payMethodIcon(line.method, line.label)}
+                            </span>
+                            <span style={{ flex: 1, minWidth: 0, fontSize: 20, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {line.label}
+                            </span>
+                            <span style={{ fontSize: 22, fontWeight: 700 }}>{fmt(line.amount)}</span>
+                            <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--pos-success)', width: 28, textAlign: 'center' as const, flexShrink: 0 }}>✓</span>
+                            <button type="button" onClick={() => setPaymentLines(prev => prev.filter(l => l.id !== line.id))}
+                              style={{ border: 'none', background: 'transparent', color: 'var(--pos-text-muted)', cursor: 'pointer', fontSize: 13, padding: 0 }}>
+                              Sil
+                            </button>
+                          </div>
+                        ))}
+                      </>
+                    )
+                  })()}
+                </div>
+                <div style={{ flexShrink: 0, borderTop: '1px solid var(--pos-border)', background: 'var(--pos-surface)', padding: '8px 14px 12px' }}>
+                  {(() => {
+                    const pavoRows = pavoPendingSaleRef
+                      ? (getRecoveryInfo().displayPayments ?? [])
+                      : []
+                    const takenFromDevice = pavoRows.length > 0
+                      ? pavoRows.filter(row => row.status === 'done').reduce((s, row) => s + row.amount, 0)
+                      : (pavoPendingSaleRef?.paidAmount ?? 0)
+                    const takenShown = takenFromDevice + paidTotal
+                    const totalShown = pavoPendingSaleRef?.totalPrice || grandTotal
+                    const summaryRow = (label: string, value: string, extra?: CSSProperties) => (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 20, color: 'var(--pos-text)', ...extra }}>
+                        <span>{label}</span>
+                        <span>{value}</span>
                       </div>
                     )
-                  })}
+                    return (
+                      <>
+                        {summaryRow('Toplam', fmt(totalShown))}
+                        {summaryRow('Alınan', fmt(takenShown))}
+                        {remaining <= 0
+                          ? <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--pos-success)', marginTop: 4 }}>Tamamı alındı ✓</div>
+                          : summaryRow('KALAN', fmt(remaining), { fontSize: 28, fontWeight: 700, color: 'var(--pos-primary)', marginTop: 4 })}
+                      </>
+                    )
+                  })()}
                 </div>
               </div>
 
@@ -8313,12 +8613,12 @@ export default function POSScreen({
                       style={{
                         ...solidBtn(cashBtn.bg, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'cash'),
                         color: remaining <= 0 ? C.disabledFg : cashBtn.text,
-                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                        padding: '12%',
+                        aspectRatio: '1 / 0.8', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.4vh',
+                        padding: '8%',
                       }}>
-                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>NK</span>
-                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Nakit</span>
+                      <span style={{ fontSize: 18, lineHeight: 1 }}>💵</span>
+                      <span style={{ fontSize: 'clamp(10px, 1.25vh, 11px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Nakit</span>
                     </button>
 
                     <button type="button"
@@ -8326,12 +8626,12 @@ export default function POSScreen({
                       style={{
                         ...solidBtn(cardBtn.bg, remaining <= 0, paymentLines[paymentLines.length - 1]?.method === 'card' && paymentLines[paymentLines.length - 1]?.brand == null),
                         color: remaining <= 0 ? C.disabledFg : cardBtn.text,
-                        aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                        padding: '12%',
+                        aspectRatio: '1 / 0.8', display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', gap: '0.4vh',
+                        padding: '8%',
                       }}>
-                      <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>KK</span>
-                      <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Kart</span>
+                      <span style={{ fontSize: 18, lineHeight: 1 }}>💳</span>
+                      <span style={{ fontSize: 'clamp(10px, 1.25vh, 11px)', textAlign: 'center' as const, lineHeight: 1.2 }}>Kredi Kartı</span>
                     </button>
 
                     {karmaVisibleBrands.map(brand => {
@@ -8344,14 +8644,12 @@ export default function POSScreen({
                           onClick={() => addPaymentLineWithMethod('other', brand, pendingAmount ? undefined : remaining)}
                           style={{
                             ...solidBtn(color, remaining <= 0, selected),
-                            aspectRatio: '1 / 1', display: 'flex', flexDirection: 'column',
-                            alignItems: 'center', justifyContent: 'center', gap: '0.7vh',
-                            padding: '12%',
+                            aspectRatio: '1 / 0.8', display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center', gap: '0.4vh',
+                            padding: '8%',
                           }}>
-                          <span style={{ fontSize: 'clamp(11px, 1.3vh, 13px)', fontWeight: 700 }}>
-                            {isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()}
-                          </span>
-                          <span style={{ fontSize: 'clamp(11px, 1.4vh, 13px)', textAlign: 'center' as const, lineHeight: 1.2,
+                          <span style={{ fontSize: 18, lineHeight: 1 }}>{payMethodIcon('other', label)}</span>
+                          <span style={{ fontSize: 'clamp(10px, 1.25vh, 11px)', textAlign: 'center' as const, lineHeight: 1.2,
                             overflow: 'hidden', display: '-webkit-box',
                             WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, width: '100%' }}>
                             {label}
@@ -8539,7 +8837,6 @@ export default function POSScreen({
                 const isTaksit = brand.payment_provider_brand_id === 999
                 const color = payBrandColor(brand.payment_provider_brand_id, brand.payment_provider_brand_nm)
                 const label = isTaksit ? 'KK Taksit/Puan' : brand.payment_provider_brand_nm
-                const initials = isTaksit ? 'KK' : brand.payment_provider_brand_nm.slice(0, 2).toUpperCase()
                 return (
                 <button
                   key={brand.payment_provider_brand_id}
@@ -8575,12 +8872,7 @@ export default function POSScreen({
                     padding: 12,
                   }}
                 >
-                  <span style={{
-                    fontSize: 14,
-                    fontWeight: 800,
-                  }}>
-                    {initials}
-                  </span>
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>{payMethodIcon('other', label)}</span>
                   <span style={{
                     fontSize: 12,
                     fontWeight: 700,
@@ -8753,46 +9045,37 @@ export default function POSScreen({
             </div>
 
             <div style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
-              Bu satışın bir kısmı tahsil edilmiştir.
-              Kalan tutarı tahsil edebilir veya satışı iptal edebilirsiniz.
-              İptal edilirse alınan ödeme iade edilir.
+              {pavoRecoveryState.paidAmount > 0.009
+                ? `${fmt(pavoRecoveryState.paidAmount)} alındı, ${fmt(pavoRecoveryState.remainingAmount)} kaldı.`
+                : 'Bu satış için tamamlanmış ödeme yok. Ödemeyi yeniden gönderebilir ya da satışı iptal edebilirsiniz.'}
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  const rec = pavoRecoveryState
-                  void (async () => {
-                    if (!pavoSettings || !rec) return
-                    try {
-                      const seq = await window.electron.db.nextPavoSequence()
-                      await pavoAbandonSuspendedSale(pavoSettings, seq, {
-                        saleId:     rec.ref.saleId,
-                        saleNumber: rec.ref.saleNumber,
-                        orderNo:    rec.orderNo,
-                      })
-                    } catch (e) {
-                      console.warn('[recovery] AbandonSuspendedSale hatası:', e)
-                    }
-                    setPavoRecoveryState(null)
-                    setPavoPendingSaleRef(null)
-                    setPaymentMode(false)
-                    setPaymentLines([])
-                    setActiveMethod(null)
-                    setPendingAmount('')
-                    setSelectedBrand(null)
-                    setCurrentOrderNo(null)
-                  })()
-                }}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 9,
-                  border: '1px solid #FECACA', background: 'var(--pos-soft-danger)',
-                  color: '#DC2626', fontWeight: 600, fontSize: 13, cursor: 'pointer',
-                }}>
-                Satışı İptal Et
-              </button>
-
+              {pavoRecoveryState.paidAmount <= 0.009 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { void resendLockedPayment() }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: 9, border: 'none',
+                      background: 'var(--pos-primary)', color: 'var(--pos-primary-text)',
+                      fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                    }}>
+                    Ödemeyi tekrar gönder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void cancelLockedSale() }}
+                    style={{
+                      flex: 1, padding: '10px', borderRadius: 9,
+                      border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                      color: 'var(--pos-text)', fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                    }}>
+                    Satışı iptal et
+                  </button>
+                </>
+              )}
+              {pavoRecoveryState.paidAmount > 0.009 && (
               <button
                 type="button"
                 onClick={() => {
@@ -8814,14 +9097,16 @@ export default function POSScreen({
                     totalPrice: rec.totalPrice,
                     paidAmount: rec.paidAmount,
                   })
+                  setPavoPhase('open', { orderNo: rec.orderNo, amount: rec.totalPrice })
                 }}
                 style={{
                   flex: 1, padding: '10px', borderRadius: 9,
                   border: 'none', background: 'var(--pos-text)',
                   color: 'white', fontWeight: 700, fontSize: 13, cursor: 'pointer',
                 }}>
-                Kalan Ödemeyi Al
+                Kalan ödemeyi al
               </button>
+              )}
             </div>
           </div>
         </div>

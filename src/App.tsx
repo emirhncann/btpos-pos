@@ -19,6 +19,8 @@ import { publishLocalPavoIfCloudEmpty, scheduleLocalSettingsBackup } from './lib
 import { maybeRunScheduledUpdate, reportAppVersion } from './lib/appUpdate'
 import { reloadSettings, setActiveCashierId, useSettings } from './hooks/useSettings'
 import { applyPosTheme, DEFAULT_THEME } from './theme/themes'
+import { SaleCompletedDialog } from './components/SaleCompletedDialog'
+import './lib/pavoRecovery'
 
 type AppState = 'loading' | 'activation' | 'restore' | 'initial_sync' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -358,6 +360,7 @@ export default function App() {
         cartActive={cartActive}
       />
       <UpdateBanner cartActive={cartActive} />
+      <SaleCompletedDialog />
       </>
     )
 
@@ -388,6 +391,7 @@ export default function App() {
       commandDeferred={hasDeferredCommand}
     />
     <UpdateBanner cartActive={cartActive} />
+    <SaleCompletedDialog />
     </>
   )
 }
