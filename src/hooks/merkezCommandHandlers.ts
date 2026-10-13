@@ -479,12 +479,8 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       try {
         const templates = await api.getTemplates(d.companyId)
         console.log('[sync_templates] API yanıtı, adet:', templates.length)
-        if (templates.length > 0) {
-          const saveResult = await window.electron.templates.save(templates)
-          console.log(`[sync_templates] ${saveResult.count} şablon SQLite'a yazıldı`)
-        } else {
-          console.warn('[sync_templates] API boş liste döndü')
-        }
+        const saveResult = await window.electron.templates.save(templates)
+        console.log(`[sync_templates] ${saveResult.count} şablon kasada`)
       } catch (e) {
         console.error('[sync_templates] hata:', e)
         throw e

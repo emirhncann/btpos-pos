@@ -218,4 +218,34 @@ describe('kasa / kasiyer ayar ayrımı', () => {
     expect(saved.devtoolsExpiresAt).toBe('2026-10-03T13:25:00.000Z')
     expect(saved.terminalInfo.terminalNumber).toBe('7')
   })
+
+  it('print_multi gelmezse kapalı kalır, kasiyer bazında yazılır', () => {
+    const old = db()
+    old.exec(`CREATE TABLE cashier_settings_cache (cashier_id TEXT PRIMARY KEY)`)
+    ensureSettingsTables(old)
+    const cols = new Set(
+      (old.prepare(`PRAGMA table_info(cashier_settings_cache)`).all() as { name: string }[]).map(c => c.name),
+    )
+    expect(cols.has('print_multi')).toBe(true)
+
+    const sqlite = db()
+    ensureSettingsTables(sqlite)
+    const bundle = parseSettingsBundle({
+      terminal: { invoice_type: 'e_archive' },
+      cashiers: [
+        { cashier_id: 'ahmet', print_multi: 1 },
+        { cashier_id: 'ayse' },
+        { cashier_id: 'mehmet', printMulti: false },
+      ],
+      payment_accounts: [],
+    })
+    expect(bundle.cashiers.find(c => c.cashierId === 'ahmet')?.printMulti).toBe(true)
+    expect(bundle.cashiers.find(c => c.cashierId === 'ayse')?.printMulti).toBe(false)
+    expect(bundle.cashiers.find(c => c.cashierId === 'mehmet')?.printMulti).toBe(false)
+
+    applySettingsBundle(sqlite, bundle, 'term-1')
+    expect(readCashierSettings(sqlite, 'ahmet').printMulti).toBe(true)
+    expect(readCashierSettings(sqlite, 'ayse').printMulti).toBe(false)
+    expect(readCashierSettings(sqlite, 'yok').printMulti).toBe(false)
+  })
 })

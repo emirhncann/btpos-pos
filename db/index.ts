@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 9
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -486,6 +486,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'customers_temp', 'district',    'district    TEXT NOT NULL DEFAULT \'\'')
   addColumnIfMissing(sqlite, 'customers',      'email',       'email       TEXT')
   addColumnIfMissing(sqlite, 'customers_temp', 'email',       'email       TEXT')
+  addColumnIfMissing(sqlite, 'customers',      'balance_updated_at', 'balance_updated_at TEXT')
+  addColumnIfMissing(sqlite, 'customers_temp', 'balance_updated_at', 'balance_updated_at TEXT')
 
   addColumnIfMissing(sqlite, 'sales', 'customer_id', 'customer_id TEXT')
   addColumnIfMissing(sqlite, 'sales', 'customer_name', 'customer_name TEXT')

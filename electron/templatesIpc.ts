@@ -7,11 +7,9 @@ import type Database from 'better-sqlite3'
 import {
   DEFAULT_PRINT_BEHAVIOR,
   normalizePrintBehavior,
-  parseTemplateSchema,
   type PrintBehavior,
   type RenderData,
 } from '../src/lib/templateEngine'
-import { renderHtml, renderThermal } from './templateRenderer'
 import { isPdfmeTemplate, renderPdfme, renderThermalReceipt } from './pdfmeRenderer'
 import {
   isPrinterActive,
@@ -66,11 +64,6 @@ async function doPrint(
 
     if (!tpl) return { success: false, message: 'Şablon bulunamadı' }
 
-    const printerCfg = getPrinterRow(db)
-    if (!printerCfg || !isPrinterActive(printerCfg)) {
-      return { success: false, message: 'Yazıcı ayarı yok' }
-    }
-
     let templateJson: unknown
     try {
       templateJson = typeof tpl.schema === 'string'
@@ -84,31 +77,32 @@ async function doPrint(
       return { success: false, message: 'Geçersiz pdfme şablonu — schemas veya basePdf eksik' }
     }
 
-    const config = settingsRowToConfig(printerCfg)
-    const paperW = Number(tpl.paper_width_mm ?? 80)
-    const isThermal = paperW <= 120
+    const bp = (templateJson as { basePdf?: { width?: number } }).basePdf
+    const paperW = Number((bp && typeof bp === 'object' && bp.width) || tpl.paper_width_mm || 80)
+    const isThermal = tpl.template_type !== 'pdf'
 
-    console.log('[doPrint] paper:', paperW, 'mm, termal:', isThermal)
+    console.log('[doPrint] tür:', tpl.template_type, 'kağıt:', paperW, 'mm, termal:', isThermal)
 
     if (isThermal) {
-      console.log('[doPrint] pdfme → ESC/POS')
-      const escBuf = await renderThermalReceipt(templateJson, data, paperW)
-      console.log('[doPrint] ESC/POS boyut:', escBuf.length, 'bytes')
-      await printReceipt(config, escBuf)
-    } else {
-      console.log('[doPrint] pdfme → PDF')
-      const pdfBuf = await renderPdfme(templateJson, data)
-      console.log('[doPrint] PDF boyut:', pdfBuf.length, 'bytes')
-
-      if (printerCfg.printer_type === 'network') {
-        console.log('[doPrint] PDF yazıcıya gönderiliyor (ağ)...')
-        await printReceipt(config, pdfBuf)
-      } else {
-        console.log('[doPrint] PDF yazıcıya gönderiliyor...')
-        await printPdfBuffer(db, pdfBuf, printerCfg)
+      const printerCfg = getPrinterRow(db)
+      if (!printerCfg || !isPrinterActive(printerCfg)) {
+        return { success: false, message: 'Fiş yazıcısı tanımlı değil' }
       }
+      const printerW = Number(printerCfg.paper_width ?? 80)
+      if ((printerW <= 58) !== (paperW <= 58)) {
+        console.warn(`[doPrint] Şablon ${paperW} mm, yazıcı ${printerW} mm — şablon yazıcıya uygun değil`)
+      }
+      const escBuf = await renderThermalReceipt(templateJson, data, paperW)
+      await printReceipt(settingsRowToConfig(printerCfg), escBuf)
+    } else {
+      const doc = db.prepare('SELECT printer_name FROM document_printer_settings WHERE id = 1')
+        .get() as { printer_name?: string | null } | undefined
+      if (!doc?.printer_name) {
+        return { success: false, message: 'Belge yazıcısı tanımlı değil (Cihazlar › Belge yazıcısı)' }
+      }
+      const pdfBuf = await renderPdfme(templateJson, data)
+      await printPdfBuffer(db, pdfBuf, { printer_name: doc.printer_name } as PrinterSettingsRow)
     }
-
     return { success: true }
   } catch (e) {
     console.error('[doPrint]', e)
@@ -118,39 +112,6 @@ async function doPrint(
 
 function getPrinterRow(db: Database.Database): PrinterSettingsRow | undefined {
   return db.prepare('SELECT * FROM printer_settings LIMIT 1').get() as PrinterSettingsRow | undefined
-}
-
-async function printRawBuffer(db: Database.Database, buf: Buffer): Promise<void> {
-  const printerCfg = getPrinterRow(db)
-  if (!printerCfg || !isPrinterActive(printerCfg)) {
-    throw new Error('Yazıcı ayarı yok')
-  }
-  await printReceipt(settingsRowToConfig(printerCfg), buf)
-}
-
-export async function renderPdfBuffer(
-  html: string,
-  widthMm: number,
-  heightMm: number | null,
-): Promise<Buffer> {
-  const win = new BrowserWindow({
-    show: false,
-    webPreferences: { offscreen: true },
-  })
-  try {
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
-    const h = heightMm ?? 297
-    const pdfBuf = await win.webContents.printToPDF({
-      pageSize: {
-        width:  (widthMm / 25.4) * 72,
-        height: (h / 25.4) * 72,
-      },
-      printBackground: true,
-    })
-    return Buffer.from(pdfBuf)
-  } finally {
-    if (!win.isDestroyed()) win.close()
-  }
 }
 
 async function printPdfBuffer(
@@ -253,70 +214,31 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
         synced_at       = excluded.synced_at
     `)
     const syncedAt = new Date().toISOString()
-    const upsertMany = db.transaction((rows: unknown[]) => {
+
+    const syncAll = db.transaction((rows: unknown[]) => {
+      const ids: string[] = []
       for (const raw of rows) {
         const t = normalizeTemplateRow(raw as Record<string, unknown>)
+        if (t.template_type === 'label') continue
         stmt.run(
           t.id, t.name, t.trigger_type, t.template_type,
           t.paper_width_mm, t.paper_height_mm,
           t.schema, t.is_default, syncedAt,
         )
+        ids.push(t.id)
       }
+      if (ids.length) {
+        db.prepare(
+          `DELETE FROM receipt_templates WHERE id NOT IN (${ids.map(() => '?').join(',')})`,
+        ).run(...ids)
+      } else {
+        db.prepare('DELETE FROM receipt_templates').run()
+      }
+      return ids.length
     })
-    upsertMany(templates)
-    return { success: true as const, count: templates.length }
-  })
 
-  ipcMain.handle('templates:printThermal', async (_e, opts: {
-    triggerType: string
-    data: RenderData
-  }) => {
-    try {
-      const tpl = db.prepare(`
-        SELECT * FROM receipt_templates
-        WHERE trigger_type = ? AND is_default = 1 AND template_type = 'thermal'
-        LIMIT 1
-      `).get(opts.triggerType) as Record<string, unknown> | undefined
-
-      if (!tpl) return { success: false as const, message: 'Şablon bulunamadı' }
-
-      const schema = parseTemplateSchema(tpl.schema)
-      const escBuf = renderThermal(schema, opts.data, Number(tpl.paper_width_mm ?? 80))
-      await printRawBuffer(db, escBuf)
-      return { success: true as const }
-    } catch (e) {
-      return { success: false as const, message: String(e) }
-    }
-  })
-
-  ipcMain.handle('templates:printPdf', async (_e, opts: {
-    triggerType: string
-    data: RenderData
-  }) => {
-    try {
-      const tpl = db.prepare(`
-        SELECT * FROM receipt_templates
-        WHERE trigger_type = ? AND is_default = 1 AND template_type = 'pdf'
-        LIMIT 1
-      `).get(opts.triggerType) as Record<string, unknown> | undefined
-
-      if (!tpl) return { success: false as const, message: 'Şablon bulunamadı' }
-
-      const schema = parseTemplateSchema(tpl.schema)
-      const paperW = Number(tpl.paper_width_mm ?? 80)
-      const paperH = tpl.paper_height_mm != null ? Number(tpl.paper_height_mm) : null
-      const html   = renderHtml(schema, opts.data, paperW, paperH)
-      const pdfBuf = await renderPdfBuffer(html, paperW, paperH)
-
-      const printerCfg = getPrinterRow(db)
-      if (!printerCfg || !isPrinterActive(printerCfg)) {
-        return { success: false as const, message: 'Yazıcı ayarı yok' }
-      }
-      await printPdfBuffer(db, pdfBuf, printerCfg)
-      return { success: true as const }
-    } catch (e) {
-      return { success: false as const, message: String(e) }
-    }
+    const count = syncAll(templates)
+    return { success: true as const, count }
   })
 
   ipcMain.handle('templates:printWithBehavior', async (_e, opts: {
@@ -334,13 +256,25 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
       }
 
       const templates = db.prepare(`
-        SELECT id, name, template_type, is_default
+        SELECT id, name, template_type, is_default, schema
         FROM receipt_templates
         WHERE trigger_type = ?
         ORDER BY is_default DESC, name
       `).all(opts.triggerType) as Array<{
-        id: string; name: string; template_type: string; is_default: number
+        id: string
+        name: string
+        template_type: string
+        is_default: number
+        schema: string
       }>
+
+      const toItem = (t: (typeof templates)[number]) => ({
+        id:            String(t.id),
+        name:          String(t.name),
+        template_type: String(t.template_type),
+        is_default:    t.is_default === 1,
+        schema:        String(t.schema ?? ''),
+      })
 
       if (!templates.length) {
         return { success: false as const, message: 'Şablon bulunamadı' }
@@ -352,31 +286,29 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
         return await doPrint(db, tpl.id, opts.data)
       }
 
-      if (templates.length === 1) {
-        return await doPrint(db, String(templates[0].id), opts.data)
-      }
-
-      if (behavior === 'default') {
-        const defaultIds = getDefaultTemplateIds(db)
-        const configuredId = defaultIds[opts.triggerType]
-        const def = (configuredId
-          ? templates.find(t => String(t.id) === configuredId)
-          : undefined)
-          ?? templates.find(t => t.is_default === 1)
-          ?? templates[0]
-        return await doPrint(db, String(def.id), opts.data)
+      if (templates.length === 1 || behavior === 'default') {
+        let chosen = templates[0]
+        if (templates.length > 1) {
+          const defaultIds = getDefaultTemplateIds(db)
+          const configuredId = defaultIds[opts.triggerType]
+          chosen = (configuredId
+            ? templates.find(t => String(t.id) === configuredId)
+            : undefined)
+            ?? templates.find(t => t.is_default === 1)
+            ?? templates[0]
+        }
+        return {
+          success:      true as const,
+          pendingPrint: true as const,
+          template:     toItem(chosen),
+        }
       }
 
       if (behavior === 'ask') {
         return {
           success:        true as const,
           needsSelection: true as const,
-          templates:      templates.map(t => ({
-            id:            String(t.id),
-            name:          String(t.name),
-            template_type: String(t.template_type),
-            is_default:    t.is_default === 1,
-          })),
+          templates:      templates.map(toItem),
           data: opts.data,
         }
       }

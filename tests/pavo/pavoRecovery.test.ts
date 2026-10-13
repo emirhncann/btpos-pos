@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canCancelRecovery, classifyProbe, displayPaymentsOf, paymentTotals, recoveryDelayMs, shownRecoveryState, type RecoveryInfo } from '../../src/lib/pavoRecovery'
+import { canCancelRecovery, classifyProbe, displayPaymentsOf, paymentTotals, recoveryDelayMs, saleGoneFromDevice, shownRecoveryState, type RecoveryInfo } from '../../src/lib/pavoRecovery'
 import { saleCompletedMs } from '../../src/store/saleCompleted'
 
 describe('satış tamamlandı süresi', () => {
@@ -107,5 +107,12 @@ describe('pavo kurtarma sınıflaması', () => {
       waitingSince: null,
       unreachableSince: Date.now() - 121_000,
     })).toBe(true)
+  })
+
+  it('cihaz satışı tanımıyorsa ve askıda da yoksa kilit kalkar', () => {
+    expect(saleGoneFromDevice({ notFound: true }, { kind: 'absent' })).toBe(true)
+    expect(saleGoneFromDevice({ notFound: true }, { kind: 'miss' })).toBe(false)
+    expect(saleGoneFromDevice({ notFound: false }, { kind: 'absent' })).toBe(false)
+    expect(saleGoneFromDevice({}, { kind: 'waiting' })).toBe(false)
   })
 })

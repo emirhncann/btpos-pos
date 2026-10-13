@@ -36,8 +36,11 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
-    "@pdfme/generator": "^6.1.2",
-    "@pdfme/schemas": "^6.1.2",
+    "@pdfme/common": "file:vendor/pdfme/pdfme-common-6.2.4-btpos.2.tgz",
+    "@pdfme/converter": "file:vendor/pdfme/pdfme-converter-6.2.4-btpos.2.tgz",
+    "@pdfme/generator": "file:vendor/pdfme/pdfme-generator-6.2.4-btpos.2.tgz",
+    "@pdfme/pdf-lib": "file:vendor/pdfme/pdfme-pdf-lib-6.2.4-btpos.2.tgz",
+    "@pdfme/schemas": "file:vendor/pdfme/pdfme-schemas-6.2.4-btpos.2.tgz",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-slot": "^1.0.2",
@@ -49,13 +52,18 @@
     "drizzle-orm": "^0.29.4",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.9",
-    "jimp": "^1.6.1",
     "lucide-react": "^0.321.0",
     "pdfjs-dist": "^3.11.174",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "serialport": "^13.0.0",
     "tailwind-merge": "^2.2.1"
+  },
+  "overrides": {
+    "@pdfme/common": "$@pdfme/common",
+    "@pdfme/schemas": "$@pdfme/schemas",
+    "@pdfme/pdf-lib": "$@pdfme/pdf-lib",
+    "@pdfme/converter": "$@pdfme/converter"
   },
   "build": {
     "npmRebuild": false,
@@ -69,7 +77,8 @@
       "!**/.claude/**",
       "!.btpos-dev/**",
       "!release/**",
-      "!release-*/**"
+      "!release-*/**",
+      "!vendor/**"
     ],
     "asar": true,
     "asarUnpack": [

@@ -4,137 +4,62 @@ import { tmpdir } from 'os'
 import { pathToFileURL } from 'url'
 import { app, BrowserWindow } from 'electron'
 import { generate } from '@pdfme/generator'
-import type { Template } from '@pdfme/common'
-import {
-  text as textPlugin,
-  multiVariableText,
-  image,
-  table as tablePlugin,
-  line as linePlugin,
-  rectangle,
-  barcodes,
-} from '@pdfme/schemas'
-import { Jimp, intToRGBA } from 'jimp'
-import { init, cut, feed, align, bold, text } from './escpos'
+import type { Font, Template } from '@pdfme/common'
+import { btposPlugins } from '@pdfme/schemas'
+import { init, cut, feed } from './escpos'
 import {
   buildPdfmeInputs,
-  resolveTemplateVariables,
-  templateNeedsPdfPipeline,
   type RenderData,
 } from '../src/lib/templateEngine'
 
-const THERMAL_DPI = 203
-const DATA_IMAGE_RE = /^data:image\/(png|jpeg|jpg);base64,/i
+/** 203 dpi termal yazıcı: 8 nokta/mm */
+const DOTS_PER_MM = 8
 
-/** pdfme generate() için plugin kaydı — şablondaki type ile eşleşmeli */
-const PDFME_PLUGINS = {
-  text: textPlugin,
-  multiVariableText,
-  image,
-  table: tablePlugin,
-  line: linePlugin,
-  rectangle,
-  qrcode: barcodes.qrcode,
+/** Kağıt genişliği → yazıcının basabildiği genişlik (mm) */
+export function printableWidthMm(paperWidthMm: number): number {
+  const w = Number(paperWidthMm)
+  if (w <= 58) return 48
+  return 72
 }
 
-/** Termal spacer vb. — PDF üretiminde yok; ESC/POS tarafında işlenir */
-const SKIP_IN_PDF_GENERATE = new Set(['spacer'])
+/** Eşik: 0–255. Büyüdükçe yazı kalınlaşır. Gri tonlar eşiğin altındaysa siyah basılır. */
+const THRESHOLD = 160
 
-type ProductListColumn = {
-  key: string
-  label: string
-  widthPct?: number
-  visible?: boolean
-  align?: 'left' | 'center' | 'right'
-}
+/** Editör ve Mağaza Paneli ile AYNI adlar — değiştirme */
+const BTPOS_FONTS = [
+  { name: 'Roboto',                file: 'Roboto-Regular.ttf',          fallback: true  },
+  { name: 'Roboto Bold',           file: 'Roboto-Bold.ttf',             fallback: false },
+  { name: 'Roboto Condensed',      file: 'RobotoCondensed-Regular.ttf', fallback: false },
+  { name: 'Roboto Condensed Bold', file: 'RobotoCondensed-Bold.ttf',    fallback: false },
+] as const
 
-const TABLE_BOX_DIM = { top: 0.1, right: 0.1, bottom: 0.1, left: 0.1 }
-const TABLE_PADDING = { top: 2, right: 2, bottom: 2, left: 2 }
+let fontCache: Font | null | undefined
 
-function defaultTableCellStyles(fontSize = 8) {
-  return {
-    fontName: undefined,
-    alignment: 'left' as const,
-    verticalAlignment: 'middle' as const,
-    fontSize,
-    lineHeight: 1,
-    characterSpacing: 0,
-    fontColor: '#000000',
-    backgroundColor: '',
-    borderColor: '#888888',
-    borderWidth: TABLE_BOX_DIM,
-    padding: TABLE_PADDING,
-  }
-}
-
-/** product-list → table (pdfme table eklentisi zorunlu stilleri) */
-function adaptProductListSchemas(t: Template): Template {
-  t.schemas = t.schemas.map(page =>
-    page.map(field => {
-      if (String(field.type) !== 'product-list') return field
-      const f = field as typeof field & {
-        columns?: ProductListColumn[]
-        showHead?: boolean
-        fontSize?: number
-      }
-      const visible = (f.columns ?? []).filter(c => c.visible !== false)
-      const fontSize = f.fontSize ?? 8
-      const cell = defaultTableCellStyles(fontSize)
-
-      const columnAlignment: Record<number, 'left' | 'center' | 'right'> = {}
-      visible.forEach((col, i) => {
-        if (col.align) columnAlignment[i] = col.align
-      })
-
-      return {
-        ...field,
-        type: 'table',
-        head: visible.map(c => c.label),
-        headWidthPercentages: visible.map(c => c.widthPct ?? Math.floor(100 / Math.max(visible.length, 1))),
-        showHead: f.showHead ?? true,
-        repeatHead: false,
-        tableStyles: {
-          borderColor: '#000000',
-          borderWidth: 0.3,
-        },
-        headStyles: {
-          ...cell,
-          backgroundColor: '',
-          borderColor: '',
-          borderWidth: { top: 0, right: 0, bottom: 0, left: 0 },
-        },
-        bodyStyles: {
-          ...cell,
-          alternateBackgroundColor: '',
-        },
-        columnStyles: {
-          alignment: columnAlignment,
-        },
-      }
-    }),
-  ) as Template['schemas']
-  return t
-}
-
-function prepareTemplateForGenerate(templateJson: unknown): Template {
-  const t = JSON.parse(JSON.stringify(templateJson)) as Template
-  t.schemas = t.schemas.map(page =>
-    page.filter(f => !SKIP_IN_PDF_GENERATE.has(String(f.type))),
-  ) as Template['schemas']
-  return adaptProductListSchemas(t)
-}
-
-function getFontData(): Buffer | null {
-  const candidates = [
-    path.join(process.resourcesPath, 'fonts', 'Roboto-Regular.ttf'),
-    path.join(app.getAppPath(), 'resources', 'fonts', 'Roboto-Regular.ttf'),
-    path.join(app.getAppPath(), 'electron', 'fonts', 'Roboto-Regular.ttf'),
+/** resources/fonts altındaki 4 fontu bir kez okur. Hiçbiri yoksa undefined (pdfme varsayılanı). */
+function getFonts(): Font | undefined {
+  if (fontCache !== undefined) return fontCache ?? undefined
+  const dirs = [
+    path.join(process.resourcesPath, 'fonts'),
+    path.join(app.getAppPath(), 'resources', 'fonts'),
+    path.join(app.getAppPath(), 'electron', 'fonts'),
   ]
-  for (const p of candidates) {
-    if (fs.existsSync(p)) return fs.readFileSync(p)
+  const dir = dirs.find(d => fs.existsSync(path.join(d, 'Roboto-Regular.ttf')))
+  if (!dir) {
+    console.warn('[pdfme] Font klasörü bulunamadı, pdfme varsayılan fontu kullanılacak')
+    fontCache = null
+    return undefined
   }
-  console.warn('[pdfme] Font bulunamadı, sistem fontu kullanılacak')
-  return null
+  const font: Font = {}
+  for (const f of BTPOS_FONTS) {
+    const p = path.join(dir, f.file)
+    if (fs.existsSync(p)) {
+      font[f.name] = { data: new Uint8Array(fs.readFileSync(p)), fallback: f.fallback }
+    } else {
+      console.warn('[pdfme] Font eksik:', p)
+    }
+  }
+  fontCache = font
+  return font
 }
 
 function getPdfJsDir(): string | null {
@@ -149,10 +74,6 @@ function getPdfJsDir(): string | null {
   return null
 }
 
-function resolveContent(content: string, data: RenderData): string {
-  return resolveTemplateVariables(content, data)
-}
-
 export function isPdfmeTemplate(templateJson: unknown): boolean {
   const t = templateJson as { schemas?: unknown; basePdf?: unknown }
   if (!t.schemas) return false
@@ -162,395 +83,172 @@ export function isPdfmeTemplate(templateJson: unknown): boolean {
   return false
 }
 
-/** Termal kağıt genişliği (mm) → yazıcı dot genişliği */
-export function thermalPaperWidthPx(paperWidthMm: number): number {
-  const mm = Number(paperWidthMm)
-  if (!Number.isFinite(mm) || mm <= 0) return Math.round((80 / 25.4) * THERMAL_DPI)
-  return Math.round((mm / 25.4) * THERMAL_DPI)
-}
-
-interface PdfmeField {
-  name: string
-  type: string
-  content?: string
-  position?: { x: number; y: number }
-  width?: number
-  height?: number
-  fontSize?: number
-  alignment?: 'left' | 'center' | 'right'
-  fontStyle?: string
-  borderWidth?: { top: number; right: number; bottom: number; left: number }
-}
-
-const TEXT_FIELD_TYPES = new Set(['text', 'multiVariableText'])
-
-function fontSizeCmd(fontSize: number): Buffer {
-  if (fontSize >= 24) return Buffer.from([0x1D, 0x21, 0x11])
-  if (fontSize >= 18) return Buffer.from([0x1D, 0x21, 0x10])
-  if (fontSize >= 16) return Buffer.from([0x1D, 0x21, 0x01])
-  return Buffer.from([0x1D, 0x21, 0x00])
-}
-
-function renderSingleField(
-  field: PdfmeField,
-  data: RenderData,
-  charWidth: number,
-): Buffer[] {
-  if (!TEXT_FIELD_TYPES.has(field.type)) return []
-
-  const content = resolveContent(field.content ?? '', data)
-  if (!content.trim()) return []
-
-  const bufs: Buffer[] = []
-  const al = field.alignment === 'center' ? 'center'
-    : field.alignment === 'right' ? 'right' : 'left'
-
-  bufs.push(align(al))
-  bufs.push(fontSizeCmd(field.fontSize ?? 12))
-
-  const isBold = field.fontStyle === 'bold' || (field.fontSize ?? 0) >= 16
-  if (isBold) bufs.push(bold(true))
-
-  bufs.push(text(content))
-
-  if (isBold) bufs.push(bold(false))
-  if ((field.fontSize ?? 12) >= 16) bufs.push(fontSizeCmd(12))
-
-  return bufs
-}
-
-function renderMultiField(
-  fields: PdfmeField[],
-  data: RenderData,
-  charWidth: number,
-  paperWidthMm: number,
-): Buffer[] {
-  const sorted = [...fields].sort(
-    (a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0),
-  )
-
-  const line = Array<string>(charWidth).fill(' ')
-
-  for (const f of sorted) {
-    if (!TEXT_FIELD_TYPES.has(f.type)) continue
-
-    const content = resolveContent(f.content ?? '', data)
-    if (!content.trim()) continue
-
-    const xRatio = (f.position?.x ?? 0) / paperWidthMm
-    let charPos = Math.round(xRatio * charWidth)
-
-    if (f.alignment === 'right') {
-      const fieldWidthRatio = (f.width ?? 20) / paperWidthMm
-      const fieldEndChar = Math.round((xRatio + fieldWidthRatio) * charWidth)
-      charPos = Math.max(0, fieldEndChar - content.length)
-    }
-
-    if (f.alignment === 'center') {
-      const fieldWidthRatio = (f.width ?? 20) / paperWidthMm
-      const fieldStartChar = charPos
-      const fieldWidthChar = Math.round(fieldWidthRatio * charWidth)
-      charPos = fieldStartChar + Math.floor((fieldWidthChar - content.length) / 2)
-    }
-
-    charPos = Math.max(0, charPos)
-
-    for (let i = 0; i < content.length; i++) {
-      const pos = charPos + i
-      if (pos < charWidth) line[pos] = content[i]
-    }
-  }
-
-  const hasBold = fields.some(
-    f => f.fontStyle === 'bold' || (f.fontSize ?? 0) >= 16,
-  )
-  const maxFontSize = Math.max(...fields.map(f => f.fontSize ?? 12))
-
-  const bufs: Buffer[] = []
-  bufs.push(align('left'))
-  bufs.push(fontSizeCmd(maxFontSize))
-  if (hasBold) bufs.push(bold(true))
-  bufs.push(text(line.join('')))
-  if (hasBold) bufs.push(bold(false))
-  if (maxFontSize >= 16) bufs.push(fontSizeCmd(12))
-
-  return bufs
-}
-
-/** pdfme JSON → ESC/POS metin (görsel yok; hızlı yol) */
-export function pdfmeToEscPos(
-  templateJson: unknown,
-  data: RenderData,
-  paperW: number,
-): Buffer {
-  const template = templateJson as {
-    schemas: PdfmeField[][]
-    basePdf: { width?: number } | string
-  }
-
-  if (!template.schemas?.[0]) {
-    throw new Error('Geçersiz şablon — schemas[0] yok')
-  }
-
-  const charWidth = paperW <= 58 ? 32 : 42
-  const paperWidthMm = typeof template.basePdf === 'object' && template.basePdf?.width
-    ? template.basePdf.width
-    : paperW
-  const fields = template.schemas[0]
-
-  const sorted = [...fields].sort(
-    (a, b) => (a.position?.y ?? 0) - (b.position?.y ?? 0),
-  )
-
-  const Y_TOLERANCE = 3
-  const rows: PdfmeField[][] = []
-
-  for (const field of sorted) {
-    const fy = field.position?.y ?? 0
-
-    if (rows.length > 0) {
-      const lastRow = rows[rows.length - 1]
-      const lastRowY = lastRow[0].position?.y ?? 0
-      if (Math.abs(fy - lastRowY) <= Y_TOLERANCE) {
-        lastRow.push(field)
-        continue
-      }
-    }
-
-    rows.push([field])
-  }
-
-  const bufs: Buffer[] = [init()]
-  const MM_PER_LINE = 4
-  let currentMm = 0
-
-  for (const row of rows) {
-    const rowY = row[0].position?.y ?? 0
-    const gapMm = rowY - currentMm
-
-    if (gapMm > MM_PER_LINE * 1.5) {
-      const extraLines = Math.floor(gapMm / MM_PER_LINE) - 1
-      if (extraLines > 0) bufs.push(feed(Math.min(extraLines, 5)))
-    }
-
-    if (row.length === 1 && row[0].type === 'spacer') {
-      const h = row[0].height ?? MM_PER_LINE
-      const lines = Math.max(1, Math.round(h / MM_PER_LINE))
-      bufs.push(feed(lines))
-      currentMm = rowY + h
-      continue
-    }
-
-    if (
-      row.length === 1 &&
-      (
-        row[0].type === 'line' ||
-        ((row[0].borderWidth?.top ?? 0) > 0 && !resolveContent(row[0].content ?? '', data).trim())
-      )
-    ) {
-      bufs.push(align('left'))
-      bufs.push(text('─'.repeat(charWidth)))
-      currentMm = rowY + (row[0].height ?? MM_PER_LINE)
-      continue
-    }
-
-    if (row.some(f => f.type === 'image')) continue
-
-    const rowBufs = row.length === 1
-      ? renderSingleField(row[0], data, charWidth)
-      : renderMultiField(row, data, charWidth, paperWidthMm)
-
-    if (rowBufs.length > 0) bufs.push(...rowBufs)
-
-    const rowHeight = Math.max(...row.map(f => f.height ?? MM_PER_LINE))
-    currentMm = rowY + rowHeight
-  }
-
-  bufs.push(fontSizeCmd(12))
-  bufs.push(bold(false))
-  bufs.push(feed(4))
-  bufs.push(cut())
-
-  return Buffer.concat(bufs)
-}
-
-export async function renderPdfme(
-  templateJson: unknown,
-  data: RenderData,
-): Promise<Buffer> {
-  if (!isPdfmeTemplate(templateJson)) {
-    throw new Error('Geçersiz pdfme şablonu — schemas veya basePdf eksik')
-  }
-
-  const template = prepareTemplateForGenerate(templateJson)
+export async function renderPdfme(templateJson: unknown, data: RenderData): Promise<Buffer> {
+  if (!isPdfmeTemplate(templateJson)) throw new Error('Geçersiz pdfme şablonu — schemas veya basePdf eksik')
+  const template = JSON.parse(JSON.stringify(templateJson)) as Template
   const schema = template.schemas[0] ?? []
-  const inputs: Record<string, unknown>[] = [
-    buildPdfmeInputs(data, schema as { name: string; content?: string; type?: string }[]),
-  ]
+  const bp = template.basePdf as { width?: number; height?: number } | string
+  const isRoll = typeof bp === 'object' && (bp.width ?? 0) <= 80 && (bp.height ?? 0) >= 100
 
-  const fontData = getFontData()
-  const font = fontData
-    ? { Roboto: { data: new Uint8Array(fontData), fallback: true } }
-    : undefined
-
+  const font = getFonts()
   const pdfBytes = await generate({
     template,
-    inputs,
-    plugins: PDFME_PLUGINS,
-    ...(font ? { options: { font } } : {}),
+    inputs: [buildPdfmeInputs(data, schema as { name: string; content?: string; type?: string }[])],
+    plugins: btposPlugins,
+    options: {
+      ...(font ? { font } : {}),
+      dynamicHeight: isRoll,
+    },
   })
-
   return Buffer.from(pdfBytes)
 }
 
-export async function pdfToPng(
-  pdfBuf: Buffer,
-  paperWidthMm = 80,
-): Promise<Buffer> {
-  const captureWidthPx = thermalPaperWidthPx(paperWidthMm)
+type GrayImage = { width: number; height: number; data: Uint8Array }
+
+/**
+ * PDF'in sayfalarını tam 8 nokta/mm ölçekte gri tonlu piksellere çevirir.
+ * Gizli pencerede pdf.js + canvas; capturePage kullanılmaz.
+ */
+export async function pdfToGray(pdfBuf: Buffer): Promise<GrayImage> {
   const pdfJsDir = getPdfJsDir()
-  if (!pdfJsDir) {
-    throw new Error('pdf.js dosyaları bulunamadı (resources/pdfjs)')
-  }
+  if (!pdfJsDir) throw new Error('pdf.js dosyaları bulunamadı (resources/pdfjs)')
 
-  const pdfJsUrl = pathToFileURL(path.join(pdfJsDir, 'pdf.min.js')).href
+  const pdfJsUrl  = pathToFileURL(path.join(pdfJsDir, 'pdf.min.js')).href
   const workerUrl = pathToFileURL(path.join(pdfJsDir, 'pdf.worker.min.js')).href
-  const b64 = pdfBuf.toString('base64')
+  const scale     = (DOTS_PER_MM * 25.4) / 72
 
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<script src="${pdfJsUrl}"></script>
-</head>
-<body style="margin:0;padding:0;overflow:hidden;background:white;">
-<canvas id="c"></canvas>
-<script>
+  const html = `<!DOCTYPE html><html><head><script src="${pdfJsUrl}"></script></head>
+<body style="margin:0;background:#fff"><canvas id="c"></canvas><script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = '${workerUrl}';
-const TARGET_W = ${captureWidthPx};
-const data = atob('${b64}');
-const arr = new Uint8Array(data.length);
-for (let i = 0; i < data.length; i++) arr[i] = data.charCodeAt(i);
-pdfjsLib.getDocument({ data: arr }).promise.then(pdf => pdf.getPage(1)).then(page => {
-  const vp1 = page.getViewport({ scale: 1 });
-  const scale = TARGET_W / vp1.width;
-  const vp = page.getViewport({ scale });
+window.__render = async (b64) => {
+  const bin = atob(b64); const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const pdf = await pdfjsLib.getDocument({ data: arr }).promise;
   const c = document.getElementById('c');
-  c.width = TARGET_W;
-  c.height = Math.round(vp.height);
-  page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise.then(() => {
-    document.title = 'READY:' + c.height;
-  });
-});
-</script>
-</body>
-</html>`
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const parts = []; let width = 0, height = 0;
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const vp   = page.getViewport({ scale: ${scale} });
+    c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const rgba = ctx.getImageData(0, 0, c.width, c.height).data;
+    const gray = new Uint8Array(c.width * c.height);
+    for (let i = 0, j = 0; i < rgba.length; i += 4, j++) {
+      gray[j] = (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) / 1000;
+    }
+    width = c.width; height += c.height; parts.push(gray);
+  }
+  const all = new Uint8Array(width * height); let off = 0;
+  for (const g of parts) { all.set(g.subarray(0, Math.min(g.length, all.length - off)), off); off += g.length; }
+  let s = ''; const CH = 0x8000;
+  for (let i = 0; i < all.length; i += CH) s += String.fromCharCode.apply(null, all.subarray(i, i + CH));
+  return { width, height, b64: btoa(s) };
+};
+document.title = 'READY';
+</script></body></html>`
 
-  const tmpHtml = path.join(tmpdir(), `btpos_${Date.now()}.html`)
+  const tmpHtml = path.join(tmpdir(), `btpos_raster_${Date.now()}.html`)
   fs.writeFileSync(tmpHtml, html)
-
   const win = new BrowserWindow({
-    show: false,
-    width: captureWidthPx,
-    height: 1400,
-    webPreferences: { contextIsolation: false, webSecurity: false },
+    show: false, width: 400, height: 400,
+    webPreferences: { contextIsolation: false, webSecurity: false, offscreen: true },
   })
-
   try {
     await win.loadFile(tmpHtml)
-
-    const height = await new Promise<number>((resolve, reject) => {
-      const start = Date.now()
-      const check = async () => {
-        if (win.isDestroyed()) {
-          reject(new Error('Pencere kapandı'))
-          return
-        }
-        try {
-          const title = String(await win.webContents.executeJavaScript('document.title || ""'))
-          if (title.startsWith('READY:')) {
-            resolve(parseInt(title.replace('READY:', ''), 10))
-            return
-          }
-        } catch {
-          /* pdf.js henüz hazır değil */
-        }
-        if (Date.now() - start > 15000) {
-          reject(new Error('PDF render timeout'))
-          return
-        }
-        setTimeout(check, 300)
-      }
-      setTimeout(check, 1000)
-    })
-
-    await new Promise(r => setTimeout(r, 500))
-
-    const image = await win.webContents.capturePage({
-      x: 0,
-      y: 0,
-      width: captureWidthPx,
-      height,
-    })
-    return image.toPNG()
+    const res = await win.webContents.executeJavaScript(
+      `window.__render(${JSON.stringify(pdfBuf.toString('base64'))})`,
+    ) as { width: number; height: number; b64: string }
+    return { width: res.width, height: res.height, data: new Uint8Array(Buffer.from(res.b64, 'base64')) }
   } finally {
     if (!win.isDestroyed()) win.close()
-    try {
-      fs.unlinkSync(tmpHtml)
-    } catch {
-      /* yok say */
-    }
+    try { fs.unlinkSync(tmpHtml) } catch { /* yok say */ }
   }
 }
 
-export async function pngToEscPos(
-  pngBuf: Buffer,
-  paperWidthMm = 80,
-): Promise<Buffer> {
-  const targetWidth = thermalPaperWidthPx(paperWidthMm)
-  const img = await Jimp.read(pngBuf)
-  img.greyscale()
+/**
+ * Gri görüntü → ESC/POS (GS v 0).
+ * Yanlardaki basılamayan şeridi kırpar, eşikler, alttaki boşluğu keser.
+ */
+export function grayToEscPos(img: GrayImage, paperWidthMm: number, threshold = THRESHOLD): Buffer {
+  const printMm = printableWidthMm(paperWidthMm)
+  const outW    = printMm * DOTS_PER_MM
+  const bpr     = outW / 8
+  const cropX   = Math.max(0, Math.round((img.width - outW) / 2))
 
-  if (img.bitmap.width !== targetWidth) {
-    img.resize({ w: targetWidth })
-  }
-
-  const width = img.bitmap.width
-  const height = img.bitmap.height
-  const bytesPerRow = Math.ceil(width / 8)
-  const bufs: Buffer[] = [align('center')]
-
-  for (let y = 0; y < height; y++) {
-    const row = new Uint8Array(bytesPerRow)
-    for (let x = 0; x < width; x++) {
-      const { r, g, b, a } = intToRGBA(img.getPixelColor(x, y))
-      const lum = 0.299 * r + 0.587 * g + 0.114 * b
-      if (a > 128 && lum < 128) {
-        const byteIndex = Math.floor(x / 8)
-        row[byteIndex] |= 0x80 >> (x % 8)
-      }
+  const rows: Buffer[] = []
+  let lastInk = -1
+  for (let y = 0; y < img.height; y++) {
+    const row = Buffer.alloc(bpr)
+    let ink = false
+    const base = y * img.width
+    for (let x = 0; x < outW; x++) {
+      const sx = x + cropX
+      const v  = sx < img.width ? img.data[base + sx] : 255
+      if (v < threshold) { row[x >> 3] |= 0x80 >> (x & 7); ink = true }
     }
-    const header = Buffer.from([
-      0x1d, 0x76, 0x30, 0x00,
-      bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
-      0x01, 0x00,
-    ])
-    bufs.push(Buffer.concat([header, Buffer.from(row)]))
+    if (ink) lastInk = y
+    rows.push(row)
   }
+  const outH = Math.min(img.height, lastInk + 1 + 2 * DOTS_PER_MM)
 
-  return Buffer.concat(bufs)
+  const parts: Buffer[] = []
+  const BAND = 128
+  for (let y = 0; y < outH; y += BAND) {
+    const h = Math.min(BAND, outH - y)
+    parts.push(Buffer.from([0x1d, 0x76, 0x30, 0x00, bpr & 0xff, bpr >> 8, h & 0xff, h >> 8]))
+    parts.push(...rows.slice(y, y + h))
+  }
+  return Buffer.concat(parts)
 }
 
-/** Termal: gömülü görsel varsa PDF→PNG→ESC/POS, yoksa doğrudan metin */
+/** Şablondaki tüm öğeler basılabilir alanın içinde mi? (0,5 mm tolerans) */
+export function fitsPrintableArea(templateJson: unknown, paperWidthMm: number): boolean {
+  const side = (paperWidthMm - printableWidthMm(paperWidthMm)) / 2
+  const t = templateJson as { schemas?: Array<Array<{ position?: { x: number }; width?: number }>> }
+  for (const page of t.schemas ?? []) {
+    for (const f of page) {
+      const x = f.position?.x ?? 0, w = f.width ?? 0
+      if (x < side - 0.5 || x + w > paperWidthMm - side + 0.5) return false
+    }
+  }
+  return true
+}
+
+/** Gri görüntüyü hedef genişliğe küçültür (kutu ortalaması) */
+export function scaleGray(img: GrayImage, outW: number): GrayImage {
+  const f = img.width / outW
+  const outH = Math.max(1, Math.round(img.height / f))
+  const data = new Uint8Array(outW * outH)
+  for (let y = 0; y < outH; y++) {
+    const y0 = Math.floor(y * f), y1 = Math.min(img.height, Math.max(y0 + 1, Math.floor((y + 1) * f)))
+    for (let x = 0; x < outW; x++) {
+      const x0 = Math.floor(x * f), x1 = Math.min(img.width, Math.max(x0 + 1, Math.floor((x + 1) * f)))
+      let sum = 0, n = 0
+      for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) { sum += img.data[yy * img.width + xx]; n++ }
+      data[y * outW + x] = n > 0 ? sum / n : 255
+    }
+  }
+  return { width: outW, height: outH, data }
+}
+
+/** Termal fiş her zaman görüntü yolundan basılır. */
 export async function renderThermalReceipt(
   templateJson: unknown,
   data: RenderData,
   paperW: number,
 ): Promise<Buffer> {
-  if (templateNeedsPdfPipeline(templateJson)) {
-    const pdfBuf = await renderPdfme(templateJson, data)
-    const pngBuf = await pdfToPng(pdfBuf, paperW)
-    const raster = await pngToEscPos(pngBuf, paperW)
-    return Buffer.concat([init(), raster, feed(4), cut()])
+  const t0 = Date.now()
+  const pdfBuf = await renderPdfme(templateJson, data)
+  const t1 = Date.now()
+  let gray = await pdfToGray(pdfBuf)
+  const dots = printableWidthMm(paperW) * DOTS_PER_MM
+  console.log(`[termal] renderPdfme ${t1 - t0} ms, pdfToGray ${Date.now() - t1} ms, genişlik ${dots} nokta (${paperW} mm kağıt, görüntü ${gray.width}x${gray.height})`)
+  if (!fitsPrintableArea(templateJson, paperW)) {
+    console.warn('[termal] Şablon kenara taşıyor → %90 küçültülerek basılıyor. Editörde kenar şeridine çekin.')
+    gray = scaleGray(gray, dots)
   }
-  return pdfmeToEscPos(templateJson, data, paperW)
+  const raster = grayToEscPos(gray, paperW)
+  return Buffer.concat([init(), raster, feed(4), cut()])
 }

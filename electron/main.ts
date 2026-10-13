@@ -1008,6 +1008,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('store:set', (_e, key, value) => store.set(key, value))
   ipcMain.handle('device:uid', () => getDeviceUID())
   ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:log', (_e, line: unknown) => {
+    const text = String(line ?? '').slice(0, 500)
+    if (text) console.log(text)
+  })
 
   ipcMain.handle('update:getVersion', () => app.getVersion())
   ipcMain.handle('update:prepare', async (_e, baseUrl: string, targetVersion: string) => {
@@ -1215,6 +1219,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getCustomerById', async (_e, companyId: string, id: string) => {
     const { getCustomerById } = await import('../db/operations')
     return getCustomerById(companyId, id)
+  })
+
+  ipcMain.handle('db:updateCustomerBalance', async (_e, customerId: string, balance: number, asOf: string | null) => {
+    const { updateCustomerBalance } = await import('../db/operations')
+    updateCustomerBalance(customerId, balance, asOf)
+  })
+
+  ipcMain.handle('db:getSaleErpEffect', async (_e, key: string) => {
+    const { getSaleErpEffect } = await import('../db/operations')
+    return getSaleErpEffect(key)
   })
 
   ipcMain.handle('db:getCustomerByCode', async (_e, companyId: string, code: string) => {

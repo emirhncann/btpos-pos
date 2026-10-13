@@ -25,6 +25,7 @@ export interface PrinterDraft {
   printerPort: number
   paperWidth: number
   enabled: boolean
+  documentPrinterName: string
 }
 
 interface Props {
@@ -38,6 +39,7 @@ export default function PrinterSettingsPanel({ onDraft }: Props) {
   const [printerPort, setPrinterPort] = useState(9100)
   const [paperWidth, setPaperWidth] = useState(80)
   const [enabled, setEnabled] = useState(true)
+  const [documentPrinterName, setDocumentPrinterName] = useState('')
   const [ready, setReady] = useState(false)
   const [printerList, setPrinterList] = useState<{ name: string; isDefault: boolean }[]>([])
   const [printerTestResult, setPrinterTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
@@ -58,18 +60,18 @@ export default function PrinterSettingsPanel({ onDraft }: Props) {
         setPrinterPort(Number(res.printer_port ?? 9100))
         setPaperWidth(Number(res.paper_width ?? 80))
         setEnabled(res.is_active !== 0 && res.is_active !== false)
-        if (type === 'usb') void loadPrinters()
-      } else {
-        void loadPrinters()
       }
+      const doc = await window.electron.printer.getDocSettings()
+      setDocumentPrinterName(String(doc?.printer_name ?? ''))
+      void loadPrinters()
       setReady(true)
     })()
   }, [])
 
   useEffect(() => {
     if (!ready) return
-    onDraft({ printerType, printerName, printerIp, printerPort, paperWidth, enabled })
-  }, [ready, printerType, printerName, printerIp, printerPort, paperWidth, enabled, onDraft])
+    onDraft({ printerType, printerName, printerIp, printerPort, paperWidth, enabled, documentPrinterName })
+  }, [ready, printerType, printerName, printerIp, printerPort, paperWidth, enabled, documentPrinterName, onDraft])
 
   async function testPrint() {
     setPrinterTestResult(null)
@@ -189,6 +191,28 @@ export default function PrinterSettingsPanel({ onDraft }: Props) {
             {printerTestResult.ok ? 'OK ' : 'X '}{printerTestResult.msg}
           </span>
         )}
+      </div>
+
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #C8E6C9' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#2E7D32', marginBottom: 8 }}>
+          Belge yazıcısı (A4 / PDF şablonlar)
+        </div>
+        <p style={{ fontSize: 11, color: '#6B7280', margin: '0 0 12px' }}>
+          PDF şablonlar Windows yazıcı sürücüsüyle basılır.
+        </p>
+        {lbl('Yazıcı')}
+        <select
+          value={documentPrinterName}
+          onChange={e => setDocumentPrinterName(e.target.value)}
+          style={inputStyle}
+        >
+          <option value="">Yok</option>
+          {printerList.map(p => (
+            <option key={p.name} value={p.name}>
+              {p.name}{p.isDefault ? ' (Varsayılan)' : ''}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   )

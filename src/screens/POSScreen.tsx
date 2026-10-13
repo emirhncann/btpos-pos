@@ -31,7 +31,13 @@ import ConnectionDot from '../components/ConnectionDot'
 import { CmdProgressChip } from '../components/CmdProgressChip'
 import { PavoLockOverlay } from '../components/PavoLockOverlay'
 import { getRecoveryInfo, isRecoveryActive, isRecoveryInFlight, paymentTotals, primeStaleWaiting, setRecoveryRuntime, summarizeProbe, type PendingLookup, type RecoveryProbe } from '../lib/pavoRecovery'
-import { claimSaleSettle, readZNo, releaseSaleSettle, showSaleCompleted } from '../store/saleCompleted'
+import {
+  attachBalanceForTemplate,
+  newBalancePrintSession,
+  shouldFetchCustomerBalance,
+  type BalancePrintSession,
+} from '../lib/customerBalance'
+import { claimSaleSettle, hideSaleCompleted, readZNo, releaseSaleSettle, showSaleCompleted } from '../store/saleCompleted'
 import {
   assertCartEditable,
   getPavoLockInfo,
@@ -803,9 +809,16 @@ export default function POSScreen({
   const [scaleEnabled, setScaleEnabled] = useState(false)
   const [printSelectModal, setPrintSelectModal] = useState<{
     trigger: string
-    templates: { id: string; name: string; template_type: string; is_default: boolean }[]
+    templates: { id: string; name: string; template_type: string; is_default: boolean; schema?: string }[]
     data: Record<string, Record<string, unknown>>
+    multi: boolean
+    balanceSession: BalancePrintSession
   } | null>(null)
+  const [printCards, setPrintCards] = useState<Record<string, { count: number; error: string | null; busy: boolean }>>({})
+  const printBusyRef = useRef(new Map<string, number>())
+  const [balanceWait, setBalanceWait] = useState(false)
+  const printChainRef = useRef(Promise.resolve())
+  const printGenRef = useRef(0)
   const [heldDocs, setHeldDocs]           = useState<HeldDocRow[]>([])
   const [showHeld, setShowHeld]           = useState(false)
   const [heldActiveTab, setHeldActiveTab] = useState<'held' | 'pending'>('held')
@@ -845,10 +858,12 @@ export default function POSScreen({
     probe: (orderNo: string) => Promise<RecoveryProbe>
     settle: (orderNo: string, probe: RecoveryProbe) => Promise<void>
     findPending: (orderNo: string) => Promise<PendingLookup>
+    releaseMissing: (orderNo: string) => void
   }>({
     probe: async () => ({ success: false, message: 'Kurtarma hazır değil' }),
     settle: async () => {},
     findPending: async () => ({ kind: 'miss' as const }),
+    releaseMissing: () => {},
   })
   const [pavoError, setPavoError] = useState<string | null>(null)
   const [pavoRecoveryState, setPavoRecoveryState] = useState<{
@@ -1349,6 +1364,17 @@ export default function POSScreen({
             console.log('[açılış] Satış zaten tamamlanmış:', lastOrderNo)
           }
 
+        } else if (result.notFound) {
+          const listSeq = await window.electron.db.nextPavoSequence()
+          const listed = await pavoListPendingSales(pavoSettings, listSeq)
+          const stillThere = listed.success && listed.sales.some(s => s.orderNo === lastOrderNo)
+          if (!listed.success || stillThere) {
+            holdOrder = true
+            setPavoPhase('error', { orderNo: lastOrderNo, message: result.message ?? '' })
+            primeStaleWaiting()
+          } else {
+            console.warn('[açılış] Satış cihazda yok, kilit açılmadı:', lastOrderNo)
+          }
         } else if (result.status === 'suspended' || result.status === 'pending' || result.success === false) {
           holdOrder = true
           setPavoPhase('error', { orderNo: lastOrderNo, message: result.message ?? '' })
@@ -1527,6 +1553,7 @@ export default function POSScreen({
       probe: orderNo => recoveryRef.current.probe(orderNo),
       settle: (orderNo, probe) => recoveryRef.current.settle(orderNo, probe),
       findPending: orderNo => recoveryRef.current.findPending(orderNo),
+      releaseMissing: orderNo => recoveryRef.current.releaseMissing(orderNo),
     })
     const onCode = (e: Event) => {
       const code = (e as CustomEvent<string>).detail
@@ -1535,6 +1562,50 @@ export default function POSScreen({
     window.addEventListener('btpos-completed-barcode', onCode)
     return () => window.removeEventListener('btpos-completed-barcode', onCode)
   }, [])
+
+  const closePrintSelectRef = useRef<() => void>(() => {})
+  closePrintSelectRef.current = closePrintSelect
+  useEffect(() => {
+    if (!printSelectModal?.multi) return
+    let buf = ''
+    let gap: ReturnType<typeof setTimeout> | null = null
+    const onScan = () => { closePrintSelectRef.current() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closePrintSelectRef.current()
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        return
+      }
+      if (e.key === 'Enter') {
+        const code = buf
+        buf = ''
+        if (gap) clearTimeout(gap)
+        if (code.length >= 2) {
+          closePrintSelectRef.current()
+          hideSaleCompleted()
+          window.dispatchEvent(new CustomEvent('btpos-completed-barcode', { detail: code }))
+        }
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        return
+      }
+      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        buf += e.key
+        if (gap) clearTimeout(gap)
+        gap = setTimeout(() => { buf = '' }, 150)
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+    }
+    window.addEventListener('btpos-completed-barcode', onScan)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      if (gap) clearTimeout(gap)
+      window.removeEventListener('btpos-completed-barcode', onScan)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [printSelectModal?.multi])
 
   /* ── POS açılınca Electron penceresine focus — barkod hemen çalışsın ── */
   useEffect(() => {
@@ -2208,21 +2279,64 @@ export default function POSScreen({
     }
   }
 
+  async function printResolvedTemplate(
+    trigger: string,
+    data: Record<string, Record<string, unknown>>,
+    template: { id: string; name: string; schema?: string },
+    session: BalancePrintSession,
+  ) {
+    const terminalId = String(await window.electron.store.get('terminal_id').catch(() => '') ?? '')
+    const willFetch = shouldFetchCustomerBalance(
+      data,
+      template,
+      session,
+      settings.terminal.torbaCariId,
+    )
+    if (willFetch) setBalanceWait(true)
+    try {
+      const payload = await attachBalanceForTemplate(data, template, session, {
+        companyId,
+        terminalId,
+        torbaId: settings.terminal.torbaCariId,
+      })
+      const result = await window.electron.templates.printWithBehavior({
+        triggerType: trigger,
+        data: payload,
+        templateId: template.id,
+        cashierId: cashier.id,
+      })
+      if (!result.success && result.message) console.warn('[Fiş]', result.message)
+      return result
+    } finally {
+      if (willFetch) setBalanceWait(false)
+    }
+  }
+
   async function printIfTemplate(
     trigger: string,
     data: Record<string, Record<string, unknown>>,
   ) {
     try {
+      const session = newBalancePrintSession()
       const result = await window.electron.templates.printWithBehavior({
         triggerType: trigger,
         data,
         cashierId: cashier.id,
       })
+      if (result.pendingPrint && result.template) {
+        await printResolvedTemplate(trigger, data, result.template, session)
+        return
+      }
       if (result.needsSelection && result.templates?.length) {
+        printGenRef.current += 1
+        printBusyRef.current.clear()
+        setPrintCards({})
         setPrintSelectModal({
           trigger,
           templates: result.templates,
           data:      result.data ?? data,
+          multi:     settings.cashier.printMulti === true,
+          balanceSession: session,
         })
       } else if (!result.success && result.message) {
         console.warn('[Fiş]', result.message)
@@ -2230,6 +2344,83 @@ export default function POSScreen({
     } catch (e) {
       console.warn('[Şablon]', e)
     }
+  }
+
+  function closePrintSelect() {
+    printGenRef.current += 1
+    printBusyRef.current.clear()
+    setPrintSelectModal(null)
+    setPrintCards({})
+  }
+
+  function releasePrintCard(templateId: string, gen: number) {
+    if (printBusyRef.current.get(templateId) === gen) printBusyRef.current.delete(templateId)
+  }
+
+  function queueTemplatePrint(templateId: string) {
+    const modal = printSelectModal
+    if (!modal) return
+    const template = modal.templates.find(t => t.id === templateId)
+    if (!template) return
+    if (!modal.multi) {
+      const session = modal.balanceSession
+      closePrintSelect()
+      void printResolvedTemplate(modal.trigger, modal.data, template, session)
+      return
+    }
+    if (printBusyRef.current.has(templateId)) return
+    const gen = printGenRef.current
+    printBusyRef.current.set(templateId, gen)
+    setPrintCards(prev => ({
+      ...prev,
+      [templateId]: { count: prev[templateId]?.count ?? 0, error: null, busy: true },
+    }))
+    printChainRef.current = printChainRef.current.then(async () => {
+      if (printGenRef.current !== gen) {
+        releasePrintCard(templateId, gen)
+        return
+      }
+      try {
+        const result = await printResolvedTemplate(
+          modal.trigger,
+          modal.data,
+          template,
+          modal.balanceSession,
+        )
+        if (printGenRef.current !== gen) return
+        if (!result.success) {
+          setPrintCards(prev => ({
+            ...prev,
+            [templateId]: {
+              count: prev[templateId]?.count ?? 0,
+              error: result.message ?? 'Yazdırılamadı',
+              busy: false,
+            },
+          }))
+          return
+        }
+        setPrintCards(prev => ({
+          ...prev,
+          [templateId]: {
+            count: (prev[templateId]?.count ?? 0) + 1,
+            error: null,
+            busy: false,
+          },
+        }))
+      } catch (e) {
+        if (printGenRef.current !== gen) return
+        setPrintCards(prev => ({
+          ...prev,
+          [templateId]: {
+            count: prev[templateId]?.count ?? 0,
+            error: e instanceof Error ? e.message : 'Yazdırılamadı',
+            busy: false,
+          },
+        }))
+      } finally {
+        releasePrintCard(templateId, gen)
+      }
+    })
   }
 
   async function handleCariPayment() {
@@ -2343,12 +2534,14 @@ export default function POSScreen({
       setCariPaymentMethod(null)
 
       void printIfTemplate(cariPaymentModal, {
+        sales: { order_no: orderNo },
         sale_payments: {
           amount,
           method:     paidMethod,
           created_at: new Date().toISOString(),
         },
         customers: {
+          id:   cariPaymentCust.id,
           name: cariPaymentCust.name,
           code: cariPaymentCust.code ?? '',
         },
@@ -4679,6 +4872,14 @@ export default function POSScreen({
     const seq = await window.electron.db.nextPavoSequence()
     const res = await pavoGetSaleResult(pavoSettings, seq, orderNo)
     if (!res.success) {
+      if (res.notFound) {
+        const listSeq = await window.electron.db.nextPavoSequence()
+        const listed = await pavoListPendingSales(pavoSettings, listSeq)
+        if (listed.success && !listed.sales.some(s => s.orderNo === orderNo)) {
+          releaseMissingPavoSale(orderNo)
+          return
+        }
+      }
       setPavoPhase('error', {
         orderNo,
         message: "Pavo'ya ulaşılamadığı için iptal edilemedi. Cihaz bağlantısını kontrol edin.",
@@ -4742,8 +4943,18 @@ export default function POSScreen({
       statusId: res.statusId,
       saleId: res.saleId,
       saleNumber: res.saleNumber,
+      notFound: res.notFound,
       data: res.data,
     }
+  }
+
+  function releaseMissingPavoSale(orderNo: string) {
+    console.warn('[pavo-recovery] Satış cihazda yok, kilit kaldırıldı:', orderNo)
+    setPavoRecoveryState(null)
+    setPavoPendingSaleRef(null)
+    setPaymentMode(false)
+    setPavoError('Bu satış Pavo cihazında yok. Ekran kilidi kaldırıldı.')
+    setPavoPhase('idle')
   }
 
   async function settleRecoveredSale(orderNo: string, probe: RecoveryProbe) {
@@ -4774,8 +4985,9 @@ export default function POSScreen({
     if (!pavoSettings) return { kind: 'miss' }
     const seq = await window.electron.db.nextPavoSequence()
     const listed = await pavoListPendingSales(pavoSettings, seq)
+    if (!listed.success) return { kind: 'miss' }
     const mine = listed.sales.find(s => s.orderNo === orderNo)
-    if (!mine) return { kind: 'miss' }
+    if (!mine) return { kind: 'absent' }
     const base = {
       paidTotal: mine.paidAmount,
       saleTotal: mine.totalPrice,
@@ -4801,6 +5013,7 @@ export default function POSScreen({
     probe: probePavoSale,
     settle: settleRecoveredSale,
     findPending: findPendingSale,
+    releaseMissing: releaseMissingPavoSale,
   }
 
   /* ────────── RENDER ────────── */
@@ -8899,7 +9112,20 @@ export default function POSScreen({
         </div>
       )}
 
-      {printSelectModal && (
+      {balanceWait && (
+        <div style={{
+          position: 'fixed', top: 56, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 10060,
+          background: 'var(--pos-surface)', color: 'var(--pos-text)',
+          border: '1px solid var(--pos-border)', borderRadius: 10,
+          padding: '10px 16px', fontWeight: 700, fontSize: 14,
+          boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+        }}>
+          Bakiye alınıyor…
+        </div>
+      )}
+
+      {printSelectModal && !printSelectModal.multi && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 10001,
           background: 'rgba(0,0,0,0.5)', display: 'flex',
@@ -8920,16 +9146,7 @@ export default function POSScreen({
               <button
                 key={t.id}
                 type="button"
-                onClick={() => {
-                  const modal = printSelectModal
-                  setPrintSelectModal(null)
-                  void window.electron.templates.printWithBehavior({
-                    triggerType: modal.trigger,
-                    data:        modal.data,
-                    templateId:  t.id,
-                    cashierId:   cashier.id,
-                  })
-                }}
+                onClick={() => { queueTemplatePrint(t.id) }}
                 style={{
                   padding: '12px 16px', borderRadius: 10,
                   ...(t.is_default ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
@@ -8956,7 +9173,7 @@ export default function POSScreen({
 
             <button
               type="button"
-              onClick={() => setPrintSelectModal(null)}
+              onClick={() => closePrintSelect()}
               style={{
                 padding: '10px', borderRadius: 10, marginTop: 4,
                 border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
@@ -8965,6 +9182,91 @@ export default function POSScreen({
             >
               Fiş Basma
             </button>
+          </div>
+        </div>
+      )}
+
+      {printSelectModal?.multi && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 10001,
+          background: 'rgba(0,0,0,0.5)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            background: 'var(--pos-surface)', color: 'var(--pos-text)',
+            border: '1px solid var(--pos-border)', borderRadius: 16, padding: 24,
+            width: 'min(560px, 94vw)', display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>
+              {balanceWait ? 'Bakiye alınıyor…' : 'Fiş Yazdır'}{(() => {
+                const sales = printSelectModal.data.sales
+                const orderNo = sales ? String(sales.order_no ?? sales.orderNo ?? '').trim() : ''
+                return orderNo ? ` — Sipariş no: ${orderNo}` : ''
+              })()}
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: 10,
+            }}>
+              {printSelectModal.templates.map(t => {
+                const card = printCards[t.id]
+                const busy = card?.busy === true
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { queueTemplatePrint(t.id) }}
+                    style={{
+                      padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                      border: '1px solid var(--pos-border)',
+                      background: 'var(--pos-surface)',
+                      color: 'var(--pos-text)',
+                      cursor: busy ? 'default' : 'pointer',
+                      opacity: busy ? 0.72 : 1,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 22 }}>
+                        {t.template_type === 'thermal' ? '🧾' : '📄'}
+                      </span>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+                    </div>
+                    {busy && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--pos-text-muted)' }}>
+                        Yazdırılıyor…
+                      </div>
+                    )}
+                    {!busy && card?.error && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--pos-danger)', lineHeight: 1.35 }}>
+                        ✕ Yazdırılamadı
+                        <div>{card.error}</div>
+                      </div>
+                    )}
+                    {!busy && !card?.error && (card?.count ?? 0) > 0 && (
+                      <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: 'var(--pos-success)' }}>
+                        ✓ Yazdırıldı ({card?.count})
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => closePrintSelect()}
+                style={{
+                  minWidth: 180, minHeight: 44, padding: '10px 18px', borderRadius: 10,
+                  border: 'none', background: 'var(--pos-primary)', color: 'var(--pos-primary-text)',
+                  fontWeight: 800, fontSize: 15, cursor: 'pointer',
+                }}
+              >
+                Bitti
+              </button>
+            </div>
           </div>
         </div>
       )}

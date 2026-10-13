@@ -63,6 +63,7 @@ declare global {
       app: {
         version:      () => Promise<string>
         hostname:     () => Promise<string>
+        log:          (line: string) => Promise<void>
         restart:      () => Promise<void>
         requestExit:  () => Promise<void>
         onExitBlocked: (cb: (data: { heldCount: number; pavoLocked?: boolean }) => void) => () => void
@@ -95,6 +96,8 @@ declare global {
         }, dataB64: string) => Promise<{ success: boolean; message?: string }>
         getSettings: () => Promise<PrinterSettingsDbRow | undefined>
         saveSettings: (s: Record<string, unknown>) => Promise<{ success: boolean }>
+        getDocSettings(): Promise<{ printer_name: string | null }>
+        saveDocSettings(s: { printer_name: string | null }): Promise<{ success: boolean }>
         printPaymentReceipt: (opts: PaymentReceiptPrintOpts) => Promise<{ success: boolean; message?: string }>
         testPrint: (settings: Record<string, unknown>) => Promise<{ success: boolean; message?: string }>
       }
@@ -103,14 +106,6 @@ declare global {
         getByTrigger: (triggerType: string) => Promise<Record<string, unknown>[]>
         getDefault: (triggerType: string) => Promise<Record<string, unknown> | undefined>
         save: (templates: Record<string, unknown>[]) => Promise<{ success: boolean; count: number }>
-        printThermal: (opts: {
-          triggerType: string
-          data: Record<string, Record<string, unknown>>
-        }) => Promise<{ success: boolean; message?: string }>
-        printPdf: (opts: {
-          triggerType: string
-          data: Record<string, Record<string, unknown>>
-        }) => Promise<{ success: boolean; message?: string }>
         printWithBehavior: (opts: {
           triggerType: string
           data:        Record<string, Record<string, unknown>>
@@ -221,6 +216,8 @@ declare global {
         syncCustomersAcid:  (items: CustomerRow[], companyId: string, mode?: 'full' | 'diff') => Promise<SyncResult>
         getCustomers:       (companyId: string, query?: string) => Promise<CustomerRow[]>
         getCustomerById:    (companyId: string, id: string) => Promise<CustomerRow | null>
+        updateCustomerBalance: (customerId: string, balance: number, asOf: string | null) => Promise<void>
+        getSaleErpEffect: (key: string) => Promise<{ invoiceSent: boolean; paymentsSentTotal: number }>
         getCustomerByCode:  (companyId: string, code: string) => Promise<CustomerRow | null>
         getPendingInvoices: (onlyAnonymous?: boolean) => Promise<SaleDbRow[]>
         markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
@@ -689,6 +686,8 @@ declare global {
     taxNo:     string
     address:   string
     balance:   number
+    balanceKnown?: boolean
+    balanceUpdatedAt?: string | null
     isPerson:  boolean
     /** true = tedarikçi, false/undefined = müşteri */
     isSupplier?: boolean
@@ -743,12 +742,15 @@ declare global {
     name:          string
     template_type: string
     is_default:    boolean
+    schema?:       string
   }
 
   interface TemplatePrintResult {
     success:         boolean
     skipped?:        boolean
+    pendingPrint?:   boolean
     needsSelection?: boolean
+    template?:       TemplateListItem
     templates?:      TemplateListItem[]
     data?:           Record<string, Record<string, unknown>>
     message?:        string

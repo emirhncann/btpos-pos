@@ -43,11 +43,12 @@ export type RecoveryProbe = {
   statusId?: number
   saleId?: number
   saleNumber?: string
+  notFound?: boolean
   data?: unknown
 }
 
 export type PendingLookup = {
-  kind: 'done' | 'waiting' | 'partial' | 'no_payment' | 'miss'
+  kind: 'done' | 'waiting' | 'partial' | 'no_payment' | 'miss' | 'absent'
   paidTotal?: number
   saleTotal?: number
   saleId?: number
@@ -58,6 +59,12 @@ type Runtime = {
   probe: (orderNo: string) => Promise<RecoveryProbe>
   settle: (orderNo: string, probe: RecoveryProbe) => Promise<void>
   findPending: (orderNo: string) => Promise<PendingLookup>
+  releaseMissing: (orderNo: string) => void
+}
+
+/** Cihaz bu OrderNo'yu tanımıyor ve askıda listede de yok. Kilit kalkmalı. */
+export function saleGoneFromDevice(probe: Pick<RecoveryProbe, 'notFound'>, pending: Pick<PendingLookup, 'kind'>): boolean {
+  return probe.notFound === true && pending.kind === 'absent'
 }
 
 const listeners = new Set<(info: RecoveryInfo) => void>()
@@ -284,10 +291,14 @@ async function tick(ctx: { orderNo: string }) {
   setRecoveryInfo({ attempt: n, lastCheck: new Date(), state: 'checking', error: undefined, nextDelayMs: recoveryDelayMs(n) })
   logRecovery(n, 'checking')
   let finished = false
+  let saleNotFound = false
   try {
     if (!runtime) throw new Error('Kurtarma hazır değil')
     const probe = await runtime.probe(ctx.orderNo)
-    if (!probe.success) throw new Error(probe.message ?? 'Sonuç alınamadı')
+    if (!probe.success) {
+      saleNotFound = probe.notFound === true
+      throw new Error(probe.message ?? 'Sonuç alınamadı')
+    }
     const summary = summarizeProbe(probe)
     if (summary.kind === 'completed') {
       waitingSince = null
@@ -323,6 +334,13 @@ async function tick(ctx: { orderNo: string }) {
     if (pending.kind === 'done') {
       finished = true
       stopRecoveryPolling()
+      return
+    }
+    if (saleGoneFromDevice({ notFound: saleNotFound }, pending)) {
+      logRecovery(n, 'missing')
+      finished = true
+      stopRecoveryPolling()
+      runtime?.releaseMissing(ctx.orderNo)
       return
     }
     const mapped: ProbeSummary['kind'] = pending.kind === 'waiting'

@@ -41,6 +41,8 @@ export interface CashierSettings {
   showCode: boolean
   showBarcode: boolean
   printBehavior: Record<string, string>
+  /** cashiers[].print_multi. Ayar nesnesinde settings.cashier.printMulti. */
+  printMulti: boolean
   /** cashiers[].button_colors JSON metni. Bozuksa '{}' gibi ele alınır. */
   buttonColors: string
   /** cashiers[].theme. Bilinmeyen değer Klasik'e düşer. */
@@ -109,6 +111,7 @@ export const DEFAULT_CASHIER_SETTINGS: CashierSettings = {
   showCode: true,
   showBarcode: false,
   printBehavior: { ...DEFAULT_PRINT_BEHAVIOR },
+  printMulti: false,
   buttonColors: '{}',
   theme: 'klasik',
 }
@@ -304,6 +307,7 @@ export function parseCashierSettings(row: Record<string, unknown>): CashierSetti
     showCode: asBool(pickRow(row, 'showCode', 'show_code'), true),
     showBarcode: asBool(pickRow(row, 'showBarcode', 'show_barcode'), false),
     printBehavior: parsePrintBehavior(pickRow(row, 'printBehavior', 'print_behavior')),
+    printMulti: asBool(pickRow(row, 'printMulti', 'print_multi'), false),
     buttonColors: buttonColorsToJson(pickRow(row, 'buttonColors', 'button_colors')),
     theme: (() => {
       const raw = pickRow(row, 'theme', 'theme')

@@ -833,6 +833,7 @@ export async function pavoGetSaleResult(
   statusId?: number
   saleId?: number
   saleNumber?: string
+  notFound?: boolean
   data?: unknown
 }> {
   try {
@@ -849,7 +850,11 @@ export async function pavoGetSaleResult(
     await syncPavoSequenceFromResponse(data)
 
     if (data.HasError === true || data.IsError === true) {
-      return { success: false, message: pavoErrorMessage(data, 'Sonuç alınamadı') }
+      return {
+        success: false,
+        notFound: isPavoSaleNotFound(data),
+        message: pavoErrorMessage(data, 'Sonuç alınamadı'),
+      }
     }
 
     const d = data.Data as Record<string, unknown> | undefined
@@ -900,6 +905,12 @@ export interface PavoReturnableSale {
 
 function pavoErrorMessage(data: Record<string, unknown>, fallback: string): string {
   return String(data.ErrorMessage ?? data.Message ?? fallback)
+}
+
+/** GetSaleResult: cihaz ayakta, bu OrderNo kayıtlı değil. Ağ hatası değil. */
+export function isPavoSaleNotFound(data: Record<string, unknown>): boolean {
+  const msg = String(data.Message ?? data.ErrorMessage ?? '').toLocaleLowerCase('tr-TR')
+  return msg.includes('nolu satış bulunamadı') || msg.includes('nolu satis bulunamadi')
 }
 
 function extractPavoSale(data: Record<string, unknown>): Record<string, unknown> | null {

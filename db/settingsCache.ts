@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS cashier_settings_cache (
   show_code                 INTEGER NOT NULL DEFAULT 1,
   show_barcode              INTEGER NOT NULL DEFAULT 0,
   print_behavior            TEXT    NOT NULL DEFAULT '{"satis":"ask","tahsilat":"ask","odeme":"ask","iade":"ask","gunsonu":"default","etiket":"none","manuel":"none"}',
+  print_multi               INTEGER NOT NULL DEFAULT 0,
   button_colors             TEXT    NOT NULL DEFAULT '{}',
   theme                     TEXT    NOT NULL DEFAULT 'klasik',
   synced_at                 TEXT
@@ -104,6 +105,9 @@ export function ensureSettingsTables(sqlite: SqliteLike): void {
   }
   if (!cashierCols.has('theme')) {
     sqlite.exec(`ALTER TABLE cashier_settings_cache ADD COLUMN theme TEXT NOT NULL DEFAULT 'klasik'`)
+  }
+  if (!cashierCols.has('print_multi')) {
+    sqlite.exec(`ALTER TABLE cashier_settings_cache ADD COLUMN print_multi INTEGER NOT NULL DEFAULT 0`)
   }
   const cols = columnSet(sqlite, 'terminal_settings_cache')
   if (!cols.has('devtools_enabled')) {
@@ -303,6 +307,7 @@ export function readCashierSettings(sqlite: SqliteLike, cashierId: string | null
     show_code: row.show_code,
     show_barcode: row.show_barcode,
     print_behavior: row.print_behavior,
+    print_multi: row.print_multi,
     button_colors: row.button_colors,
     theme: row.theme,
   })
@@ -401,8 +406,8 @@ const INSERT_CASHIER = `
     allow_exit_with_held_docs, allow_line_discount, max_line_discount_pct,
     allow_doc_discount, max_doc_discount_pct, plu_cols, plu_rows,
     font_size_name, font_size_price, font_size_code,
-    show_price, show_code, show_barcode, print_behavior, button_colors, theme, synced_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    show_price, show_code, show_barcode, print_behavior, print_multi, button_colors, theme, synced_at
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 /** Tek transaction. Hata fırlatır; çağıran rollback görür, eski satırlar kalır. */
@@ -454,6 +459,7 @@ export function applySettingsBundle(
         c.showCode ? 1 : 0,
         c.showBarcode ? 1 : 0,
         JSON.stringify(c.printBehavior ?? DEFAULT_PRINT_BEHAVIOR),
+        c.printMulti ? 1 : 0,
         c.buttonColors && c.buttonColors.trim() ? c.buttonColors : '{}',
         c.theme && c.theme.trim() ? c.theme.trim() : 'klasik',
         now,

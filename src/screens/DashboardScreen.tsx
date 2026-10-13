@@ -232,6 +232,9 @@ export default function DashboardScreen({
           is_active:    printerDraft.enabled,
         })
         printerSnap.current = JSON.stringify(printerDraft)
+        await window.electron.printer.saveDocSettings({
+          printer_name: printerDraft.documentPrinterName || null,
+        })
       }
       if (scaleDraft) {
         await window.electron.scale.saveSettings({

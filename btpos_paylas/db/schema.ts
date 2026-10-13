@@ -1,0 +1,340 @@
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core'
+
+export const activation = sqliteTable('activation', {
+  id: integer('id').primaryKey(),
+  terminalId: text('terminal_id').notNull(),
+  companyId: text('company_id').notNull(),
+  deviceUid: text('device_uid').notNull(),
+  activatedAt: text('activated_at').notNull(),
+  planName: text('plan_name'),
+  expiryDate: text('expiry_date'),
+  licenseKey: text('license_key'),
+})
+
+export const products = sqliteTable('products', {
+  id: text('id').primaryKey(),
+  code: text('code'),
+  name: text('name').notNull(),
+  barcode: text('barcode'),
+  price: real('price').default(0),
+  vatRate: real('vat_rate').default(18),
+  unit: text('unit').default('Adet'),
+  stock: real('stock').default(0),
+  category: text('category'),
+  syncedAt: text('synced_at'),
+  modificationDate: text('modification_date'),
+})
+
+export const sales = sqliteTable('sales', {
+  id:             text('id').primaryKey(),
+  receiptNo:      integer('receipt_no'),
+  orderNo:        text('order_no'),
+  totalAmount:    real('total_amount').notNull(),
+  discountRate:   real('discount_rate').default(0),
+  discountAmount: real('discount_amount').default(0),
+  netAmount:      real('net_amount').notNull(),
+  paymentType:    text('payment_type').notNull(),
+  cashAmount:     real('cash_amount').default(0),
+  cardAmount:     real('card_amount').default(0),
+  createdAt:      text('created_at').notNull(),
+  synced:         integer('synced', { mode: 'boolean' }).default(false),
+  customerId:     text('customer_id'),
+  customerName:   text('customer_name'),
+  customerCode:   text('customer_code'),
+  cashierId:      text('cashier_id'),
+  cashierName:    text('cashier_name'),
+  invoiceSent:    integer('invoice_sent').notNull().default(0),
+  invoiceId:      text('invoice_id'),
+  invoiceError:   text('invoice_error'),
+  invoiceAt:      text('invoice_at'),
+  cardAcquirerId: text('card_acquirer_id'),
+  paymentProvider:   text('payment_provider'),
+  paymentDeviceData: text('payment_device_data'),
+  isReturn:          integer('is_return').default(0),
+})
+
+export const saleItems = sqliteTable('sale_items', {
+  id:               text('id').primaryKey(),
+  saleId:           text('sale_id').notNull().references(() => sales.id),
+  productId:        text('product_id'),
+  productName:      text('product_name').notNull(),
+  quantity:         real('quantity').notNull(),
+  unitPrice:        real('unit_price').notNull(),
+  vatRate:          real('vat_rate').default(18),
+  discountRate:     real('discount_rate').default(0),
+  discountAmount:   real('discount_amount').default(0),
+  lineTotal:        real('line_total').notNull(),
+  appliedBy:        text('applied_by'),
+  unitPriceGross:   real('unit_price_gross'),
+  grossAmount:      real('gross_amount'),
+  lineDiscount:     real('line_discount').default(0),
+  docDiscountShare: real('doc_discount_share').default(0),
+  netAmount:        real('net_amount'),
+})
+
+export const salePayments = sqliteTable('sale_payments', {
+  id:           text('id').primaryKey(),
+  saleId:       text('sale_id').notNull(),
+  method:       text('method').notNull(),
+  amount:       real('amount').notNull(),
+  mediator:     integer('mediator'),
+  acquirerId:   text('acquirer_id'),
+  acquirerName: text('acquirer_name'),
+  cashierId:    text('cashier_id'),
+  cashierName:  text('cashier_name'),
+  createdAt:    text('created_at'),
+})
+
+// Kasiyerler (Supabase'den çekilip yerel cache olarak saklanır)
+export const cashiers = sqliteTable('cashiers', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull().default(''),
+  fullName:    text('full_name').notNull(),
+  cashierCode: text('cashier_code').notNull(),
+  password:    text('password').notNull(),
+  role:        text('role').default('cashier'),
+  isActive:    integer('is_active', { mode: 'boolean' }).default(true),
+  cardNumber:  text('card_number'),
+  syncedAt:    text('synced_at'),
+})
+
+export const heldDocuments = sqliteTable('held_documents', {
+  id:           text('id').primaryKey(),
+  companyId:    text('company_id').notNull(),
+  receiptNo:    text('receipt_no'),
+  orderNo:      text('order_no'),
+  label:        text('label'),
+  items:        text('items').notNull(),
+  totalAmount:  real('total_amount').default(0),
+  customerName: text('customer_name'),
+  cashierName:  text('cashier_name'),
+  customer:     text('customer'),
+  createdAt:    text('created_at').notNull(),
+})
+
+// PLU grupları (Supabase / API cache)
+export const pluGroupsCache = sqliteTable('plu_groups_cache', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  workplaceId: text('workplace_id'),
+  terminalId:  text('terminal_id'),
+  cashierId:   text('cashier_id'),
+  name:        text('name').notNull(),
+  color:       text('color').notNull().default('#90CAF9'),
+  sortOrder:   integer('sort_order').default(0),
+  syncedAt:    text('synced_at').notNull(),
+})
+
+// PLU kalemleri (cache)
+export const pluItemsCache = sqliteTable('plu_items_cache', {
+  id:          text('id').primaryKey(),
+  groupId:     text('group_id').notNull(),
+  productCode: text('product_code').notNull(),
+  sortOrder:   integer('sort_order').default(0),
+})
+
+export const customers = sqliteTable('customers', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  code:      text('code').notNull().default(''),
+  name:      text('name').notNull(),
+  phone:     text('phone').notNull().default(''),
+  taxNo:     text('tax_no').notNull().default(''),
+  address:   text('address').notNull().default(''),
+  balance:   real('balance').notNull().default(0),
+  isPerson:  integer('is_person').notNull().default(1),
+  firstName: text('first_name').notNull().default(''),
+  lastName:  text('last_name').notNull().default(''),
+  postalCode: text('postal_code').notNull().default(''),
+  city:       text('city').notNull().default(''),
+  district:   text('district').notNull().default(''),
+  email:      text('email'),
+  syncedAt:  text('synced_at').notNull(),
+})
+
+export const customersTemp = sqliteTable('customers_temp', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  code:      text('code').notNull().default(''),
+  name:      text('name').notNull(),
+  phone:     text('phone').notNull().default(''),
+  taxNo:     text('tax_no').notNull().default(''),
+  address:   text('address').notNull().default(''),
+  balance:   real('balance').notNull().default(0),
+  isPerson:  integer('is_person').notNull().default(1),
+  firstName: text('first_name').notNull().default(''),
+  lastName:  text('last_name').notNull().default(''),
+  postalCode: text('postal_code').notNull().default(''),
+  city:       text('city').notNull().default(''),
+  district:   text('district').notNull().default(''),
+  email:      text('email'),
+  syncedAt:  text('synced_at').notNull(),
+})
+
+/** Bu kasanın ayarları — tek satır (id = 1). */
+export const terminalSettingsCache = sqliteTable('terminal_settings_cache', {
+  id:                   integer('id').primaryKey(),
+  touchKeyboard:        integer('touch_keyboard', { mode: 'boolean' }).notNull().default(true),
+  customerDisplay:      integer('customer_display', { mode: 'boolean' }).notNull().default(false),
+  invoiceType:          text('invoice_type').notNull().default('e_archive'),
+  torbaCariId:          text('torba_cari_id'),
+  torbaCariName:        text('torba_cari_name'),
+  cariPaymentUsePavo:   integer('cari_payment_use_pavo', { mode: 'boolean' }).notNull().default(false),
+  enabledPaymentBrands: text('enabled_payment_brands').notNull().default('[]'),
+  loginWithCode:        integer('login_with_code', { mode: 'boolean' }).notNull().default(true),
+  loginWithCard:        integer('login_with_card', { mode: 'boolean' }).notNull().default(false),
+  defaultTemplateIds:   text('default_template_ids').notNull().default('{}'),
+  terminalInfo:         text('terminal_info').notNull().default('{}'),
+  devtoolsEnabled:      integer('devtools_enabled', { mode: 'boolean' }).notNull().default(false),
+  devtoolsExpiresAt:    text('devtools_expires_at'),
+  syncedAt:             text('synced_at'),
+})
+
+/** Kasiyer başına bir satır. */
+export const cashierSettingsCache = sqliteTable('cashier_settings_cache', {
+  cashierId:             text('cashier_id').primaryKey(),
+  duplicateItemAction:   text('duplicate_item_action').notNull().default('increase_qty'),
+  minQtyPerLine:         integer('min_qty_per_line').notNull().default(1),
+  allowExitWithHeldDocs: integer('allow_exit_with_held_docs', { mode: 'boolean' }).notNull().default(true),
+  allowLineDiscount:     integer('allow_line_discount', { mode: 'boolean' }).notNull().default(true),
+  maxLineDiscountPct:    real('max_line_discount_pct').notNull().default(100),
+  allowDocDiscount:      integer('allow_doc_discount', { mode: 'boolean' }).notNull().default(true),
+  maxDocDiscountPct:     real('max_doc_discount_pct').notNull().default(100),
+  pluCols:               integer('plu_cols').notNull().default(4),
+  pluRows:               integer('plu_rows').notNull().default(3),
+  fontSizeName:          integer('font_size_name').notNull().default(12),
+  fontSizePrice:         integer('font_size_price').notNull().default(13),
+  fontSizeCode:          integer('font_size_code').notNull().default(9),
+  showPrice:             integer('show_price', { mode: 'boolean' }).notNull().default(true),
+  showCode:              integer('show_code', { mode: 'boolean' }).notNull().default(true),
+  showBarcode:           integer('show_barcode', { mode: 'boolean' }).notNull().default(false),
+  printBehavior:         text('print_behavior').notNull().default('{}'),
+  buttonColors:          text('button_colors').notNull().default('{}'),
+  theme:                 text('theme').notNull().default('klasik'),
+  syncedAt:              text('synced_at'),
+})
+
+export const paymentAccountsCache = sqliteTable('payment_accounts_cache', {
+  id:                 text('id').primaryKey(),
+  paymentType:        text('payment_type').notNull(),
+  pavoAcquirerId:     text('pavo_acquirer_id'),
+  isbasiAccountCode:  text('isbasi_account_code').notNull(),
+  isbasiAccountName:  text('isbasi_account_name').notNull(),
+  isbasiAccountType:  integer('isbasi_account_type').notNull(),
+  isbasiAccountId:    text('isbasi_account_id'),
+  isDefault:          integer('is_default', { mode: 'boolean' }).notNull().default(false),
+})
+
+// Kasanın aldığı komutların lokal geçmişi
+export const commandHistory = sqliteTable('command_history', {
+  id:          text('id').primaryKey(),
+  command:     text('command').notNull(),
+  payload:     text('payload').default('{}'),
+  status:      text('status').notNull(),
+  receivedAt:  text('received_at').notNull(),
+  doneAt:      text('done_at'),
+})
+
+// Temp tablolar — sync sırasında kullanılır, başarılı olunca ana tabloya geçer
+export const productsTemp = sqliteTable('products_temp', {
+  id:        text('id').primaryKey(),
+  code:      text('code'),
+  name:      text('name').notNull(),
+  barcode:   text('barcode'),
+  price:     real('price').default(0),
+  vatRate:   real('vat_rate').default(18),
+  unit:      text('unit').default('Adet'),
+  stock:     real('stock').default(0),
+  category:  text('category'),
+  syncedAt:  text('synced_at'),
+  modificationDate: text('modification_date'),
+})
+
+export const pluGroupsTemp = sqliteTable('plu_groups_temp', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  workplaceId: text('workplace_id'),
+  terminalId:  text('terminal_id'),
+  cashierId:   text('cashier_id'),
+  name:        text('name').notNull(),
+  color:       text('color').notNull().default('#90CAF9'),
+  sortOrder:   integer('sort_order').default(0),
+  syncedAt:    text('synced_at').notNull(),
+})
+
+export const pluItemsTemp = sqliteTable('plu_items_temp', {
+  id:          text('id').primaryKey(),
+  groupId:     text('group_id').notNull(),
+  productCode: text('product_code').notNull(),
+  sortOrder:   integer('sort_order').default(0),
+})
+
+export const cashiersTemp = sqliteTable('cashiers_temp', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  fullName:    text('full_name').notNull(),
+  cashierCode: text('cashier_code').notNull(),
+  password:    text('password').notNull(),
+  role:        text('role').default('cashier'),
+  isActive:    integer('is_active', { mode: 'boolean' }).default(true),
+  cardNumber:  text('card_number'),
+  syncedAt:    text('synced_at'),
+})
+
+/** Buluta gidecek işlemler kuyruğu */
+export const cariPayments = sqliteTable('cari_payments', {
+  id:           text('id').primaryKey(),
+  companyId:    text('company_id').notNull(),
+  type:         text('type').notNull(),
+  amount:       real('amount').notNull(),
+  customerId:   text('customer_id'),
+  customerName: text('customer_name'),
+  customerCode: text('customer_code'),
+  cashierId:    text('cashier_id'),
+  cashierName:  text('cashier_name'),
+  description:  text('description'),
+  createdAt:    text('created_at').notNull(),
+})
+
+export const operationQueue = sqliteTable('operation_queue', {
+  id:          text('id').primaryKey(),
+  companyId:   text('company_id').notNull(),
+  type:        text('type').notNull(),
+  payload:     text('payload').notNull(),
+  status:      text('status').notNull().default('pending'),
+  attempts:    integer('attempts').default(0),
+  maxAttempts: integer('max_attempts').default(3),
+  error:       text('error'),
+  createdAt:   text('created_at').notNull(),
+  sentAt:      text('sent_at'),
+  label:       text('label'),
+})
+
+// Odeme terminali ayarlari (Supabase'den sync edilir)
+export const paymentDeviceSettings = sqliteTable('payment_device_settings', {
+  id:              text('id').primaryKey(),
+  companyId:       text('company_id').notNull(),
+  terminalId:      text('terminal_id').notNull(),
+  provider:        text('provider').notNull().default('pavo'),
+  ipAddress:       text('ip_address'),
+  port:            integer('port').default(9100),
+  serialNo:        text('serial_no'),
+  cardReadTimeout: integer('card_read_timeout').default(30),
+  printWidth:      text('print_width').default('80mm'),
+  isActive:        integer('is_active', { mode: 'boolean' }).default(true),
+  syncedAt:        text('synced_at'),
+})
+
+export const unitMappings = sqliteTable('unit_mappings', {
+  id:        text('id').primaryKey(),
+  companyId: text('company_id').notNull(),
+  unitName:  text('unit_name').notNull(),
+  pavoCode:  text('pavo_code').notNull().default('C62'),
+})
+
+// Pavo islem sirasi
+export const pavoSequence = sqliteTable('pavo_sequence', {
+  id:  integer('id').primaryKey(),
+  seq: integer('seq').notNull().default(0),
+})
+

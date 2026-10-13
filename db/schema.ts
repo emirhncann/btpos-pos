@@ -149,6 +149,7 @@ export const customers = sqliteTable('customers', {
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
   email:      text('email'),
+  balanceUpdatedAt: text('balance_updated_at'),
   syncedAt:  text('synced_at').notNull(),
 })
 
@@ -168,6 +169,7 @@ export const customersTemp = sqliteTable('customers_temp', {
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
   email:      text('email'),
+  balanceUpdatedAt: text('balance_updated_at'),
   syncedAt:  text('synced_at').notNull(),
 })
 
@@ -209,6 +211,7 @@ export const cashierSettingsCache = sqliteTable('cashier_settings_cache', {
   showCode:              integer('show_code', { mode: 'boolean' }).notNull().default(true),
   showBarcode:           integer('show_barcode', { mode: 'boolean' }).notNull().default(false),
   printBehavior:         text('print_behavior').notNull().default('{}'),
+  printMulti:            integer('print_multi', { mode: 'boolean' }).notNull().default(false),
   buttonColors:          text('button_colors').notNull().default('{}'),
   theme:                 text('theme').notNull().default('klasik'),
   syncedAt:              text('synced_at'),

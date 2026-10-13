@@ -1,0 +1,773 @@
+import { drizzle } from 'drizzle-orm/better-sqlite3'
+import Database from 'better-sqlite3'
+import { dirname, join } from 'path'
+import * as fs from 'fs'
+import * as schema from './schema'
+import { migrateSalesReceiptNo } from './migrations'
+import { migrateLegacySettings } from './settingsCache'
+import { getDefaultDbDir } from '../electron/paths'
+
+let db: ReturnType<typeof drizzle> | undefined
+let rawSqlite: Database.Database | null = null
+
+export const SCHEMA_VERSION = 7
+
+export function getSqlite(): Database.Database {
+  if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
+  return rawSqlite
+}
+
+export function getDbUserVersion(): number {
+  return Number(getSqlite().pragma('user_version', { simple: true }))
+}
+
+/** Açık veritabanının anlık kopyası. Son 5 yedek tutulur. */
+export function backupDatabase(label: string): string {
+  const sqlite = getSqlite()
+  sqlite.pragma('wal_checkpoint(TRUNCATE)')
+  const src = sqlite.name
+  const dir = join(dirname(src), 'backups')
+  fs.mkdirSync(dir, { recursive: true })
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const safe = label.replace(/[^a-zA-Z0-9._-]+/g, '-')
+  const dest = join(dir, `btpos-${stamp}-${safe}.db`)
+  fs.copyFileSync(src, dest)
+  const old = fs.readdirSync(dir)
+    .filter(n => n.startsWith('btpos-') && n.endsWith('.db'))
+    .sort()
+  while (old.length > 5) {
+    const name = old.shift()
+    if (name) fs.unlinkSync(join(dir, name))
+  }
+  return dest
+}
+
+export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
+  const sqlite = new Database(dbFile)
+  const userVersion = Number(sqlite.pragma('user_version', { simple: true }))
+  if (userVersion > SCHEMA_VERSION) {
+    sqlite.close()
+    throw new Error(
+      `Bu veritabanı daha yeni bir sürüme ait. Lütfen şema ${userVersion} ile gelen sürümü veya üzerini kurun.`,
+    )
+  }
+  rawSqlite = sqlite
+
+  sqlite.pragma('journal_mode = WAL')
+
+  db = drizzle(sqlite, { schema })
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS activation (
+      id INTEGER PRIMARY KEY,
+      terminal_id TEXT NOT NULL,
+      company_id TEXT NOT NULL,
+      device_uid TEXT NOT NULL,
+      activated_at TEXT NOT NULL,
+      plan_name TEXT,
+      expiry_date TEXT,
+      license_key TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS products (
+      id TEXT PRIMARY KEY,
+      code TEXT,
+      name TEXT NOT NULL,
+      barcode TEXT,
+      price REAL DEFAULT 0,
+      vat_rate REAL DEFAULT 18,
+      unit TEXT DEFAULT 'Adet',
+      stock REAL DEFAULT 0,
+      category TEXT,
+      synced_at TEXT,
+      modification_date TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sales (
+      id TEXT PRIMARY KEY,
+      receipt_no INTEGER,
+      order_no TEXT,
+      total_amount REAL NOT NULL,
+      discount_rate REAL DEFAULT 0,
+      discount_amount REAL DEFAULT 0,
+      net_amount REAL NOT NULL,
+      payment_type TEXT NOT NULL,
+      cash_amount REAL DEFAULT 0,
+      card_amount REAL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      synced INTEGER DEFAULT 0,
+      customer_id TEXT,
+      customer_name TEXT,
+      customer_code TEXT,
+      cashier_id TEXT,
+      cashier_name TEXT,
+      invoice_sent INTEGER NOT NULL DEFAULT 0,
+      invoice_id TEXT,
+      invoice_error TEXT,
+      invoice_at TEXT,
+      card_acquirer_id TEXT,
+      payment_provider TEXT,
+      payment_device_data TEXT,
+      is_return INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS sale_items (
+      id TEXT PRIMARY KEY,
+      sale_id TEXT NOT NULL,
+      product_id TEXT,
+      product_name TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      vat_rate REAL DEFAULT 18,
+      discount_rate REAL DEFAULT 0,
+      discount_amount REAL DEFAULT 0,
+      line_total REAL NOT NULL,
+      applied_by TEXT,
+      unit_price_gross REAL,
+      gross_amount REAL,
+      line_discount REAL DEFAULT 0,
+      doc_discount_share REAL DEFAULT 0,
+      net_amount REAL,
+      FOREIGN KEY (sale_id) REFERENCES sales(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sale_payments (
+      id            TEXT PRIMARY KEY,
+      sale_id       TEXT NOT NULL,
+      method        TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      mediator      INTEGER,
+      acquirer_id   TEXT,
+      acquirer_name TEXT,
+      created_at    TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cashiers (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL DEFAULT '',
+      full_name    TEXT NOT NULL,
+      cashier_code TEXT NOT NULL,
+      password     TEXT NOT NULL,
+      role         TEXT DEFAULT 'cashier',
+      is_active    INTEGER DEFAULT 1,
+      card_number  TEXT,
+      synced_at    TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS products_temp (
+      id TEXT PRIMARY KEY, code TEXT, name TEXT NOT NULL,
+      barcode TEXT, price REAL DEFAULT 0, vat_rate REAL DEFAULT 18,
+      unit TEXT DEFAULT 'Adet', stock REAL DEFAULT 0,
+      category TEXT, synced_at TEXT, modification_date TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_groups_temp (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      workplace_id TEXT,
+      terminal_id  TEXT,
+      cashier_id   TEXT,
+      name         TEXT NOT NULL,
+      color        TEXT NOT NULL DEFAULT '#90CAF9',
+      sort_order   INTEGER DEFAULT 0,
+      synced_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_items_temp (
+      id TEXT PRIMARY KEY, group_id TEXT NOT NULL,
+      product_code TEXT NOT NULL, sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS cashiers_temp (
+      id TEXT PRIMARY KEY, company_id TEXT NOT NULL,
+      full_name TEXT NOT NULL, cashier_code TEXT NOT NULL,
+      password TEXT NOT NULL, role TEXT DEFAULT 'cashier',
+      is_active INTEGER DEFAULT 1, card_number TEXT, synced_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS held_documents (
+      id            TEXT PRIMARY KEY,
+      company_id    TEXT NOT NULL,
+      receipt_no    TEXT,
+      order_no      TEXT,
+      label         TEXT,
+      items         TEXT NOT NULL,
+      total_amount  REAL DEFAULT 0,
+      customer_name TEXT,
+      cashier_name  TEXT,
+      customer      TEXT,
+      created_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_groups_cache (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      workplace_id TEXT,
+      terminal_id  TEXT,
+      cashier_id   TEXT,
+      name         TEXT NOT NULL,
+      color        TEXT NOT NULL DEFAULT '#90CAF9',
+      sort_order   INTEGER DEFAULT 0,
+      synced_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS plu_items_cache (
+      id           TEXT PRIMARY KEY,
+      group_id     TEXT NOT NULL,
+      product_code TEXT NOT NULL,
+      sort_order   INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS pos_settings_cache (
+      id                    TEXT PRIMARY KEY DEFAULT 'local',
+      cashier_id            TEXT,
+      show_price            INTEGER DEFAULT 1,
+      show_code             INTEGER DEFAULT 1,
+      show_barcode          INTEGER DEFAULT 0,
+      duplicate_item_action TEXT DEFAULT 'increase_qty',
+      min_qty_per_line      INTEGER DEFAULT 1,
+      allow_line_discount   INTEGER DEFAULT 1,
+      allow_doc_discount    INTEGER DEFAULT 1,
+      max_line_discount_pct REAL DEFAULT 100,
+      max_doc_discount_pct  REAL DEFAULT 100,
+      plu_cols              INTEGER DEFAULT 4,
+      plu_rows              INTEGER DEFAULT 3,
+      font_size_name        INTEGER DEFAULT 12,
+      font_size_price       INTEGER DEFAULT 13,
+      font_size_code        INTEGER DEFAULT 9,
+      source                TEXT DEFAULT 'default',
+      login_with_code       INTEGER DEFAULT 1,
+      login_with_card       INTEGER DEFAULT 1,
+      synced_at             TEXT,
+      torba_cari_id         TEXT,
+      torba_cari_name       TEXT,
+      invoice_type          TEXT DEFAULT 'e_archive'
+    );
+
+    CREATE TABLE IF NOT EXISTS command_history (
+      id          TEXT PRIMARY KEY,
+      command     TEXT NOT NULL,
+      payload     TEXT DEFAULT '{}',
+      status      TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      done_at     TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS barcode_formats_cache (
+      id                   TEXT PRIMARY KEY,
+      company_id           TEXT NOT NULL,
+      terminal_id          TEXT NOT NULL,
+      flag_code            INTEGER NOT NULL,
+      type                 TEXT NOT NULL,
+      integer_length       INTEGER NOT NULL,
+      decimal_length       INTEGER NOT NULL,
+      decimal_multiplier   INTEGER NOT NULL DEFAULT 1,
+      minimum_value        INTEGER NOT NULL DEFAULT 1,
+      is_active            INTEGER NOT NULL DEFAULT 1,
+      label                TEXT,
+      synced_at            TEXT NOT NULL,
+      UNIQUE(terminal_id, flag_code)
+    );
+  `)
+
+  migrateCashiersCompanyId(sqlite)
+  migratePosDiscountAndSettings(sqlite)
+  migrateHeldDocuments(sqlite)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS pos_settings_temp (
+      id                    TEXT PRIMARY KEY,
+      cashier_id            TEXT,
+      show_price            INTEGER DEFAULT 1,
+      show_code             INTEGER DEFAULT 1,
+      show_barcode          INTEGER DEFAULT 0,
+      duplicate_item_action TEXT DEFAULT 'increase_qty',
+      min_qty_per_line      INTEGER DEFAULT 1,
+      allow_line_discount   INTEGER DEFAULT 1,
+      allow_doc_discount    INTEGER DEFAULT 1,
+      max_line_discount_pct REAL DEFAULT 100,
+      max_doc_discount_pct  REAL DEFAULT 100,
+      plu_cols              INTEGER DEFAULT 4,
+      plu_rows              INTEGER DEFAULT 3,
+      font_size_name        INTEGER DEFAULT 12,
+      font_size_price       INTEGER DEFAULT 13,
+      font_size_code        INTEGER DEFAULT 9,
+      source                TEXT DEFAULT 'default',
+      login_with_code       INTEGER DEFAULT 1,
+      login_with_card       INTEGER DEFAULT 0,
+      synced_at             TEXT,
+      torba_cari_id         TEXT,
+      torba_cari_name       TEXT,
+      invoice_type          TEXT DEFAULT 'e_archive'
+    );
+  `)
+
+  migrateLegacySettings(sqlite)
+  sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
+
+  return db
+}
+
+/** Bağlantıyı kapatıp dosyayı açar. Modül yüklenirken çağrılmaz. */
+export function openDb(filePath: string): ReturnType<typeof drizzle> {
+  try {
+    rawSqlite?.close()
+  } catch {
+    /* yok say */
+  }
+  rawSqlite = null
+  db = undefined
+  const dir = join(filePath, '..')
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+  const opened = initDatabase(filePath)
+  console.log('[db] açıldı:', filePath)
+  return opened
+}
+
+/** @deprecated Ana süreçte doğrudan {@link openDb} kullanın. */
+export function initDB(): ReturnType<typeof drizzle> {
+  return openDb(join(getDefaultDbDir(), 'btpos.db'))
+}
+
+export function reinitDatabase(customPath?: string): void {
+  const dbDir = customPath?.trim() ? customPath.trim() : getDefaultDbDir()
+  openDb(join(dbDir, 'btpos.db'))
+}
+
+export function getDb(): Database.Database {
+  return getSqlite()
+}
+
+function migrateCashiersCompanyId(sqlite: Database.Database) {
+  const cols = sqlite.prepare('PRAGMA table_info(cashiers)').all() as { name: string }[]
+  if (!cols.some(c => c.name === 'company_id')) {
+    try {
+      sqlite.exec(`ALTER TABLE cashiers ADD COLUMN company_id TEXT NOT NULL DEFAULT ''`)
+    } catch {
+      // yok say
+    }
+  }
+}
+
+function addColumnIfMissing(sqlite: Database.Database, table: string, column: string, ddl: string) {
+  const cols = sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  if (!cols.some(c => c.name === column)) {
+    try {
+      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
+    } catch {
+      /* yok say */
+    }
+  }
+}
+
+/** Eski btpos.db — iskonto ve POS ayar sütunları */
+function migratePosDiscountAndSettings(sqlite: Database.Database) {
+  addColumnIfMissing(sqlite, 'products', 'modification_date', 'modification_date TEXT')
+  addColumnIfMissing(sqlite, 'products_temp', 'modification_date', 'modification_date TEXT')
+  addColumnIfMissing(sqlite, 'activation', 'license_key', 'license_key TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'duplicate_item_action', `duplicate_item_action TEXT DEFAULT 'increase_qty'`)
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'min_qty_per_line', 'min_qty_per_line INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_line_discount', 'allow_line_discount INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_doc_discount', 'allow_doc_discount INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'max_line_discount_pct', 'max_line_discount_pct REAL DEFAULT 100')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'max_doc_discount_pct', 'max_doc_discount_pct REAL DEFAULT 100')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_cols', 'plu_cols INTEGER DEFAULT 4')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'plu_rows', 'plu_rows INTEGER DEFAULT 3')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_name', 'font_size_name INTEGER DEFAULT 12')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_price', 'font_size_price INTEGER DEFAULT 13')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'font_size_code', 'font_size_code INTEGER DEFAULT 9')
+  addColumnIfMissing(sqlite, 'plu_groups_cache', 'terminal_id', 'terminal_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_cache', 'cashier_id', 'cashier_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_temp', 'terminal_id', 'terminal_id TEXT')
+  addColumnIfMissing(sqlite, 'plu_groups_temp', 'cashier_id', 'cashier_id TEXT')
+  addColumnIfMissing(sqlite, 'cashiers', 'card_number', 'card_number TEXT')
+  addColumnIfMissing(sqlite, 'cashiers_temp', 'card_number', 'card_number TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'login_with_code', 'login_with_code INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'login_with_card', 'login_with_card INTEGER DEFAULT 0')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_code', 'login_with_code INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'login_with_card', 'login_with_card INTEGER DEFAULT 0')
+
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_id', 'torba_cari_id TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'torba_cari_name', 'torba_cari_name TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_id', 'torba_cari_id TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'torba_cari_name', 'torba_cari_name TEXT')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'touch_keyboard', 'touch_keyboard INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'touch_keyboard', 'touch_keyboard INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'customer_display', 'customer_display INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'customer_display', 'customer_display INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'print_behavior', 'print_behavior TEXT DEFAULT NULL')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'print_behavior', 'print_behavior TEXT DEFAULT NULL')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'default_template_ids', 'default_template_ids TEXT DEFAULT NULL')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'allow_exit_with_held_docs', 'allow_exit_with_held_docs INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'allow_exit_with_held_docs', 'allow_exit_with_held_docs INTEGER DEFAULT 1')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'cari_payment_use_pavo', 'cari_payment_use_pavo INTEGER DEFAULT 0')
+  addColumnIfMissing(sqlite, 'pos_settings_temp', 'cari_payment_use_pavo', 'cari_payment_use_pavo INTEGER DEFAULT 0')
+  const workplaceCols = [
+    'terminal_number', 'workplace_name', 'workplace_address',
+    'workplace_phone', 'workplace_city', 'workplace_district',
+    'workplace_tax_office', 'workplace_tax_no',
+  ] as const
+  for (const col of workplaceCols) {
+    addColumnIfMissing(sqlite, 'pos_settings_cache', col, `${col} TEXT`)
+    addColumnIfMissing(sqlite, 'pos_settings_temp', col, `${col} TEXT`)
+  }
+  try {
+    sqlite.exec(`ALTER TABLE pos_settings_cache ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
+  } catch {
+    /* kolon zaten var */
+  }
+  try {
+    sqlite.exec(`ALTER TABLE pos_settings_temp ADD COLUMN invoice_type TEXT DEFAULT 'e_archive'`)
+  } catch {
+    /* kolon zaten var */
+  }
+
+  addColumnIfMissing(sqlite, 'sale_items', 'discount_rate', 'discount_rate REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'discount_amount', 'discount_amount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'applied_by', 'applied_by TEXT')
+  addColumnIfMissing(sqlite, 'sale_items', 'unit_price_gross', 'unit_price_gross REAL')
+  addColumnIfMissing(sqlite, 'sale_items', 'gross_amount', 'gross_amount REAL')
+  addColumnIfMissing(sqlite, 'sale_items', 'line_discount', 'line_discount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'doc_discount_share', 'doc_discount_share REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sale_items', 'net_amount', 'net_amount REAL')
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS customers (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      code        TEXT NOT NULL DEFAULT '',
+      name        TEXT NOT NULL,
+      phone       TEXT NOT NULL DEFAULT '',
+      tax_no      TEXT NOT NULL DEFAULT '',
+      address     TEXT NOT NULL DEFAULT '',
+      balance     REAL NOT NULL DEFAULT 0,
+      is_person   INTEGER NOT NULL DEFAULT 1,
+      first_name  TEXT NOT NULL DEFAULT '',
+      last_name   TEXT NOT NULL DEFAULT '',
+      postal_code TEXT NOT NULL DEFAULT '',
+      city        TEXT NOT NULL DEFAULT '',
+      district    TEXT NOT NULL DEFAULT '',
+      synced_at   TEXT NOT NULL
+    )
+  `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS customers_temp (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      code        TEXT NOT NULL DEFAULT '',
+      name        TEXT NOT NULL,
+      phone       TEXT NOT NULL DEFAULT '',
+      tax_no      TEXT NOT NULL DEFAULT '',
+      address     TEXT NOT NULL DEFAULT '',
+      balance     REAL NOT NULL DEFAULT 0,
+      is_person   INTEGER NOT NULL DEFAULT 1,
+      first_name  TEXT NOT NULL DEFAULT '',
+      last_name   TEXT NOT NULL DEFAULT '',
+      postal_code TEXT NOT NULL DEFAULT '',
+      city        TEXT NOT NULL DEFAULT '',
+      district    TEXT NOT NULL DEFAULT '',
+      synced_at   TEXT NOT NULL
+    )
+  `)
+
+  addColumnIfMissing(sqlite, 'customers',      'is_person',  'is_person  INTEGER NOT NULL DEFAULT 1')
+  addColumnIfMissing(sqlite, 'customers',      'first_name', 'first_name TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'last_name',  'last_name  TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'is_person',  'is_person  INTEGER NOT NULL DEFAULT 1')
+  addColumnIfMissing(sqlite, 'customers_temp', 'first_name', 'first_name TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'last_name',  'last_name  TEXT NOT NULL DEFAULT \'\'')
+
+  addColumnIfMissing(sqlite, 'customers',      'postal_code', 'postal_code TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'city',        'city        TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'district',    'district    TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'postal_code', 'postal_code TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'city',        'city        TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers_temp', 'district',    'district    TEXT NOT NULL DEFAULT \'\'')
+  addColumnIfMissing(sqlite, 'customers',      'email',       'email       TEXT')
+  addColumnIfMissing(sqlite, 'customers_temp', 'email',       'email       TEXT')
+
+  addColumnIfMissing(sqlite, 'sales', 'customer_id', 'customer_id TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'customer_name', 'customer_name TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'customer_code', 'customer_code TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_sent', 'invoice_sent INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_id', 'invoice_id TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_error', 'invoice_error TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
+
+  const salesCols = (sqlite.prepare('PRAGMA table_info(sales)').all() as { name: string }[]).map(c => c.name)
+  if (!salesCols.includes('order_no')) sqlite.exec('ALTER TABLE sales ADD COLUMN order_no TEXT')
+  if (!salesCols.includes('card_acquirer_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN card_acquirer_id TEXT')
+  if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
+  if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
+  if (!salesCols.includes('is_return')) sqlite.exec('ALTER TABLE sales ADD COLUMN is_return INTEGER DEFAULT 0')
+
+  addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'sales', 'net_amount', 'net_amount REAL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'pos_settings_cache', 'cashier_id', 'cashier_id TEXT')
+  try {
+    sqlite.exec(`UPDATE sales SET net_amount = total_amount WHERE net_amount IS NULL OR net_amount = 0`)
+  } catch {
+    /* yok say */
+  }
+
+  migrateSalesReceiptNo(sqlite)
+
+  // Kolon sırası düzeltmesi tabloyu yeniden kurup işyeri kolonlarını düşürebilir.
+  // Kopya, o silmeden önce alınır; tablolar doluysa tekrar kopyalanmaz.
+  migrateLegacySettings(sqlite)
+
+  // Sprint 24 — pos_settings_cache kolon sırası düzeltmesi
+  // cashier_id migration ile sona eklenmişti, fiziksel sıra yanlıştı.
+  // Tabloyu yeniden oluşturarak kolon sırasını düzelt.
+  try {
+    const cols = sqlite.prepare('PRAGMA table_info(pos_settings_cache)').all() as { name: string; cid: number }[]
+    const cashierCol = cols.find(c => c.name === 'cashier_id')
+
+    const settingsCopied = sqlite.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'terminal_settings_cache'`,
+    ).get() as { name?: string } | undefined
+    const keepLegacyBackup = Boolean(settingsCopied?.name)
+    // cashier_id 2. sırada değilse (cid=1) tablo yeniden oluşturulmalı.
+    // Yeni tablolara kopya alındıysa eski tablo yedek kalsın; yeniden kurma onu siler.
+    if (cashierCol && cashierCol.cid !== 1 && !keepLegacyBackup) {
+      sqlite.exec(`
+        -- Mevcut veriyi yedekle
+        CREATE TABLE IF NOT EXISTS pos_settings_cache_backup AS
+          SELECT * FROM pos_settings_cache;
+
+        -- Eski tabloyu sil
+        DROP TABLE pos_settings_cache;
+
+        -- Doğru sırayla yeniden oluştur
+        CREATE TABLE pos_settings_cache (
+          id                    TEXT PRIMARY KEY DEFAULT 'local',
+          cashier_id            TEXT,
+          show_price            INTEGER DEFAULT 1,
+          show_code             INTEGER DEFAULT 1,
+          show_barcode          INTEGER DEFAULT 0,
+          duplicate_item_action TEXT DEFAULT 'increase_qty',
+          min_qty_per_line      INTEGER DEFAULT 1,
+          allow_line_discount   INTEGER DEFAULT 1,
+          allow_doc_discount    INTEGER DEFAULT 1,
+          max_line_discount_pct REAL DEFAULT 100,
+          max_doc_discount_pct  REAL DEFAULT 100,
+          plu_cols              INTEGER DEFAULT 4,
+          plu_rows              INTEGER DEFAULT 3,
+          font_size_name        INTEGER DEFAULT 12,
+          font_size_price       INTEGER DEFAULT 13,
+          font_size_code        INTEGER DEFAULT 9,
+          source                TEXT DEFAULT 'default',
+          login_with_code       INTEGER DEFAULT 1,
+          login_with_card       INTEGER DEFAULT 0,
+          synced_at             TEXT,
+          torba_cari_id         TEXT,
+          torba_cari_name       TEXT,
+          invoice_type          TEXT DEFAULT 'e_archive'
+        );
+
+        -- Veriyi açık kolon listesiyle geri yaz (kolon adı bazlı, sıra bağımsız)
+        INSERT INTO pos_settings_cache (
+          id, cashier_id, show_price, show_code, show_barcode,
+          duplicate_item_action, min_qty_per_line,
+          allow_line_discount, allow_doc_discount,
+          max_line_discount_pct, max_doc_discount_pct,
+          plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+          source, login_with_code, login_with_card, synced_at,
+          torba_cari_id, torba_cari_name, invoice_type
+        )
+        SELECT
+          id, cashier_id, show_price, show_code, show_barcode,
+          duplicate_item_action, min_qty_per_line,
+          allow_line_discount, allow_doc_discount,
+          max_line_discount_pct, max_doc_discount_pct,
+          plu_cols, plu_rows, font_size_name, font_size_price, font_size_code,
+          source, login_with_code, login_with_card, synced_at,
+          torba_cari_id, torba_cari_name, 'e_archive'
+        FROM pos_settings_cache_backup;
+
+        -- Yedek tabloyu sil
+        DROP TABLE pos_settings_cache_backup;
+      `)
+    }
+  } catch (e) {
+    console.warn('[migration] pos_settings_cache yeniden oluşturma hatası:', e)
+  }
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS operation_queue (
+      id           TEXT PRIMARY KEY,
+      company_id   TEXT NOT NULL,
+      type         TEXT NOT NULL,
+      payload      TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      attempts     INTEGER DEFAULT 0,
+      max_attempts INTEGER DEFAULT 3,
+      error        TEXT,
+      created_at   TEXT NOT NULL,
+      sent_at      TEXT,
+      label        TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS payment_device_settings (
+      id                TEXT PRIMARY KEY,
+      company_id        TEXT NOT NULL,
+      terminal_id       TEXT NOT NULL,
+      provider          TEXT NOT NULL DEFAULT 'pavo',
+      ip_address        TEXT,
+      port              INTEGER DEFAULT 9100,
+      serial_no         TEXT,
+      card_read_timeout INTEGER DEFAULT 30,
+      print_width       TEXT DEFAULT '80mm',
+      is_active         INTEGER DEFAULT 1,
+      synced_at         TEXT
+    )
+  `)
+  try {
+    const pdsCols = (sqlite.prepare('PRAGMA table_info(payment_device_settings)').all() as { name: string }[]).map(c => c.name)
+    if (pdsCols.includes('invoice_type')) {
+      sqlite.exec(`
+        CREATE TABLE IF NOT EXISTS payment_device_settings_new (
+          id                TEXT PRIMARY KEY,
+          company_id        TEXT NOT NULL,
+          terminal_id       TEXT NOT NULL,
+          provider          TEXT NOT NULL DEFAULT 'pavo',
+          ip_address        TEXT,
+          port              INTEGER DEFAULT 9100,
+          serial_no         TEXT,
+          card_read_timeout INTEGER DEFAULT 30,
+          print_width       TEXT DEFAULT '80mm',
+          is_active         INTEGER DEFAULT 1,
+          synced_at         TEXT
+        );
+        INSERT INTO payment_device_settings_new (
+          id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at
+        )
+        SELECT
+          id, company_id, terminal_id, provider, ip_address, port, serial_no, card_read_timeout, print_width, is_active, synced_at
+        FROM payment_device_settings;
+        DROP TABLE payment_device_settings;
+        ALTER TABLE payment_device_settings_new RENAME TO payment_device_settings;
+      `)
+    }
+  } catch (e) {
+    console.warn('[migration] payment_device_settings invoice_type kaldırma hatası:', e)
+  }
+  addColumnIfMissing(sqlite, 'payment_device_settings', 'last_paired_at', 'last_paired_at TEXT')
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS unit_mappings (
+      id          TEXT PRIMARY KEY,
+      company_id  TEXT NOT NULL,
+      unit_name   TEXT NOT NULL,
+      pavo_code   TEXT NOT NULL DEFAULT 'C62',
+      UNIQUE(company_id, unit_name)
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS pavo_sequence (
+      id  INTEGER PRIMARY KEY,
+      seq INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  sqlite.exec(`INSERT OR IGNORE INTO pavo_sequence (id, seq) VALUES (1, 0)`)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cari_payments (
+      id            TEXT PRIMARY KEY,
+      company_id    TEXT NOT NULL,
+      type          TEXT NOT NULL,
+      amount        REAL NOT NULL,
+      customer_id   TEXT,
+      customer_name TEXT,
+      customer_code TEXT,
+      cashier_id    TEXT,
+      cashier_name  TEXT,
+      description   TEXT,
+      created_at    TEXT NOT NULL
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS enabled_payment_brands (
+      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+      terminal_id               TEXT    NOT NULL,
+      payment_provider_brand_id INTEGER NOT NULL,
+      payment_provider_brand_nm TEXT    NOT NULL,
+      payment_mediator          INTEGER NOT NULL,
+      synced_at                 TEXT    NOT NULL,
+      UNIQUE(terminal_id, payment_provider_brand_id)
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS scale_settings (
+      id        INTEGER PRIMARY KEY DEFAULT 1,
+      port_path TEXT,
+      baud_rate INTEGER DEFAULT 9600,
+      enabled   INTEGER DEFAULT 0
+    )
+  `)
+  sqlite.prepare('INSERT OR IGNORE INTO scale_settings (id) VALUES (1)').run()
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cart_draft (
+      id          TEXT PRIMARY KEY DEFAULT 'current',
+      company_id  TEXT,
+      terminal_id TEXT,
+      cashier_id  TEXT,
+      cart        TEXT NOT NULL DEFAULT '[]',
+      customer    TEXT,
+      saved_at    TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS printer_settings (
+      id           TEXT PRIMARY KEY,
+      terminal_id  TEXT,
+      printer_type TEXT DEFAULT 'usb',
+      printer_name TEXT,
+      printer_ip   TEXT,
+      printer_port INTEGER DEFAULT 9100,
+      paper_width  INTEGER DEFAULT 80,
+      is_active    INTEGER DEFAULT 1,
+      updated_at   TEXT
+    )
+  `)
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS barcode_formats_cache (
+      id                   TEXT PRIMARY KEY,
+      company_id           TEXT NOT NULL,
+      terminal_id          TEXT NOT NULL,
+      flag_code            INTEGER NOT NULL,
+      type                 TEXT NOT NULL,
+      integer_length       INTEGER NOT NULL,
+      decimal_length       INTEGER NOT NULL,
+      decimal_multiplier   INTEGER NOT NULL DEFAULT 1,
+      minimum_value        INTEGER NOT NULL DEFAULT 1,
+      is_active            INTEGER NOT NULL DEFAULT 1,
+      label                TEXT,
+      synced_at            TEXT NOT NULL,
+      UNIQUE(terminal_id, flag_code)
+    )
+  `)
+}
+
+function migrateHeldDocuments(sqlite: Database.Database) {
+  addColumnIfMissing(sqlite, 'held_documents', 'receipt_no', 'receipt_no TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'order_no', 'order_no TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'customer_name', 'customer_name TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'cashier_name', 'cashier_name TEXT')
+  addColumnIfMissing(sqlite, 'held_documents', 'customer', 'customer TEXT')
+}
+
+export function getDB() {
+  if (!db) throw new Error('DB henüz başlatılmadı')
+  return db
+}

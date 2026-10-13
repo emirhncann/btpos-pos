@@ -216,6 +216,7 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
       cash_amount:          input.cashAmount,
       card_amount:          input.cardAmount,
       paid_amount:          input.paidAmount,
+      tendered_amount:      (input.paymentLines ?? []).reduce((s, p) => s + p.amount, 0) || input.paidAmount,
       change_amount:        input.changeAmount ?? 0,
       item_count:           cart.length,
       total_quantity:       totalQty,
@@ -234,7 +235,14 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
           city:     customer.city ?? '',
           district: customer.district ?? '',
           email:    customer.email ?? '',
-          balance:  customer.balance ?? 0,
+          id:       customer.id ?? '',
+          balance:  '',
+          balance_before: '',
+          balance_after: '',
+          balance_before_text: '',
+          balance_after_text: '',
+          balance_at: '',
+          balance_note: '',
         }
       : {},
     cashiers: {
@@ -270,12 +278,21 @@ export function buildSaleReceiptData(input: SaleReceiptInput): RenderData {
   }
 }
 
+const missingTemplateKeys = new Set<string>()
+
+/** undefined / null / NaN fişe "undefined" veya "NaN" olarak basılmaz. */
 export function formatPdfmeValue(val: unknown): string {
-  if (val === null || val === undefined) return ''
+  if (val === undefined || val === null || (typeof val === 'number' && Number.isNaN(val))) return ''
   if (typeof val === 'number') {
     return val.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
   return String(val)
+}
+
+function noteMissingTemplateKey(key: string) {
+  if (missingTemplateKeys.has(key)) return
+  missingTemplateKeys.add(key)
+  console.warn(`[template] değer yok: ${key}`)
 }
 
 /** RenderData → düz değişken haritası (ESC/POS ve multiVariableText için) */
@@ -305,6 +322,13 @@ export function flattenRenderData(data: RenderData): Record<string, string> {
     flat['sales.customer_name'] = formatPdfmeValue(data.customers.name)
   }
 
+  if (data.customers && !data.customer) {
+    for (const [col, val] of Object.entries(data.customers)) {
+      const k = `customer.${col}`
+      if (!Object.prototype.hasOwnProperty.call(flat, k)) flat[k] = formatPdfmeValue(val)
+    }
+  }
+
   return flat
 }
 
@@ -314,10 +338,10 @@ export function resolveTemplateVariables(
   data: RenderData,
 ): string {
   const flat = flattenRenderData(data)
-  return template.replace(/\{([^{}]+)\}/g, (match, key: string) => {
+  return template.replace(/\{([^{}]+)\}/g, (_match, key: string) => {
     const k = key.trim()
-    const val = flat[k]
-    return val !== undefined && val !== '' ? val : match
+    if (!Object.prototype.hasOwnProperty.call(flat, k)) noteMissingTemplateKey(k)
+    return flat[k] ?? ''
   })
 }
 
@@ -345,15 +369,6 @@ function bindListField(
 ): string | undefined {
   const raw = saleItemsJson(data) ?? flat.sale_items
   if (!raw) return undefined
-
-  if (field.type === 'product-list' && field.columns?.length) {
-    try {
-      const rows = JSON.parse(raw) as string[][]
-      return JSON.stringify(mapSaleItemsForColumns(rows, field.columns))
-    } catch {
-      return raw
-    }
-  }
 
   return raw
 }
@@ -394,8 +409,36 @@ export function buildNestedPdfmeContext(data: RenderData): Record<string, unknow
   if (sales && customers && !sales.customer_name && customers.name) {
     sales.customer_name = customers.name
   }
+  if (customers && !ctx.customer) ctx.customer = customers
 
   return ctx
+}
+
+const TEMPLATE_VAR_RE = /\{([^{}]+)\}/g
+
+function fillMissingTemplatePaths(inputs: Record<string, unknown>, schema: PdfmeSchemaField[]) {
+  for (const field of schema) {
+    const text = fieldTemplateText(field)
+    for (const match of text.matchAll(TEMPLATE_VAR_RE)) {
+      const key = match[1].trim()
+      const dot = key.indexOf('.')
+      if (dot <= 0) continue
+      const table = key.slice(0, dot)
+      const col = key.slice(dot + 1)
+      if (!col || col.includes('.')) continue
+      const bag = inputs[table]
+      if (!bag || typeof bag !== 'object' || Array.isArray(bag)) {
+        inputs[table] = { [col]: '' }
+        noteMissingTemplateKey(key)
+        continue
+      }
+      const rec = bag as Record<string, unknown>
+      if (!Object.prototype.hasOwnProperty.call(rec, col)) {
+        rec[col] = ''
+        noteMissingTemplateKey(key)
+      }
+    }
+  }
 }
 
 /**
@@ -411,6 +454,7 @@ export function buildPdfmeInputs(
 ): Record<string, unknown> {
   const flat = flattenRenderData(data)
   const inputs: Record<string, unknown> = buildNestedPdfmeContext(data)
+  fillMissingTemplatePaths(inputs, schema)
 
   for (const field of schema) {
     const t = field.type ?? 'text'
@@ -456,20 +500,6 @@ function extractTemplateVar(content: string | undefined): string | null {
   if (!m) return null
   const key = m[1].trim()
   return key.includes('.') ? key.split('.')[0] : key
-}
-
-/** pdfme şablonu PDF üretimi gerektiriyor mu (görsel veya dinamik tablo) */
-export function templateNeedsPdfPipeline(templateJson: unknown): boolean {
-  const t = templateJson as { schemas?: { type?: string; content?: string }[][] }
-  const fields = t.schemas?.[0] ?? []
-  return fields.some(
-    f =>
-      f.type === 'table'
-      || f.type === 'product-list'
-      || (f.type === 'image'
-        && typeof f.content === 'string'
-        && DATA_IMAGE_RE.test(f.content)),
-  )
 }
 
 export type PrintBehaviorMap = Record<string, PrintBehavior>

@@ -14,6 +14,26 @@ import {
 
 export function registerPrinterIpc(ipcMain: IpcMain, db: Database.Database): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS document_printer_settings (
+      id           INTEGER PRIMARY KEY CHECK (id = 1),
+      printer_name TEXT,
+      updated_at   TEXT
+    )
+  `)
+
+  ipcMain.handle('printer:getDocSettings', () =>
+    db.prepare('SELECT printer_name FROM document_printer_settings WHERE id = 1').get()
+      ?? { printer_name: null })
+
+  ipcMain.handle('printer:saveDocSettings', (_e, s: { printer_name: string | null }) => {
+    db.prepare(`
+      INSERT INTO document_printer_settings (id, printer_name, updated_at) VALUES (1, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET printer_name = excluded.printer_name, updated_at = excluded.updated_at
+    `).run(s.printer_name || null, new Date().toISOString())
+    return { success: true }
+  })
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS printer_settings (
       id           TEXT PRIMARY KEY,
       terminal_id  TEXT,

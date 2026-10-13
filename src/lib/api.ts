@@ -52,6 +52,7 @@ export const api = {
         taxNo:     String(c.taxNo ?? c.vkn ?? ''),
         address:   String(c.address ?? c.Address ?? ''),
         balance:   Number(c.balance ?? c.Balance ?? 0),
+        balanceKnown: c.balance != null || c.Balance != null,
         isPerson,
         firstName: String(c.firstName ?? ''),
         lastName:  String(c.lastName ?? ''),
@@ -61,6 +62,24 @@ export const api = {
         email:      String(c.emailAddress ?? c.email ?? c.Email ?? ''),
       }
     })
+  },
+
+  async getCustomerBalance(customerRef: string, terminalId: string): Promise<{ balance: number; as_of: string | null }> {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 3000)
+    try {
+      const url = `${API_URL}/pos/customers/${encodeURIComponent(customerRef)}/balance?terminal_id=${encodeURIComponent(terminalId)}`
+      const res = await fetch(url, { signal: ctrl.signal })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const json = await res.json() as Record<string, unknown>
+      const body = (json.data && typeof json.data === 'object' ? json.data : json) as Record<string, unknown>
+      const balance = body.balance ?? body.Balance
+      if (typeof balance !== 'number' || !Number.isFinite(balance)) throw new Error('bakiye yok')
+      const asOf = body.as_of ?? body.asOf ?? null
+      return { balance, as_of: asOf != null && String(asOf).trim() ? String(asOf) : new Date().toISOString() }
+    } finally {
+      clearTimeout(timer)
+    }
   },
 
   async getCashiers(companyId: string): Promise<CashierRow[]> {
@@ -155,7 +174,7 @@ export const api = {
   },
 
   async getTemplates(companyId: string): Promise<Record<string, unknown>[]> {
-    const url = `${API_URL}/templates/${companyId}`
+    const url = `${API_URL}/templates/${companyId}?for=terminal`
     console.log('[api.getTemplates] GET', url)
     const res = await fetch(url)
     if (!res.ok) {

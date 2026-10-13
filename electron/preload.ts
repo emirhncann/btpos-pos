@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electron', {
   app: {
     version:      () => ipcRenderer.invoke('app:version'),
     hostname:     () => ipcRenderer.invoke('app:hostname'),
+    log:          (line: string) => ipcRenderer.invoke('app:log', line),
     restart:      () => ipcRenderer.invoke('app:restart'),
     requestExit:  () => ipcRenderer.invoke('app:requestExit'),
     onExitBlocked: (cb: (data: { heldCount: number; pavoLocked?: boolean }) => void) => {
@@ -60,6 +61,8 @@ contextBridge.exposeInMainWorld('electron', {
     }, dataB64: string) => ipcRenderer.invoke('printer:printRaw', config, dataB64),
     getSettings: () => ipcRenderer.invoke('printer:getSettings'),
     saveSettings: (s: Record<string, unknown>) => ipcRenderer.invoke('printer:saveSettings', s),
+    getDocSettings: () => ipcRenderer.invoke('printer:getDocSettings'),
+    saveDocSettings: (s: { printer_name: string | null }) => ipcRenderer.invoke('printer:saveDocSettings', s),
     printPaymentReceipt: (opts: PaymentReceiptPrintOpts) =>
       ipcRenderer.invoke('printer:printPaymentReceipt', opts),
     testPrint: (settings: Record<string, unknown>) =>
@@ -70,10 +73,6 @@ contextBridge.exposeInMainWorld('electron', {
     getByTrigger: (triggerType: string) => ipcRenderer.invoke('templates:getByTrigger', triggerType),
     getDefault: (triggerType: string) => ipcRenderer.invoke('templates:getDefault', triggerType),
     save: (templates: Record<string, unknown>[]) => ipcRenderer.invoke('templates:save', templates),
-    printThermal: (opts: { triggerType: string; data: Record<string, Record<string, unknown>> }) =>
-      ipcRenderer.invoke('templates:printThermal', opts),
-    printPdf: (opts: { triggerType: string; data: Record<string, Record<string, unknown>> }) =>
-      ipcRenderer.invoke('templates:printPdf', opts),
     printWithBehavior: (opts: {
       triggerType: string
       data: Record<string, Record<string, unknown>>
@@ -157,6 +156,9 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:getCustomers', companyId, query),
     getCustomerById:    (companyId: string, id: string) =>
       ipcRenderer.invoke('db:getCustomerById', companyId, id),
+    updateCustomerBalance: (customerId: string, balance: number, asOf: string | null) =>
+      ipcRenderer.invoke('db:updateCustomerBalance', customerId, balance, asOf),
+    getSaleErpEffect: (key: string) => ipcRenderer.invoke('db:getSaleErpEffect', key),
     getCustomerByCode:  (companyId: string, code: string) =>
       ipcRenderer.invoke('db:getCustomerByCode', companyId, code),
     getPendingInvoices: (onlyAnonymous?: boolean) =>

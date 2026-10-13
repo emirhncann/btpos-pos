@@ -132,6 +132,12 @@ export async function collectLocalSettings(): Promise<LocalSettings> {
     out.scale = null
   }
   try {
+    const doc = await window.electron.printer.getDocSettings()
+    out.document_printer_name = doc?.printer_name ?? null
+  } catch {
+    out.document_printer_name = null
+  }
+  try {
     out.paymentDevices = await window.electron.db.getAllPaymentDeviceSettings()
   } catch {
     out.paymentDevices = []
@@ -158,6 +164,11 @@ export async function applyLocalSettings(s: LocalSettings): Promise<void> {
       ? scale as ScaleSettings
       : toCloudScale(scale as ScaleRow)
     if (cloud) await saveScaleSettings(fromCloudScale(cloud))
+  }
+  if (Object.prototype.hasOwnProperty.call(s, 'document_printer_name')) {
+    const raw = s.document_printer_name
+    const name = typeof raw === 'string' && raw.trim() ? raw.trim() : null
+    await window.electron.printer.saveDocSettings({ printer_name: name })
   }
 }
 

@@ -1547,6 +1547,9 @@ export interface CustomerRow {
   taxNo:     string
   address:   string
   balance:   number
+  /** false: API bu satırda bakiye göndermedi; yerel bakiye korunur */
+  balanceKnown?: boolean
+  balanceUpdatedAt?: string | null
   isPerson:  boolean
   firstName: string
   lastName:  string
@@ -1569,6 +1572,9 @@ function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
     taxNo:     String(r.tax_no ?? ''),
     address:   String(r.address ?? ''),
     balance:   Number(r.balance ?? 0),
+    balanceUpdatedAt: r.balance_updated_at != null && String(r.balance_updated_at).trim()
+      ? String(r.balance_updated_at)
+      : null,
     isPerson,
     firstName: String(r.first_name ?? ''),
     lastName:  String(r.last_name ?? ''),
@@ -1596,16 +1602,23 @@ export function syncCustomersAcid(
   }
 
   const txn = db.transaction(() => {
+    const prevRows = db.prepare(
+      `SELECT id, balance, balance_updated_at FROM customers WHERE company_id = ?`,
+    ).all(companyId) as { id: string; balance: number | null; balance_updated_at: string | null }[]
+    const prev = new Map(prevRows.map(r => [String(r.id), r]))
+
     db.prepare('DELETE FROM customers_temp').run()
 
     const ins = db.prepare(`
       INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance,
-        is_person, first_name, last_name, postal_code, city, district, email, synced_at)
+        is_person, first_name, last_name, postal_code, city, district, email, balance_updated_at, synced_at)
       VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance,
-        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @email, @syncedAt)
+        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @email, @balanceUpdatedAt, @syncedAt)
     `)
 
     for (const c of items) {
+      const old = prev.get(String(c.id))
+      const known = c.balanceKnown !== false
       ins.run({
         id:        c.id,
         companyId,
@@ -1614,7 +1627,8 @@ export function syncCustomersAcid(
         phone:     c.phone   ?? '',
         taxNo:     c.taxNo   ?? '',
         address:   c.address ?? '',
-        balance:   c.balance ?? 0,
+        balance:   known ? (c.balance ?? 0) : Number(old?.balance ?? 0),
+        balanceUpdatedAt: known ? now : (old?.balance_updated_at ?? null),
         isPerson:  c.isPerson ? 1 : 0,
         firstName: c.firstName ?? '',
         lastName:  c.lastName  ?? '',
@@ -1650,6 +1664,41 @@ export function syncCustomersAcid(
   } catch (e) {
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: String(e) }
   }
+}
+
+/** Yalnızca bakiye kolonları. Diğer cari alanlarına dokunmaz. */
+export function updateCustomerBalance(customerId: string, balance: number, asOf: string | null): void {
+  const db = getSqlite()
+  db.prepare(`
+    UPDATE customers SET balance = ?, balance_updated_at = ? WHERE id = ?
+  `).run(balance, asOf, customerId)
+}
+
+/** Fatura ile tahsilat ayrı kuyruk işi. Etki yalnız başarıyla gönderilmiş olanlardan. */
+export function getSaleErpEffect(key: string): { invoiceSent: boolean; paymentsSentTotal: number } {
+  const sqlite = getSqlite()
+  const sale = sqlite.prepare(`
+    SELECT invoice_sent, invoice_id FROM sales
+    WHERE id = ? OR order_no = ? OR receipt_no = ?
+    LIMIT 1
+  `).get(key, key, key) as { invoice_sent?: number; invoice_id?: string | null } | undefined
+  if (!sale || Number(sale.invoice_sent) !== 1 || !sale.invoice_id) {
+    return { invoiceSent: Number(sale?.invoice_sent) === 1, paymentsSentTotal: 0 }
+  }
+  const rows = sqlite.prepare(`
+    SELECT payload FROM operation_queue WHERE type = 'payment' AND status = 'success'
+  `).all() as { payload: string }[]
+  let total = 0
+  for (const row of rows) {
+    try {
+      const p = JSON.parse(row.payload) as { invoice_id?: unknown; cash_amount?: unknown; card_amount?: unknown }
+      if (String(p.invoice_id ?? '') !== String(sale.invoice_id)) continue
+      total += Number(p.cash_amount ?? 0) + Number(p.card_amount ?? 0)
+    } catch {
+      /* bozuk satır bakiyeyi bozmasın */
+    }
+  }
+  return { invoiceSent: true, paymentsSentTotal: parseFloat(total.toFixed(2)) }
 }
 
 export function getCustomerById(companyId: string, id: string): CustomerRow | null {

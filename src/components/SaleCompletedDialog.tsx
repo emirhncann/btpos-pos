@@ -31,7 +31,7 @@ export function SaleCompletedDialog() {
           window.dispatchEvent(new CustomEvent('btpos-completed-barcode', { detail: code }))
         }
         e.preventDefault()
-        e.stopPropagation()
+        e.stopImmediatePropagation()
         return
       }
       if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -39,7 +39,7 @@ export function SaleCompletedDialog() {
         if (gap) clearTimeout(gap)
         gap = setTimeout(() => { buf = '' }, 150)
         e.preventDefault()
-        e.stopPropagation()
+        e.stopImmediatePropagation()
       }
     }
     window.addEventListener('keydown', onKey, true)
