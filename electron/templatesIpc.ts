@@ -227,18 +227,21 @@ export function registerTemplatesIpc(ipcMain: IpcMain, db: Database.Database): v
         )
         ids.push(t.id)
       }
+      let deleted = 0
       if (ids.length) {
-        db.prepare(
+        const info = db.prepare(
           `DELETE FROM receipt_templates WHERE id NOT IN (${ids.map(() => '?').join(',')})`,
         ).run(...ids)
+        deleted = Number(info.changes ?? 0)
       } else {
-        db.prepare('DELETE FROM receipt_templates').run()
+        const info = db.prepare('DELETE FROM receipt_templates').run()
+        deleted = Number(info.changes ?? 0)
       }
-      return ids.length
+      return { count: ids.length, deleted }
     })
 
-    const count = syncAll(templates)
-    return { success: true as const, count }
+    const saved = syncAll(templates)
+    return { success: true as const, count: saved.count, deleted: saved.deleted }
   })
 
   ipcMain.handle('templates:printWithBehavior', async (_e, opts: {

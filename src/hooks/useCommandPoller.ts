@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { api } from '../lib/api'
+import { adminCommandError, isCommandAckResult, type CommandAckResult } from '../lib/commandResult'
 import { cmdProgress } from '../lib/cmdProgress'
 import { isBusy } from '../store/pavoLock'
 
@@ -11,21 +12,87 @@ export function syncModeFromPayload(payload: unknown): SyncMode {
 }
 
 export interface CommandHandlers {
-  onSyncAll:            (mode?: SyncMode) => Promise<void>
-  onSyncPrices:         () => Promise<void>
-  onSyncCashiers:       (mode?: SyncMode) => Promise<void>
-  onSyncPlu:            (mode?: SyncMode) => Promise<void>
-  onSyncCustomers:      (mode?: SyncMode) => Promise<void>
-  onSyncProducts:       (mode?: SyncMode) => Promise<void>
-  onSyncSettings:       () => Promise<void>
-  onSyncTemplates:      () => Promise<void>
-  onSyncPaymentBrands:  () => Promise<void>
-  onPairPavo:           (payload?: Record<string, unknown>) => Promise<void>
+  onSyncAll:            (mode?: SyncMode) => Promise<CommandAckResult | void>
+  onSyncPrices:         () => Promise<CommandAckResult | void>
+  onSyncCashiers:       (mode?: SyncMode) => Promise<CommandAckResult | void>
+  onSyncPlu:            (mode?: SyncMode) => Promise<CommandAckResult | void>
+  onSyncCustomers:      (mode?: SyncMode) => Promise<CommandAckResult | void>
+  onSyncProducts:       (mode?: SyncMode) => Promise<CommandAckResult | void>
+  onSyncSettings:       () => Promise<CommandAckResult | void>
+  onSyncTemplates:      () => Promise<CommandAckResult | void>
+  onSyncPaymentBrands:  () => Promise<CommandAckResult | void>
+  onPairPavo:           (payload?: Record<string, unknown>) => Promise<CommandAckResult | void>
   onLogout:             () => void
-  onMessage:            (text: string, duration?: number) => void
+  onMessage:            (text: string, duration?: number) => CommandAckResult | void
   onRestart:            () => void
   onLock:               (reason?: string) => void
-  onUpdateApp:          (payload: Record<string, unknown>) => Promise<void>
+  onUpdateApp:          (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
+}
+
+const ACK_OUTBOX_KEY = 'command_ack_outbox'
+
+interface PendingCommandAck {
+  targetId: string
+  status: 'done' | 'failed'
+  error?: string
+  result?: CommandAckResult
+}
+
+async function readAckOutbox(): Promise<PendingCommandAck[]> {
+  try {
+    const raw = await window.electron.store.get(ACK_OUTBOX_KEY)
+    if (!Array.isArray(raw)) return []
+    return raw.filter((row): row is PendingCommandAck => {
+      if (!row || typeof row !== 'object') return false
+      const item = row as PendingCommandAck
+      return typeof item.targetId === 'string' && (item.status === 'done' || item.status === 'failed')
+    })
+  } catch {
+    return []
+  }
+}
+
+async function writeAckOutbox(rows: PendingCommandAck[]): Promise<void> {
+  await window.electron.store.set(ACK_OUTBOX_KEY, rows).catch(() => {})
+}
+
+async function enqueueAck(row: PendingCommandAck): Promise<void> {
+  const rows = (await readAckOutbox()).filter(item => item.targetId !== row.targetId)
+  rows.push(row)
+  await writeAckOutbox(rows)
+}
+
+/** Bağlantı varken biriken done/failed bildirimlerini yollar. Komut sırasına girmez. */
+async function flushAckOutbox(): Promise<Set<string>> {
+  const rows = await readAckOutbox()
+  if (!rows.length) return new Set()
+  const left: PendingCommandAck[] = []
+  const sent = new Set<string>()
+  for (const row of rows) {
+    try {
+      await api.ackCommand(row.targetId, row.status, row.error, row.result)
+      sent.add(row.targetId)
+    } catch {
+      left.push(row)
+    }
+  }
+  await writeAckOutbox(left)
+  return sent
+}
+
+async function sendAck(
+  targetId: string,
+  status: 'done' | 'failed',
+  error?: string,
+  result?: CommandAckResult,
+): Promise<void> {
+  try {
+    await api.ackCommand(targetId, status, error, result)
+    const rows = (await readAckOutbox()).filter(item => item.targetId !== targetId)
+    await writeAckOutbox(rows)
+  } catch {
+    await enqueueAck({ targetId, status, error, result })
+  }
 }
 
 const SYNC_KINDS = new Set([
@@ -99,6 +166,8 @@ export function useCommandPoller(
 
     const res = await api.pollCommands(terminalId)
     console.log('[POLL] komut sayısı:', res.commands?.length ?? 0)
+    let ackedAlready = new Set<string>()
+    try { ackedAlready = await flushAckOutbox() } catch { /* bildirim kuyruğu komut almayı durdurmasın */ }
 
     intervalRef.current = res.poll_interval ?? 30
 
@@ -126,33 +195,39 @@ export function useCommandPoller(
         continue
       }
 
+      if (ackedAlready.has(cmd.target_id)) {
+        console.log('[POLL] bildirim iletildi, komut yeniden çalıştırılmadı:', kind)
+        continue
+      }
+
       processed += 1
       const progressId = cmd.target_id ?? (cmd as { id?: string }).id ?? ''
+      let outcome: unknown
       try {
         try { cmdProgress.start(progressId) } catch { /* sayaç komut akışını bozmasın */ }
         switch (kind) {
           case 'sync_all':
-            await h.onSyncAll(mode)
+            outcome = await h.onSyncAll(mode)
             break
 
           case 'sync_prices':
-            await h.onSyncPrices()
+            outcome = await h.onSyncPrices()
             break
 
           case 'sync_cashiers':
-            await h.onSyncCashiers(mode)
+            outcome = await h.onSyncCashiers(mode)
             break
 
           case 'sync_plu':
-            await h.onSyncPlu(mode)
+            outcome = await h.onSyncPlu(mode)
             break
 
           case 'sync_customers':
-            await h.onSyncCustomers(mode)
+            outcome = await h.onSyncCustomers(mode)
             break
 
           case 'sync_products':
-            await h.onSyncProducts(mode)
+            outcome = await h.onSyncProducts(mode)
             break
 
           case 'sync_templates': {
@@ -164,7 +239,7 @@ export function useCommandPoller(
             if (typeof h.onSyncTemplates !== 'function') {
               throw new Error('onSyncTemplates handler tanımlı değil — uygulamayı yeniden başlatın')
             }
-            await h.onSyncTemplates()
+            outcome = await h.onSyncTemplates()
             console.log('[POLL][sync_templates] handler tamamlandı')
             break
           }
@@ -174,7 +249,7 @@ export function useCommandPoller(
               targetId: cmd.target_id,
               createdAt: cmd.created_at,
             })
-            await h.onSyncSettings()
+            outcome = await h.onSyncSettings()
             console.log('[POLL][sync_settings] handler tamamlandı')
             setTimeout(async () => {
               try {
@@ -195,11 +270,11 @@ export function useCommandPoller(
             break
 
           case 'sync_payment_brands':
-            await h.onSyncPaymentBrands()
+            outcome = await h.onSyncPaymentBrands()
             break
 
           case 'pair_pavo':
-            await h.onPairPavo(cmd.payload)
+            outcome = await h.onPairPavo(cmd.payload)
             break
 
           case 'logout':
@@ -207,7 +282,7 @@ export function useCommandPoller(
             break
 
           case 'message':
-            h.onMessage(
+            outcome = h.onMessage(
               String(cmd.payload.text ?? ''),
               cmd.payload.duration ? Number(cmd.payload.duration) : undefined
             )
@@ -222,7 +297,7 @@ export function useCommandPoller(
             break
 
           case 'update_app':
-            await h.onUpdateApp(cmd.payload ?? {})
+            outcome = await h.onUpdateApp(cmd.payload ?? {})
             break
 
           default:
@@ -240,12 +315,13 @@ export function useCommandPoller(
 
         onPersistedRef.current?.()
 
-        await api.ackCommand(cmd.target_id, 'done')
+        const result = isCommandAckResult(outcome) ? outcome : undefined
+        await sendAck(cmd.target_id, 'done', undefined, result)
         try { cmdProgress.done(progressId) } catch { /* sayaç komut akışını bozmasın */ }
 
       } catch (cmdErr) {
-        try { cmdProgress.fail(progressId, cmdErr) } catch { /* sayaç komut akışını bozmasın */ }
-        const errMsg = cmdErr instanceof Error ? cmdErr.message : 'Bilinmeyen hata'
+        const errMsg = adminCommandError(cmdErr)
+        try { cmdProgress.fail(progressId, errMsg) } catch { /* sayaç komut akışını bozmasın */ }
         console.error('Komut işleme hatası:', cmd.command, errMsg)
         await window.electron.db.saveCommandHistory({
           id:         cmd.target_id,
@@ -258,7 +334,7 @@ export function useCommandPoller(
 
         onPersistedRef.current?.()
 
-        await api.ackCommand(cmd.target_id, 'failed', errMsg).catch(() => {})
+        await sendAck(cmd.target_id, 'failed', errMsg)
       }
     }
 

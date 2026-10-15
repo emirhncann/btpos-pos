@@ -150,11 +150,19 @@ export const api = {
   },
 
   // Komutu tamamlandı/hata olarak işaretle
-  async ackCommand(targetId: string, status: 'done' | 'failed', error?: string) {
+  async ackCommand(
+    targetId: string,
+    status: 'done' | 'failed',
+    error?: string,
+    result?: { count?: number; message: string },
+  ) {
+    const body: Record<string, unknown> = { status }
+    if (error) body.error = error
+    if (status === 'done' && result) body.result = result
     const res = await fetch(`${API_URL}/pos/commands/ack/${targetId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, error }),
+      body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return res.json()

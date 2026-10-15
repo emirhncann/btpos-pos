@@ -1995,6 +1995,12 @@ export default function POSScreen({
     return Math.max(1, n || 1)
   }
 
+  function removeCartLine(id: string) {
+    assertCartEditable()
+    setCart(prev => prev.filter(c => c.id !== id))
+    resetSlide()
+  }
+
   function cancelOneFromCart(id: string) {
     assertCartEditable()
     const qty = cancelQtyFromNumBuf()
@@ -7147,7 +7153,7 @@ export default function POSScreen({
                       cursor:         'pointer',
                     }}
                     onClick={() => {
-                      cancelOneFromCart(item.id)
+                      removeCartLine(item.id)
                       setSwipeState(null)
                     }}
                   >

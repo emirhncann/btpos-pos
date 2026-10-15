@@ -105,7 +105,7 @@ declare global {
         getAll: () => Promise<Record<string, unknown>[]>
         getByTrigger: (triggerType: string) => Promise<Record<string, unknown>[]>
         getDefault: (triggerType: string) => Promise<Record<string, unknown> | undefined>
-        save: (templates: Record<string, unknown>[]) => Promise<{ success: boolean; count: number }>
+        save: (templates: Record<string, unknown>[]) => Promise<{ success: boolean; count: number; deleted?: number }>
         printWithBehavior: (opts: {
           triggerType: string
           data:        Record<string, Record<string, unknown>>

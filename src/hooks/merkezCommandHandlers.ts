@@ -1,5 +1,6 @@
 import { API_URL, api, fetchPluGroupsFromServer } from '../lib/api'
 import { parseBarcodeFormatsResponse } from '../lib/barcodeFormat'
+import { trCount, type CommandAckResult } from '../lib/commandResult'
 import { parseSettingsBundle } from '../lib/settingsModel'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
@@ -90,6 +91,8 @@ async function syncPlu(
   const pluSyncMode: SyncMode = 'full'
   const allCashiers = await window.electron.db.getAllCashiers()
   let anySuccess = false
+  let groupCount = 0
+  let keyCount = 0
 
   for (const cashier of allCashiers) {
     try {
@@ -101,13 +104,23 @@ async function syncPlu(
         groups, companyId, workplaceId, terminalId, cashier.id,
       )
       const result = await window.electron.db.syncPluGroupsAcid(cacheRows, pluSyncMode)
-      if (result.success) anySuccess = true
+      if (result.success) {
+        anySuccess = true
+        groupCount += groups.length
+        keyCount += groups.reduce((sum, g) => sum + (g.plu_items?.length ?? 0), 0)
+      }
     } catch (e) {
       console.warn(`[syncPlu] kasiyer ${cashier.fullName} hatası:`, e)
     }
   }
 
-  return { success: anySuccess, inserted: 0, updated: 0, deleted: 0 }
+  return {
+    success: anySuccess,
+    inserted: groupCount,
+    updated: keyCount,
+    deleted: 0,
+    error: anySuccess ? undefined : 'Boş PLU listesi — sync iptal',
+  }
 }
 
 async function refreshPluDisplay(
@@ -395,17 +408,22 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         const result = await window.electron.db.syncProductsAcid(merged, 'diff')
         if (!result.success) throw new Error(result.error)
       }
+      return { count: changed.length, message: `${trCount(changed.length)} fiyat güncellendi` }
     },
 
     onSyncCashiers: async (mode: SyncMode = 'full') => {
       const cashiers = await api.getCashiers(d.companyId)
       const result = await window.electron.db.syncCashiersAcid(cashiers, d.companyId, mode)
       if (!result.success) throw new Error(result.error)
+      return { count: cashiers.length, message: `${trCount(cashiers.length)} kasiyer` }
     },
 
     onLogout: () => d.onLogout(),
 
-    onMessage: (text) => d.onShowMessage(text),
+    onMessage: (text) => {
+      d.onShowMessage(text)
+      return { message: 'Kasiyere gösterildi' }
+    },
 
     onRestart: () => window.electron.app.restart(),
 
@@ -417,12 +435,17 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       const result = await syncPlu(d.companyId, workplaceId, d.terminalId, loggedInCashierId, mode)
       if (!result.success) throw new Error(result.error ?? 'PLU sync başarısız')
       await refreshPluDisplay(d.companyId, workplaceId, loggedInCashierId, d.onPluUpdated)
+      return {
+        count: result.inserted,
+        message: `${trCount(result.inserted)} grup, ${trCount(result.updated)} tuş`,
+      }
     },
 
     onSyncCustomers: async (mode: SyncMode = 'full') => {
       const customers = await api.getCustomers(d.companyId)
       const result = await window.electron.db.syncCustomersAcid(customers, d.companyId, mode)
       if (!result.success) throw new Error(result.error ?? 'Cari sync hatası')
+      return { count: customers.length, message: `${trCount(customers.length)} cari güncellendi` }
     },
 
     onSyncProducts: async (mode: SyncMode = 'full') => {
@@ -444,6 +467,7 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         })
         const result = await window.electron.db.syncProductsAcid(items, mode)
         if (!result.success) throw new Error(result.error)
+        return { count: items.length, message: `${trCount(items.length)} ürün güncellendi` }
       } finally {
         d.setCommandSyncing(false)
       }
@@ -456,22 +480,20 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         d.companyId, workplaceId, d.terminalId, cashierId, d.onSettingsUpdated,
         d.onBarcodeFormatsUpdated,
       )
+      return { message: 'Ayarlar uygulandı' }
     },
 
     onSyncPaymentBrands: async () => {
-      try {
-        const token = await window.electron.store.get('token').catch(() => null) as string | null
-        const r = await fetch(`${API_URL}/payment-provider-brands/enabled/${d.terminalId}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        })
-        if (!r.ok) return
-        const brands = await r.json() as PaymentProviderBrand[]
-        const list = Array.isArray(brands) ? brands : []
-        await window.electron.db.saveEnabledBrands(d.terminalId, list)
-        d.onEnabledBrandsUpdated?.(list)
-      } catch (e) {
-        console.warn('[sync_payment_brands] hata:', e)
-      }
+      const token = await window.electron.store.get('token').catch(() => null) as string | null
+      const r = await fetch(`${API_URL}/payment-provider-brands/enabled/${d.terminalId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!r.ok) throw new Error(`ERP bağlantısı yok`)
+      const brands = await r.json() as PaymentProviderBrand[]
+      const list = Array.isArray(brands) ? brands : []
+      await window.electron.db.saveEnabledBrands(d.terminalId, list)
+      d.onEnabledBrandsUpdated?.(list)
+      return { count: list.length, message: `${trCount(list.length)} ödeme tipi` }
     },
 
     onSyncTemplates: async () => {
@@ -481,6 +503,11 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         console.log('[sync_templates] API yanıtı, adet:', templates.length)
         const saveResult = await window.electron.templates.save(templates)
         console.log(`[sync_templates] ${saveResult.count} şablon kasada`)
+        const summary: CommandAckResult = {
+          count: saveResult.count,
+          message: `${trCount(saveResult.count)} şablon (${trCount(saveResult.deleted ?? 0)} silindi)`,
+        }
+        return summary
       } catch (e) {
         console.error('[sync_templates] hata:', e)
         throw e
