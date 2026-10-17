@@ -4,6 +4,7 @@ import { sendPendingInvoices } from '../lib/invoiceSend'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
+import CashReconciliationScreen, { CashReconciliationHistory, countPavoPendingSales } from './CashReconciliationScreen'
 import { SalesReportScreen } from './SalesReportScreen'
 import PrinterSettingsPanel, { type PrinterDraft } from '../components/PrinterSettingsPanel'
 import ScaleSettings, { type ScaleDraft } from '../components/ScaleSettings'
@@ -103,6 +104,10 @@ export default function DashboardScreen({
   const [pavoDeviceInfo, setPavoDeviceInfo] = useState<{ ip: string; port: number } | null>(null)
   const [showQueue, setShowQueue] = useState(false)
   const [showSalesReport, setShowSalesReport] = useState(false)
+  const [showRecon, setShowRecon] = useState(false)
+  const [showReconHistory, setShowReconHistory] = useState(false)
+  const [pavoPendingCount, setPavoPendingCount] = useState(0)
+  const [reconBlock, setReconBlock] = useState(false)
   const [invoiceSending, setInvoiceSending] = useState(false)
 
   const isOnline = useConnectionStatus(30) === 'online'
@@ -112,6 +117,10 @@ export default function DashboardScreen({
     onToast: () => {},
   })
   const { dialogProps, showError } = useAlertDialog()
+
+  useEffect(() => {
+    void countPavoPendingSales().then(setPavoPendingCount).catch(() => setPavoPendingCount(0))
+  }, [])
 
   const refreshCmdHistory = useCallback(() => {
     window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
@@ -377,6 +386,40 @@ export default function DashboardScreen({
           >
             📤 Belge Aktarım
           </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => {
+                void countPavoPendingSales().then(n => {
+                  setPavoPendingCount(n)
+                  if (n > 0) {
+                    setReconBlock(true)
+                    return
+                  }
+                  setReconBlock(false)
+                  setShowRecon(true)
+                }).catch(() => setShowRecon(true))
+              }}
+              style={{
+                ...solidBtn(C.meal),
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '10px 18px', borderRadius: 10, fontSize: 13,
+                position: 'relative',
+              }}
+            >
+              💰 Hesap Alma
+              {pavoPendingCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: -6, right: -6,
+                  background: C.danger, color: 'var(--pos-primary-text)', borderRadius: 10,
+                  fontSize: 11, padding: '2px 6px',
+                }}>Askıda</span>
+              )}
+            </button>
+            <button type="button" onClick={() => setShowReconHistory(true)} style={{ background: 'transparent', border: 'none', color: C.primary, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
+              Geçmiş
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setShowSalesReport(true)}
@@ -492,6 +535,33 @@ export default function DashboardScreen({
             </div>
           </div>
         </div>
+      )}
+
+      {reconBlock && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'var(--pos-scrim)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+          <div style={{ background: 'var(--pos-surface)', color: 'var(--pos-text)', border: '1px solid var(--pos-border)', borderRadius: 16, padding: 20, maxWidth: 420 }}>
+            <div style={{ fontWeight: 700, marginBottom: 12 }}>Askıda satış var, önce tamamlayın</div>
+            <button type="button" onClick={() => setReconBlock(false)} style={{ background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none', borderRadius: 10, padding: '10px 16px', fontWeight: 700, cursor: 'pointer' }}>Tamam</button>
+          </div>
+        </div>
+      )}
+
+      {showRecon && (
+        <CashReconciliationScreen
+          companyId={companyId}
+          terminalId={terminalId}
+          cashier={cashier}
+          onClose={() => setShowRecon(false)}
+          onQueued={() => scheduleProcessQueue(processQueue)}
+        />
+      )}
+
+      {showReconHistory && (
+        <CashReconciliationHistory
+          terminalId={terminalId}
+          cashierId={cashier.id}
+          onClose={() => setShowReconHistory(false)}
+        />
       )}
 
       {showSalesReport && (

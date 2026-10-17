@@ -21,6 +21,8 @@ export interface AdminUpdatePayload {
   schema_version?: number
   mode?: 'prompt' | 'on_close'
   is_mandatory?: boolean
+  created_at?: string
+  requested_name?: string | null
 }
 
 const BLOCKING_QUEUE = new Set([

@@ -250,6 +250,21 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:saveEnabledBrands', terminalId, brands),
     getEnabledBrands: (terminalId: string) =>
       ipcRenderer.invoke('db:getEnabledBrands', terminalId),
+    getLastDayEndAt: () => ipcRenderer.invoke('db:getLastDayEndAt'),
+    getLastCountedCash: (terminalId: string) =>
+      ipcRenderer.invoke('db:getLastCountedCash', terminalId),
+    listReconCatalog: (terminalId: string) =>
+      ipcRenderer.invoke('db:listReconCatalog', terminalId),
+    computeCashReconciliation: (opts: unknown) =>
+      ipcRenderer.invoke('db:computeCashReconciliation', opts),
+    saveCashReconciliation: (row: unknown) =>
+      ipcRenderer.invoke('db:saveCashReconciliation', row),
+    finalizeCashReconciliation: (row: unknown) =>
+      ipcRenderer.invoke('db:finalizeCashReconciliation', row),
+    listCashReconciliations: (terminalId: string) =>
+      ipcRenderer.invoke('db:listCashReconciliations', terminalId),
+    markCashReconciliationSynced: (id: string) =>
+      ipcRenderer.invoke('db:markCashReconciliationSynced', id),
     saveBarcodeFormats: (terminalId: string, formats: unknown[]) =>
       ipcRenderer.invoke('db:saveBarcodeFormats', terminalId, formats),
     getBarcodeFormats: (terminalId: string) =>

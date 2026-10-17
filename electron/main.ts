@@ -16,6 +16,7 @@ import {
 } from './dbLocation'
 import { appendDailyLog, dailyLogPath, pruneOldLogs } from './paths'
 import { isDevtoolsPermitActive, type TerminalSettings } from '../src/lib/settingsModel'
+import { shouldClearPendingAdminUpdate } from '../src/lib/updateCommand'
 import { registerPrinterIpc } from './printerNative'
 import { registerTemplatesIpc } from './templatesIpc'
 import {
@@ -640,7 +641,24 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('tr.bolutekno.btpos')
 }
 
+function rememberInstalledVersion(): void {
+  const v = app.getVersion()
+  const raw = store.get('versionInstalledAt', {})
+  const map: Record<string, string> = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as Record<string, string>) }
+    : {}
+  if (!map[v]) {
+    map[v] = new Date().toISOString()
+    store.set('versionInstalledAt', map)
+  }
+  const pending = store.get('pendingAdminUpdate') as { version?: string; created_at?: string } | null
+  if (shouldClearPendingAdminUpdate(pending, v, map[v] ?? null)) {
+    store.set('pendingAdminUpdate', null)
+  }
+}
+
 app.whenReady().then(async () => {
+  rememberInstalledVersion()
   pruneOldLogs()
   hookAppLog()
   const legacyDirs = ['db_path', 'dbPath'].map(key => {
@@ -1456,6 +1474,75 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:getEnabledBrands', async (_e, terminalId: string) => {
     const { getEnabledBrands } = await import('../db/operations')
     return getEnabledBrands(terminalId)
+  })
+
+  ipcMain.handle('db:getLastDayEndAt', async () => {
+    const { getLastDayEndAt } = await import('../db/operations')
+    return getLastDayEndAt()
+  })
+
+  ipcMain.handle('db:getLastCountedCash', async (_e, terminalId: string) => {
+    const { getLastCountedCash } = await import('../db/operations')
+    return getLastCountedCash(terminalId)
+  })
+
+  ipcMain.handle('db:listReconCatalog', async (_e, terminalId: string) => {
+    const { listReconCatalog } = await import('../db/operations')
+    return listReconCatalog(terminalId)
+  })
+
+  ipcMain.handle('db:computeCashReconciliation', async (_e, opts: {
+    companyId: string
+    terminalId: string
+    startIso: string
+    endIso: string
+    cashierId: string | null
+  }) => {
+    const { computeCashReconciliation } = await import('../db/operations')
+    return computeCashReconciliation(opts)
+  })
+
+  ipcMain.handle('db:saveCashReconciliation', async (_e, row: {
+    id: string
+    terminalId: string
+    cashierId: string | null
+    filterCashierId: string | null
+    periodStart: string
+    periodEnd: string
+    periodOverridden: number
+    entered: string
+    lockedAt: string
+    lines: string
+    cashDetail: string
+    info: string
+    totalDiff: number
+    note: string | null
+    createdAt: string
+  }) => {
+    const { saveCashReconciliation } = await import('../db/operations')
+    saveCashReconciliation(row)
+    return { success: true }
+  })
+
+  ipcMain.handle('db:finalizeCashReconciliation', async (_e, row: {
+    id: string
+    note: string | null
+    cashDetail: string
+  }) => {
+    const { finalizeCashReconciliation } = await import('../db/operations')
+    finalizeCashReconciliation(row)
+    return { success: true }
+  })
+
+  ipcMain.handle('db:listCashReconciliations', async (_e, terminalId: string) => {
+    const { listCashReconciliations } = await import('../db/operations')
+    return listCashReconciliations(terminalId)
+  })
+
+  ipcMain.handle('db:markCashReconciliationSynced', async (_e, id: string) => {
+    const { markCashReconciliationSynced } = await import('../db/operations')
+    markCashReconciliationSynced(id)
+    return { success: true }
   })
 
   ipcMain.handle('db:saveBarcodeFormats', async (_e, terminalId: string, formats: unknown[]) => {

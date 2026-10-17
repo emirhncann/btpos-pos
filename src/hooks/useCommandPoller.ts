@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { api } from '../lib/api'
 import { adminCommandError, isCommandAckResult, type CommandAckResult } from '../lib/commandResult'
+import { requestedNameFrom, type UpdateAppContext } from '../lib/updateCommand'
 import { cmdProgress } from '../lib/cmdProgress'
 import { isBusy } from '../store/pavoLock'
 
@@ -26,7 +27,7 @@ export interface CommandHandlers {
   onMessage:            (text: string, duration?: number) => CommandAckResult | void
   onRestart:            () => void
   onLock:               (reason?: string) => void
-  onUpdateApp:          (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
+  onUpdateApp:          (payload: Record<string, unknown>, ctx: UpdateAppContext) => Promise<CommandAckResult | void>
 }
 
 const ACK_OUTBOX_KEY = 'command_ack_outbox'
@@ -297,7 +298,18 @@ export function useCommandPoller(
             break
 
           case 'update_app':
-            outcome = await h.onUpdateApp(cmd.payload ?? {})
+            outcome = await h.onUpdateApp(cmd.payload ?? {}, {
+              createdAt: cmd.created_at ?? '',
+              targetId: cmd.target_id,
+              requestedName: requestedNameFrom(cmd.payload, cmd),
+              batch: (res.commands ?? [])
+                .filter(row => normalizeCommandKind(row.command ?? '') === 'update_app')
+                .map(row => ({
+                  targetId: row.target_id,
+                  version: String((row.payload ?? {}).version ?? ''),
+                  createdAt: row.created_at ?? '',
+                })),
+            })
             break
 
           default:

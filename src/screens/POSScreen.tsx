@@ -2528,6 +2528,7 @@ export default function POSScreen({
         cashierName:  cashier.fullName,
         description:  cariPaymentDesc.trim() || reason,
         createdAt:    new Date().toISOString(),
+        method:       cariPaymentMethod === 'card' ? 'card' : 'cash',
       })
 
       setCariPaymentResult({

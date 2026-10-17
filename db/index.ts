@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 9
+export const SCHEMA_VERSION = 11
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -693,6 +693,32 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       created_at    TEXT NOT NULL
     )
   `)
+  addColumnIfMissing(sqlite, 'cari_payments', 'method', 'method TEXT')
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS cash_reconciliations (
+      id TEXT PRIMARY KEY,
+      terminal_id TEXT NOT NULL,
+      cashier_id TEXT,
+      filter_cashier_id TEXT,
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      period_overridden INTEGER NOT NULL DEFAULT 0,
+      entered TEXT NOT NULL,
+      locked_at TEXT NOT NULL,
+      lines TEXT NOT NULL,
+      cash_detail TEXT NOT NULL,
+      info TEXT NOT NULL,
+      total_diff REAL NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      synced INTEGER NOT NULL DEFAULT 0
+    )
+  `)
+  addColumnIfMissing(sqlite, 'cash_reconciliations', 'period_overridden', 'period_overridden INTEGER NOT NULL DEFAULT 0')
+  addColumnIfMissing(sqlite, 'cash_reconciliations', 'entered', "entered TEXT NOT NULL DEFAULT '{}'")
+  addColumnIfMissing(sqlite, 'cash_reconciliations', 'locked_at', "locked_at TEXT NOT NULL DEFAULT ''")
+  sqlite.exec(`UPDATE cash_reconciliations SET locked_at = created_at WHERE locked_at = ''`)
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS enabled_payment_brands (

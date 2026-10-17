@@ -341,3 +341,22 @@ export const pavoSequence = sqliteTable('pavo_sequence', {
   seq: integer('seq').notNull().default(0),
 })
 
+export const cashReconciliations = sqliteTable('cash_reconciliations', {
+  id:              text('id').primaryKey(),
+  terminalId:      text('terminal_id').notNull(),
+  cashierId:       text('cashier_id'),
+  filterCashierId: text('filter_cashier_id'),
+  periodStart:     text('period_start').notNull(),
+  periodEnd:       text('period_end').notNull(),
+  periodOverridden: integer('period_overridden').notNull().default(0),
+  entered:         text('entered').notNull(),
+  lockedAt:        text('locked_at').notNull(),
+  lines:           text('lines').notNull(),
+  cashDetail:      text('cash_detail').notNull(),
+  info:            text('info').notNull(),
+  totalDiff:       real('total_diff').notNull(),
+  note:            text('note'),
+  createdAt:       text('created_at').notNull(),
+  synced:          integer('synced').notNull().default(0),
+})
+

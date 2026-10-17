@@ -1,6 +1,6 @@
 {
   "name": "btpos-pos",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "BTPOS POS Kasa Yazılımı",
   "main": "dist-electron/main.js",
   "scripts": {

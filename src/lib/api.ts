@@ -145,6 +145,7 @@ export const api = {
         command:    string
         payload:    Record<string, unknown>
         created_at: string
+        created_by_name?: string | null
       }>
     }>
   },

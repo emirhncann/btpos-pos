@@ -9,6 +9,12 @@ import {
   type SqliteLike,
 } from './settingsCache'
 import type { CashierSettings, PaymentAccountCache, SettingsBundle, TerminalSettings } from '../src/lib/settingsModel'
+import {
+  aggregateReconciliation,
+  catalogFromDefs,
+  type ReconCatalogItem,
+  type ReconSnapshot,
+} from '../src/lib/cashReconciliation'
 import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import type BetterSqlite3 from 'better-sqlite3'
@@ -1750,6 +1756,7 @@ export type OperationQueueType =
   | 'terminal_local_settings'
   | 'payment_device'
   | 'app_report'
+  | 'cash_reconciliation'
 
 export interface OperationQueueRow {
   id:          string
@@ -1774,7 +1781,7 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
   const tp = String(r.type ?? '')
   const type = ([
     'invoice', 'return_invoice', 'customer', 'day_end_invoice', 'payment',
-    'terminal_local_settings', 'payment_device', 'app_report',
+    'terminal_local_settings', 'payment_device', 'app_report', 'cash_reconciliation',
   ].includes(tp) ? tp : 'invoice') as OperationQueueType
   return {
     id:          String(r.id ?? ''),
@@ -2081,6 +2088,7 @@ export interface CariPaymentSaveRow {
   cashierName?: string
   description?: string
   createdAt:    string
+  method?:      'cash' | 'card' | null
 }
 
 export interface CariPaymentReportRow {
@@ -2099,14 +2107,14 @@ export function saveCariPayment(row: CariPaymentSaveRow): void {
   db.prepare(`
     INSERT INTO cari_payments
       (id, company_id, type, amount, customer_id, customer_name,
-       customer_code, cashier_id, cashier_name, description, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       customer_code, cashier_id, cashier_name, description, created_at, method)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     row.id, row.companyId, row.type, row.amount,
     row.customerId ?? null, row.customerName ?? null,
     row.customerCode ?? null, row.cashierId ?? null,
     row.cashierName ?? null, row.description ?? null,
-    row.createdAt,
+    row.createdAt, row.method ?? null,
   )
 }
 
@@ -2206,4 +2214,249 @@ export function getBarcodeFormats(terminalId: string): BarcodeFormatRow[] {
     WHERE terminal_id = ? AND is_active = 1
     ORDER BY flag_code ASC
   `).all(terminalId) as BarcodeFormatRow[]
+}
+
+export interface CashReconciliationRow {
+  id: string
+  terminalId: string
+  cashierId: string | null
+  filterCashierId: string | null
+  periodStart: string
+  periodEnd: string
+  periodOverridden: number
+  entered: string
+  lockedAt: string
+  lines: string
+  cashDetail: string
+  info: string
+  totalDiff: number
+  note: string | null
+  createdAt: string
+  synced: number
+  cashierName: string | null
+}
+
+function mapReconciliation(r: Record<string, unknown>): CashReconciliationRow {
+  return {
+    id: String(r.id ?? ''),
+    terminalId: String(r.terminal_id ?? ''),
+    cashierId: r.cashier_id != null ? String(r.cashier_id) : null,
+    filterCashierId: r.filter_cashier_id != null ? String(r.filter_cashier_id) : null,
+    periodStart: String(r.period_start ?? ''),
+    periodEnd: String(r.period_end ?? ''),
+    periodOverridden: Number(r.period_overridden ?? 0),
+    entered: String(r.entered ?? '{}'),
+    lockedAt: String(r.locked_at ?? ''),
+    lines: String(r.lines ?? '[]'),
+    cashDetail: String(r.cash_detail ?? '{}'),
+    info: String(r.info ?? '{}'),
+    totalDiff: Number(r.total_diff ?? 0),
+    note: r.note != null ? String(r.note) : null,
+    createdAt: String(r.created_at ?? ''),
+    synced: Number(r.synced ?? 0),
+    cashierName: r.cashier_name != null ? String(r.cashier_name) : null,
+  }
+}
+
+/** Son başarılı gün sonu gönderimi. Ayrı Z saati tablosu yok. */
+export function getLastDayEndAt(): string | null {
+  const row = getSqlite().prepare(`
+    SELECT COALESCE(sent_at, created_at) AS ts
+    FROM operation_queue
+    WHERE type = 'day_end_invoice' AND status IN ('success', 'done')
+    ORDER BY ts DESC
+    LIMIT 1
+  `).get() as { ts?: string } | undefined
+  const ts = row?.ts?.trim()
+  return ts ? ts : null
+}
+
+export function getLastCountedCash(terminalId: string): number | null {
+  const row = getSqlite().prepare(`
+    SELECT cash_detail FROM cash_reconciliations
+    WHERE terminal_id = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(terminalId) as { cash_detail?: string } | undefined
+  if (!row?.cash_detail) return null
+  try {
+    const detail = JSON.parse(row.cash_detail) as { carry_over?: unknown; counted?: unknown }
+    const carry = Number(detail.carry_over)
+    if (Number.isFinite(carry)) return carry
+    const counted = Number(detail.counted)
+    return Number.isFinite(counted) ? counted : null
+  } catch {
+    return null
+  }
+}
+
+function loadReconDefs(terminalId: string): {
+  banks: Array<{ acquirerId: string; label: string }>
+  brands: Array<{ brandId: number; mediator: number; label: string }>
+} {
+  const db = getSqlite()
+  const accounts = db.prepare(`
+    SELECT payment_type, pavo_acquirer_id, isbasi_account_name
+    FROM payment_accounts_cache
+    WHERE pavo_acquirer_id IS NOT NULL AND TRIM(pavo_acquirer_id) != ''
+  `).all() as Array<Record<string, unknown>>
+  const brands = db.prepare(`
+    SELECT payment_provider_brand_id, payment_provider_brand_nm, payment_mediator
+    FROM enabled_payment_brands
+    WHERE terminal_id = ?
+    ORDER BY payment_provider_brand_id ASC
+  `).all(terminalId) as Array<Record<string, unknown>>
+  return {
+    banks: accounts
+      .filter(r => String(r.payment_type ?? '') !== 'cash')
+      .map(r => ({
+        acquirerId: String(r.pavo_acquirer_id),
+        label: String(r.isbasi_account_name || r.pavo_acquirer_id),
+      })),
+    brands: brands.map(r => ({
+      brandId: Number(r.payment_provider_brand_id ?? 0),
+      mediator: Number(r.payment_mediator ?? 0),
+      label: String(r.payment_provider_brand_nm ?? ''),
+    })),
+  }
+}
+
+export function listReconCatalog(terminalId: string): {
+  banks: ReconCatalogItem[]
+  others: ReconCatalogItem[]
+} {
+  const defs = loadReconDefs(terminalId)
+  return catalogFromDefs(defs.banks, defs.brands)
+}
+
+export function computeCashReconciliation(opts: {
+  companyId: string
+  terminalId: string
+  startIso: string
+  endIso: string
+  cashierId: string | null
+}): ReconSnapshot {
+  const db = getSqlite()
+  const cashier = opts.cashierId ?? ''
+  const sales = db.prepare(`
+    SELECT id, is_return, net_amount, discount_amount, cash_amount, card_amount
+    FROM sales
+    WHERE created_at >= ? AND created_at <= ?
+      AND (? = '' OR cashier_id = ?)
+  `).all(opts.startIso, opts.endIso, cashier, cashier) as Array<Record<string, unknown>>
+
+  const payments = db.prepare(`
+    SELECT sp.sale_id, sp.method, sp.amount, sp.mediator, sp.acquirer_id, sp.acquirer_name, s.is_return
+    FROM sale_payments sp
+    JOIN sales s ON s.id = sp.sale_id
+    WHERE s.created_at >= ? AND s.created_at <= ?
+      AND (? = '' OR s.cashier_id = ?)
+  `).all(opts.startIso, opts.endIso, cashier, cashier) as Array<Record<string, unknown>>
+
+  const collections = db.prepare(`
+    SELECT amount, method
+    FROM cari_payments
+    WHERE company_id = ?
+      AND type = 'tahsilat'
+      AND created_at >= ? AND created_at <= ?
+      AND (? = '' OR cashier_id = ?)
+  `).all(opts.companyId, opts.startIso, opts.endIso, cashier, cashier) as Array<Record<string, unknown>>
+
+  const defs = loadReconDefs(opts.terminalId)
+
+  return aggregateReconciliation({
+    sales: sales.map(r => ({
+      id: String(r.id),
+      isReturn: Number(r.is_return ?? 0) === 1,
+      netAmount: Number(r.net_amount ?? 0),
+      discountAmount: Number(r.discount_amount ?? 0),
+      cashAmount: Number(r.cash_amount ?? 0),
+      cardAmount: Number(r.card_amount ?? 0),
+    })),
+    payments: payments.map(r => ({
+      saleId: String(r.sale_id),
+      method: String(r.method ?? ''),
+      amount: Number(r.amount ?? 0),
+      mediator: r.mediator == null ? null : Number(r.mediator),
+      acquirerId: r.acquirer_id != null ? String(r.acquirer_id) : null,
+      acquirerName: r.acquirer_name != null ? String(r.acquirer_name) : null,
+      isReturn: Number(r.is_return ?? 0) === 1,
+    })),
+    collections: collections.map(r => ({
+      amount: Number(r.amount ?? 0),
+      method: r.method != null ? String(r.method) : null,
+    })),
+    banks: defs.banks,
+    brands: defs.brands,
+  })
+}
+
+export function saveCashReconciliation(row: {
+  id: string
+  terminalId: string
+  cashierId: string | null
+  filterCashierId: string | null
+  periodStart: string
+  periodEnd: string
+  periodOverridden: number
+  entered: string
+  lockedAt: string
+  lines: string
+  cashDetail: string
+  info: string
+  totalDiff: number
+  note: string | null
+  createdAt: string
+}): void {
+  getSqlite().prepare(`
+    INSERT INTO cash_reconciliations (
+      id, terminal_id, cashier_id, filter_cashier_id,
+      period_start, period_end, period_overridden, entered, locked_at,
+      lines, cash_detail, info, total_diff, note, created_at, synced
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(
+    row.id,
+    row.terminalId,
+    row.cashierId,
+    row.filterCashierId,
+    row.periodStart,
+    row.periodEnd,
+    row.periodOverridden ? 1 : 0,
+    row.entered,
+    row.lockedAt,
+    row.lines,
+    row.cashDetail,
+    row.info,
+    row.totalDiff,
+    row.note,
+    row.createdAt,
+  )
+}
+
+export function finalizeCashReconciliation(row: {
+  id: string
+  note: string | null
+  cashDetail: string
+}): void {
+  getSqlite().prepare(`
+    UPDATE cash_reconciliations
+    SET note = ?, cash_detail = ?
+    WHERE id = ?
+  `).run(row.note, row.cashDetail, row.id)
+}
+
+export function listCashReconciliations(terminalId: string, limit = 30): CashReconciliationRow[] {
+  const rows = getSqlite().prepare(`
+    SELECT r.*, c.full_name AS cashier_name
+    FROM cash_reconciliations r
+    LEFT JOIN cashiers c ON c.id = r.cashier_id
+    WHERE r.terminal_id = ?
+    ORDER BY r.created_at DESC
+    LIMIT ?
+  `).all(terminalId, limit) as Record<string, unknown>[]
+  return rows.map(mapReconciliation)
+}
+
+export function markCashReconciliationSynced(id: string): void {
+  getSqlite().prepare(`UPDATE cash_reconciliations SET synced = 1 WHERE id = ?`).run(id)
 }

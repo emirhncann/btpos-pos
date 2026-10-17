@@ -6,6 +6,7 @@ import {
   runUpdate,
   type AdminUpdatePayload,
 } from '../lib/appUpdate'
+import { downgradeBannerText } from '../lib/updateCommand'
 import { C, solidBtn } from '../theme/colors'
 
 export default function UpdateBanner({
@@ -49,7 +50,12 @@ export default function UpdateBanner({
     if (!pending) return
     if (compareVersions(pending.version, installed) < 0) {
       const ok = window.confirm(
-        `Yönetici bu kasanın sürümünü v${pending.version} olarak değiştirmek istiyor (v${installed} → v${pending.version}). Bu sürümden sonra eklenen özellikler kullanılamaz. Devam edilsin mi?`,
+        `${downgradeBannerText({
+          from: installed,
+          to: pending.version,
+          requestedName: pending.requested_name,
+          createdAt: pending.created_at,
+        })} Bu sürümden sonra eklenen özellikler kullanılamaz. Devam edilsin mi?`,
       )
       if (!ok) return
     }
@@ -88,7 +94,12 @@ export default function UpdateBanner({
         }}>
           <span>
             {downgrade
-              ? `Yönetici bu kasanın sürümünü v${pending.version}’ye düşürmek istiyor`
+              ? `⚠ ${downgradeBannerText({
+                from: installed,
+                to: pending.version,
+                requestedName: pending.requested_name,
+                createdAt: pending.created_at,
+              })}`
               : `Güncelleme hazır: v${pending.version}`}
             {pending.mode === 'on_close' ? ' · gün sonunda kurulacak' : ''}
           </span>
@@ -102,7 +113,7 @@ export default function UpdateBanner({
               color: incompatible ? C.disabledFg : (downgrade ? '#FFFFFF' : C.primary),
               borderRadius: 8, padding: '6px 12px', fontSize: 14,
             }}
-          >Şimdi güncelle</button>
+          >{downgrade ? 'Şimdi uygula' : 'Şimdi güncelle'}</button>
           {!pending.is_mandatory && (
             <button
               type="button"

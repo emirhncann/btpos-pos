@@ -360,7 +360,12 @@ export async function processOperationQueue({
             console.log('[worker] payment result:', JSON.stringify(data))
             success = data.success === true
             error = data.message ?? null
-          } else if (op.type === 'terminal_local_settings' || op.type === 'payment_device' || op.type === 'app_report') {
+          } else if (
+            op.type === 'terminal_local_settings' ||
+            op.type === 'payment_device' ||
+            op.type === 'app_report' ||
+            op.type === 'cash_reconciliation'
+          ) {
             const endpoint = String(payload.endpoint ?? '')
             const method = String(payload.method ?? 'POST').toUpperCase()
             if (!endpoint.startsWith('/')) throw new Error('endpoint eksik')
@@ -380,6 +385,10 @@ export async function processOperationQueue({
             }
             success = res.ok && data.success !== false
             error = success ? null : (data.message || `HTTP ${res.status}`)
+            if (success && op.type === 'cash_reconciliation') {
+              const reconId = String(payload.reconciliation_id ?? '')
+              if (reconId) await window.electron.db.markCashReconciliationSynced(reconId)
+            }
           }
 
           if (success) {

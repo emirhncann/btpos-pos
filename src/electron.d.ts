@@ -238,7 +238,7 @@ declare global {
         enqueueOperation:  (params: {
           id: string
           companyId: string
-          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report'
+          type: 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report' | 'cash_reconciliation'
           payload: Record<string, unknown>
           label?: string
           status?: 'pending' | 'pending_dayend'
@@ -277,6 +277,7 @@ declare global {
           cashierName?: string
           description?: string
           createdAt: string
+          method?: 'cash' | 'card' | null
         }): Promise<{ success: boolean }>
         getCariPayments(opts: { dateFrom: string; dateTo: string; companyId: string }): Promise<CariPaymentReportRow[]>
         getPaymentDeviceSettings: (provider?: string) => Promise<PaymentDeviceRow | undefined>
@@ -299,6 +300,43 @@ declare global {
         }) => Promise<RecentSaleRow[]>
         saveEnabledBrands(terminalId: string, brands: PaymentProviderBrand[]): Promise<{ success: boolean }>
         getEnabledBrands(terminalId: string): Promise<PaymentProviderBrand[]>
+        getLastDayEndAt(): Promise<string | null>
+        getLastCountedCash(terminalId: string): Promise<number | null>
+        listReconCatalog(terminalId: string): Promise<{
+          banks: Array<{ key: string; label: string }>
+          others: Array<{ key: string; label: string }>
+        }>
+        computeCashReconciliation(opts: {
+          companyId: string
+          terminalId: string
+          startIso: string
+          endIso: string
+          cashierId: string | null
+        }): Promise<CashReconciliationSnapshot>
+        saveCashReconciliation(row: {
+          id: string
+          terminalId: string
+          cashierId: string | null
+          filterCashierId: string | null
+          periodStart: string
+          periodEnd: string
+          periodOverridden: number
+          entered: string
+          lockedAt: string
+          lines: string
+          cashDetail: string
+          info: string
+          totalDiff: number
+          note: string | null
+          createdAt: string
+        }): Promise<{ success: boolean }>
+        finalizeCashReconciliation(row: {
+          id: string
+          note: string | null
+          cashDetail: string
+        }): Promise<{ success: boolean }>
+        listCashReconciliations(terminalId: string): Promise<CashReconciliationRecord[]>
+        markCashReconciliationSynced(id: string): Promise<{ success: boolean }>
         saveBarcodeFormats(terminalId: string, formats: BarcodeFormatRow[]): Promise<{ success: boolean }>
         getBarcodeFormats(terminalId: string): Promise<BarcodeFormatRow[]>
       }
@@ -451,10 +489,42 @@ declare global {
     }>
   }
 
+  interface CashReconciliationSnapshot {
+    cards: Array<{ group: 'card' | 'other'; key: string; label: string; system: number }>
+    others: Array<{ group: 'card' | 'other'; key: string; label: string; system: number }>
+    cashSales: number
+    cashCollections: number
+    cashRefunds: number
+    onAccount: number
+    discount: number
+    saleCount: number
+    refundCount: number
+  }
+
+  interface CashReconciliationRecord {
+    id: string
+    terminalId: string
+    cashierId: string | null
+    filterCashierId: string | null
+    periodStart: string
+    periodEnd: string
+    periodOverridden: number
+    entered: string
+    lockedAt: string
+    lines: string
+    cashDetail: string
+    info: string
+    totalDiff: number
+    note: string | null
+    createdAt: string
+    synced: number
+    cashierName: string | null
+  }
+
   interface OperationQueueRow {
     id:          string
     companyId:   string
-    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report'
+    type:        'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment' | 'terminal_local_settings' | 'payment_device' | 'app_report' | 'cash_reconciliation'
     payload:     string
     status:      'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
     attempts:    number
