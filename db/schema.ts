@@ -149,6 +149,9 @@ export const customers = sqliteTable('customers', {
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
   email:      text('email'),
+  taxOffice: text('tax_office').notNull().default(''),
+  customerType: text('customer_type').notNull().default(''),
+  erpId: text('erp_id').notNull().default(''),
   balanceUpdatedAt: text('balance_updated_at'),
   syncedAt:  text('synced_at').notNull(),
 })
@@ -169,6 +172,9 @@ export const customersTemp = sqliteTable('customers_temp', {
   city:       text('city').notNull().default(''),
   district:   text('district').notNull().default(''),
   email:      text('email'),
+  taxOffice: text('tax_office').notNull().default(''),
+  customerType: text('customer_type').notNull().default(''),
+  erpId: text('erp_id').notNull().default(''),
   balanceUpdatedAt: text('balance_updated_at'),
   syncedAt:  text('synced_at').notNull(),
 })
@@ -214,6 +220,8 @@ export const cashierSettingsCache = sqliteTable('cashier_settings_cache', {
   printMulti:            integer('print_multi', { mode: 'boolean' }).notNull().default(false),
   buttonColors:          text('button_colors').notNull().default('{}'),
   theme:                 text('theme').notNull().default('klasik'),
+  canAddCustomer:        integer('can_add_customer', { mode: 'boolean' }).notNull().default(true),
+  canEditCustomer:       integer('can_edit_customer', { mode: 'boolean' }).notNull().default(true),
   syncedAt:              text('synced_at'),
 })
 

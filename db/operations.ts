@@ -17,6 +17,7 @@ import {
 } from '../src/lib/cashReconciliation'
 import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
+import { planCustomerSyncRepair } from '../src/lib/customerSyncRepair'
 import type BetterSqlite3 from 'better-sqlite3'
 
 export interface ProductRow {
@@ -1546,6 +1547,10 @@ export function syncCashiersAcid(cashierList: CashierRow[], companyId: string, m
 
 export interface CustomerRow {
   id:        string
+  /** İşbaşı firma id. Boşsa kasa satırı henüz bağlanmamıştır. */
+  erpId?:    string
+  /** upsert sırasında eski yerel PK. Tablo kolonu değildir. */
+  previousId?: string
   companyId: string
   code:      string
   name:      string
@@ -1563,14 +1568,20 @@ export interface CustomerRow {
   city:       string
   district:   string
   email:      string
+  taxOffice?: string
+  /** Slim: individual | corporate. Yerel kayıtta yoksa boş kalır. */
+  type?: 'individual' | 'corporate' | string
   syncedAt?: string
 }
 
 function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
+  const stored = String(r.customer_type ?? '')
+  const type = stored === 'individual' || stored === 'corporate' ? stored : undefined
   const ip = r.is_person
-  const isPerson = !(ip === 0 || ip === false || ip === '0')
+  const isPerson = type === 'corporate' ? false : type === 'individual' ? true : !(ip === 0 || ip === false || ip === '0')
   return {
     id:        String(r.id ?? ''),
+    erpId:     String(r.erp_id ?? ''),
     companyId: String(r.company_id ?? ''),
     code:      String(r.code ?? ''),
     name:      String(r.name ?? ''),
@@ -1588,6 +1599,8 @@ function mapCustomerRow(r: Record<string, unknown>): CustomerRow {
     city:       String(r.city ?? ''),
     district:   String(r.district ?? ''),
     email:      String(r.email ?? ''),
+    taxOffice:  String(r.tax_office ?? ''),
+    type,
     syncedAt:  r.synced_at != null ? String(r.synced_at) : undefined,
   }
 }
@@ -1607,19 +1620,38 @@ export function syncCustomersAcid(
     return { success: false, inserted: 0, updated: 0, deleted: 0, error: 'Boş müşteri listesi' }
   }
 
+  for (const c of items) {
+    const explicit = String(c.erpId ?? '').trim()
+    const remoteId = String(c.id ?? '').trim()
+    c.erpId = explicit || remoteId
+    if (!c.id) c.id = c.erpId
+  }
+
   const txn = db.transaction(() => {
+    const localKeys = db.prepare(
+      `SELECT id, tax_no, erp_id FROM customers WHERE company_id = ?`,
+    ).all(companyId) as { id: string; tax_no: string | null; erp_id: string | null }[]
+    const repair = planCustomerSyncRepair(
+      localKeys.map(r => ({ id: String(r.id), taxNo: String(r.tax_no ?? ''), erpId: String(r.erp_id ?? '') })),
+      items.map(c => ({ id: String(c.id), taxNo: String(c.taxNo ?? ''), erpId: String(c.erpId ?? '') })),
+    )
+    const dropLocal = db.prepare(`DELETE FROM customers WHERE company_id = ? AND id = ?`)
+    for (const id of repair.deleteIds) dropLocal.run(companyId, id)
+    const fixErp = db.prepare(`UPDATE customers SET erp_id = ? WHERE company_id = ? AND id = ?`)
+    for (const upd of repair.erpUpdates) fixErp.run(upd.erpId, companyId, upd.id)
+
     const prevRows = db.prepare(
-      `SELECT id, balance, balance_updated_at FROM customers WHERE company_id = ?`,
-    ).all(companyId) as { id: string; balance: number | null; balance_updated_at: string | null }[]
+      `SELECT id, balance, balance_updated_at, tax_office, customer_type, erp_id FROM customers WHERE company_id = ?`,
+    ).all(companyId) as { id: string; balance: number | null; balance_updated_at: string | null; tax_office: string | null; customer_type: string | null; erp_id: string | null }[]
     const prev = new Map(prevRows.map(r => [String(r.id), r]))
 
     db.prepare('DELETE FROM customers_temp').run()
 
     const ins = db.prepare(`
       INSERT INTO customers_temp (id, company_id, code, name, phone, tax_no, address, balance,
-        is_person, first_name, last_name, postal_code, city, district, email, balance_updated_at, synced_at)
+        is_person, first_name, last_name, postal_code, city, district, email, tax_office, customer_type, erp_id, balance_updated_at, synced_at)
       VALUES (@id, @companyId, @code, @name, @phone, @taxNo, @address, @balance,
-        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @email, @balanceUpdatedAt, @syncedAt)
+        @isPerson, @firstName, @lastName, @postalCode, @city, @district, @email, @taxOffice, @customerType, @erpId, @balanceUpdatedAt, @syncedAt)
     `)
 
     for (const c of items) {
@@ -1635,13 +1667,16 @@ export function syncCustomersAcid(
         address:   c.address ?? '',
         balance:   known ? (c.balance ?? 0) : Number(old?.balance ?? 0),
         balanceUpdatedAt: known ? now : (old?.balance_updated_at ?? null),
-        isPerson:  c.isPerson ? 1 : 0,
+        isPerson:  c.type === 'corporate' ? 0 : c.type === 'individual' ? 1 : (c.isPerson ? 1 : 0),
         firstName: c.firstName ?? '',
         lastName:  c.lastName  ?? '',
         postalCode: c.postalCode ?? '',
         city:       c.city       ?? '',
         district:   c.district   ?? '',
         email:      c.email      ?? '',
+        taxOffice:  (c.taxOffice && c.taxOffice.trim()) ? c.taxOffice : String(old?.tax_office ?? ''),
+        customerType: c.type === 'individual' || c.type === 'corporate' ? c.type : String(old?.customer_type ?? ''),
+        erpId: String(c.erpId ?? '').trim() || String(old?.erp_id ?? ''),
         syncedAt:  now,
       })
       inserted++
@@ -1801,17 +1836,31 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
 export function upsertCustomer(row: CustomerRow): void {
   const db = getSqlite()
   const synced = row.syncedAt ?? new Date().toISOString()
+  const erpId = String(row.erpId ?? '').trim()
+  if (!erpId) return
+  const id = String(row.id || erpId).trim()
+  const previousId = String(row.previousId ?? '').trim()
+  if (previousId && previousId !== id) {
+    const target = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(id) as { id: string } | undefined
+    if (target) db.prepare(`DELETE FROM customers WHERE id = ?`).run(previousId)
+    else db.prepare(`UPDATE customers SET id = ? WHERE id = ?`).run(id, previousId)
+  }
   db.prepare(`
     INSERT INTO customers (id, company_id, code, name, phone, tax_no, address, balance,
-      is_person, first_name, last_name, postal_code, city, district, email, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      is_person, first_name, last_name, postal_code, city, district, email, tax_office, customer_type, erp_id, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      code=excluded.code,
       name=excluded.name, phone=excluded.phone, tax_no=excluded.tax_no,
       address=excluded.address, city=excluded.city, district=excluded.district,
-      email=excluded.email,
+      email=excluded.email, tax_office=excluded.tax_office,
+      customer_type=excluded.customer_type,
+      erp_id=excluded.erp_id,
+      is_person=excluded.is_person, first_name=excluded.first_name, last_name=excluded.last_name,
+      postal_code=excluded.postal_code,
       synced_at=excluded.synced_at
   `).run(
-    row.id,
+    id,
     row.companyId,
     row.code,
     row.name,
@@ -1819,13 +1868,16 @@ export function upsertCustomer(row: CustomerRow): void {
     row.taxNo,
     row.address,
     row.balance,
-    row.isPerson ? 1 : 0,
+    row.type === 'corporate' ? 0 : row.type === 'individual' ? 1 : (row.isPerson ? 1 : 0),
     row.firstName,
     row.lastName,
     row.postalCode,
     row.city,
     row.district,
     row.email ?? '',
+    row.taxOffice ?? '',
+    row.type === 'individual' || row.type === 'corporate' ? row.type : '',
+    erpId,
     synced,
   )
 }

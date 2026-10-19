@@ -36,11 +36,11 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
-    "@pdfme/common": "file:vendor/pdfme/pdfme-common-6.2.4-btpos.2.tgz",
-    "@pdfme/converter": "file:vendor/pdfme/pdfme-converter-6.2.4-btpos.2.tgz",
-    "@pdfme/generator": "file:vendor/pdfme/pdfme-generator-6.2.4-btpos.2.tgz",
-    "@pdfme/pdf-lib": "file:vendor/pdfme/pdfme-pdf-lib-6.2.4-btpos.2.tgz",
-    "@pdfme/schemas": "file:vendor/pdfme/pdfme-schemas-6.2.4-btpos.2.tgz",
+    "@pdfme/common": "file:vendor/pdfme/pdfme-common-6.2.4-btpos.3.tgz",
+    "@pdfme/converter": "file:vendor/pdfme/pdfme-converter-6.2.4-btpos.3.tgz",
+    "@pdfme/generator": "file:vendor/pdfme/pdfme-generator-6.2.4-btpos.3.tgz",
+    "@pdfme/pdf-lib": "file:vendor/pdfme/pdfme-pdf-lib-6.2.4-btpos.3.tgz",
+    "@pdfme/schemas": "file:vendor/pdfme/pdfme-schemas-6.2.4-btpos.3.tgz",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-slot": "^1.0.2",

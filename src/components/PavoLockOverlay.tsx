@@ -43,7 +43,7 @@ export function PavoLockOverlay(props: {
     : null
 
   return (
-    <div style={{
+    <div data-pavo-lock="" style={{
       position: 'fixed',
       inset: 0,
       zIndex: 10040,

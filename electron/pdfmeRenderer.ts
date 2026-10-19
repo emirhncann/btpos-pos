@@ -7,6 +7,7 @@ import { generate } from '@pdfme/generator'
 import type { Font, Template } from '@pdfme/common'
 import { btposPlugins } from '@pdfme/schemas'
 import { init, cut, feed } from './escpos'
+import { applyAutoBarcodeFields } from '../src/lib/receiptBarcode'
 import {
   buildPdfmeInputs,
   type RenderData,
@@ -86,6 +87,13 @@ export function isPdfmeTemplate(templateJson: unknown): boolean {
 export async function renderPdfme(templateJson: unknown, data: RenderData): Promise<Buffer> {
   if (!isPdfmeTemplate(templateJson)) throw new Error('Geçersiz pdfme şablonu — schemas veya basePdf eksik')
   const template = JSON.parse(JSON.stringify(templateJson)) as Template
+  const hasAutoBarcode = Object.values(btposPlugins).some(plugin => {
+    const schema = plugin?.propPanel?.defaultSchema as { type?: string } | undefined
+    return schema?.type === 'btposBarcodeAuto'
+  })
+  if (hasAutoBarcode) {
+    applyAutoBarcodeFields(template.schemas as unknown as Array<Array<Record<string, unknown>>>)
+  }
   const schema = template.schemas[0] ?? []
   const bp = template.basePdf as { width?: number; height?: number } | string
   const isRoll = typeof bp === 'object' && (bp.width ?? 0) <= 80 && (bp.height ?? 0) >= 100

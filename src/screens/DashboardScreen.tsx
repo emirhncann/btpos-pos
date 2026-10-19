@@ -16,6 +16,9 @@ import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { C, solidBtn } from '../theme/colors'
+import { PosUndefinedBadge } from '../components/PosUndefinedBadge'
+import { POS_UNDEFINED_MESSAGE } from '../services/pos/posReadiness'
+import { isPosReady, refreshPosReady, usePosReady } from '../store/posReady'
 
 const CMD_LABELS: Record<string, string> = {
   sync_all:       'Tüm veriler güncellendi',
@@ -116,10 +119,12 @@ export default function DashboardScreen({
     isOnline,
     onToast: () => {},
   })
-  const { dialogProps, showError } = useAlertDialog()
+  const { dialogProps, showError, showInfo } = useAlertDialog()
+  const posReady = usePosReady()
 
   useEffect(() => {
     void countPavoPendingSales().then(setPavoPendingCount).catch(() => setPavoPendingCount(0))
+    void refreshPosReady()
   }, [])
 
   const refreshCmdHistory = useCallback(() => {
@@ -177,6 +182,10 @@ export default function DashboardScreen({
   }
 
   async function handleSendPendingInvoices() {
+    if (!isPosReady()) {
+      showInfo('Satış kapalı', POS_UNDEFINED_MESSAGE)
+      return
+    }
     if (invoiceSending) return
     setInvoiceSending(true)
     try {
@@ -338,6 +347,7 @@ export default function DashboardScreen({
         </div>
 
         {/* Butonlar */}
+        <PosUndefinedBadge onClick={() => showInfo('Satış kapalı', POS_UNDEFINED_MESSAGE)} />
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             type="button"
@@ -366,14 +376,14 @@ export default function DashboardScreen({
             disabled={invoiceSending}
             onClick={() => void handleSendPendingInvoices()}
             style={{
-              ...solidBtn(C.success, invoiceSending),
+              ...solidBtn(C.success, invoiceSending || !posReady),
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '10px 18px', borderRadius: 10, fontSize: 13,
               cursor: invoiceSending ? 'wait' : 'pointer',
             }}
             title="Bekleyen POS faturalarını ERP’ye gönderir (Z raporu / toplu)"
           >
-            {invoiceSending ? '⏳ Gönderiliyor…' : '📄 Bekleyen faturalar'}
+            {invoiceSending ? '⏳ Gönderiliyor…' : !posReady ? '🔒 Bekleyen faturalar' : '📄 Bekleyen faturalar'}
           </button>
           <button
             type="button"
@@ -655,7 +665,24 @@ export default function DashboardScreen({
             </div>
             <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
               {settingsTab === 'general' && generalUnlocked && (
-                <DbLocationPanel pathOnly />
+                <>
+                  <DbLocationPanel pathOnly />
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 16, fontSize: 13, color: 'var(--pos-text, #111)' }}>
+                    Ekran klavyesi
+                    <select
+                      defaultValue={typeof localStorage !== 'undefined' ? (localStorage.getItem('btpos.screenKeyboard') || 'auto') : 'auto'}
+                      onChange={e => {
+                        localStorage.setItem('btpos.screenKeyboard', e.target.value)
+                        window.dispatchEvent(new Event('btpos-keyboard-mode'))
+                      }}
+                      style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #E5E7EB' }}
+                    >
+                      <option value="auto">Otomatik</option>
+                      <option value="always">Her zaman</option>
+                      <option value="off">Kapalı</option>
+                    </select>
+                  </label>
+                </>
               )}
               {settingsTab === 'license' && (
                 <LicenseSettingsPanel />

@@ -749,6 +749,10 @@ declare global {
 
   interface CustomerRow {
     id:        string
+    /** İşbaşı firma id. PATCH yalnız bunu kullanır; yerel `id` kullanılmaz. */
+    erpId?:    string
+    /** Kayıt sonrası eski yerel satırı bu id ile birleştirmek için. Kolon değildir. */
+    previousId?: string
     companyId: string
     code:      string
     name:      string
@@ -767,6 +771,9 @@ declare global {
     city:       string
     district:   string
     email?:     string | null
+    taxOffice?: string
+    /** Slim türü: individual | corporate */
+    type?: 'individual' | 'corporate' | string
     syncedAt?: string
   }
 

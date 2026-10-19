@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { sendInvoiceForSale, sendReturnInvoice, tryResolveTorbaCustomer, enqueueCustomer } from '../lib/invoiceSend'
+import { sendInvoiceForSale, sendReturnInvoice, tryResolveTorbaCustomer } from '../lib/invoiceSend'
+import { CustomerFormModal } from '../components/CustomerFormModal'
 import {
   pavoCompleteSale,
   pavoStartSaleWithItems,
@@ -29,6 +30,9 @@ import AppLogo from '../components/AppLogo'
 import LicenseBanner from '../components/LicenseBanner'
 import ConnectionDot from '../components/ConnectionDot'
 import { CmdProgressChip } from '../components/CmdProgressChip'
+import { PosUndefinedBadge } from '../components/PosUndefinedBadge'
+import { isPosDefined, POS_UNDEFINED_MESSAGE } from '../services/pos/posReadiness'
+import { getPosSnapshot, isPosReady, refreshPosReady, subscribePosReady, usePosReady } from '../store/posReady'
 import { PavoLockOverlay } from '../components/PavoLockOverlay'
 import { getRecoveryInfo, isRecoveryActive, isRecoveryInFlight, paymentTotals, primeStaleWaiting, setRecoveryRuntime, summarizeProbe, type PendingLookup, type RecoveryProbe } from '../lib/pavoRecovery'
 import {
@@ -48,8 +52,8 @@ import {
   setPavoPhase,
   usePavoLock,
 } from '../store/pavoLock'
-import { TouchKeyboard } from '../components/TouchKeyboard'
-import { useTouchKeyboard, type OpenOpts } from '../hooks/useTouchKeyboard'
+import { ScreenKeyboardHost } from '../components/OnScreenKeyboard'
+import { useTouchKeyboard } from '../hooks/useTouchKeyboard'
 import { searchCustomers as rankCustomers } from '../lib/searchCustomers'
 import { buildSaleReceiptData } from '../lib/templateEngine'
 import { nextOrderNo } from '../lib/orderNo'
@@ -699,7 +703,7 @@ function PopupItem({ icon, label, disabled, danger, accent = 'var(--pos-primary)
   return (
     <button
       type="button"
-      disabled={disabled}
+      aria-disabled={disabled || undefined}
       onClick={onClick}
       style={{
         ...solidBtn(tone, !!disabled),
@@ -752,7 +756,7 @@ export default function POSScreen({
   const customerDisplay = settings.terminal.customerDisplay
 
   const touchEnabled = settings.terminal.touchKeyboard
-  const { openKeyboard, keyboardProps, keyboardOpen } = useTouchKeyboard(touchEnabled)
+  const { openKeyboard } = useTouchKeyboard(touchEnabled)
 
   /* ── State ── */
   const [cart, setCart]                   = useState<CartItem[]>([])
@@ -840,8 +844,8 @@ export default function POSScreen({
   const [showCustomer, setShowCustomer]   = useState(false)
   const [customers, setCustomers]         = useState<CustomerRow[]>([])
   const [customerQ, setCustomerQ]         = useState('')
-  const [addCustomerModal, setAddCustomerModal] = useState(false)
-  const [newCustPrefill, setNewCustPrefill] = useState('')
+  const [customerForm, setCustomerForm] = useState<null | { mode: 'create' | 'edit'; customer?: CustomerRow; query?: string }>(null)
+  const [customerPickId, setCustomerPickId] = useState<string | null>(null)
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null)
   const [smsPhone, setSmsPhone] = useState('')
   const [mailAddr, setMailAddr] = useState('')
@@ -881,6 +885,7 @@ export default function POSScreen({
     paidAmount: number
   } | null>(null)
   const { dialogProps, showError, showSuccess, showInfo, confirm } = useAlertDialog()
+  const posReady = usePosReady()
   const [quickReturnModal, setQuickReturnModal] = useState<QuickReturnModalState | null>(null)
   const [quickReturnLoading, setQuickReturnLoading] = useState(false)
   const [quickReturnError, setQuickReturnError]   = useState<string | null>(null)
@@ -922,10 +927,10 @@ export default function POSScreen({
   const [heldToast, setHeldToast] = useState<string | null>(null)
   const heldToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const showToast = useCallback((msg: string, _type: 'error' | 'success' | 'info' = 'error') => {
+  const showToast = useCallback((msg: string, _type: 'error' | 'success' | 'info' = 'error', ms = 4000) => {
     if (heldToastTimer.current) clearTimeout(heldToastTimer.current)
     setHeldToast(msg)
-    heldToastTimer.current = setTimeout(() => setHeldToast(null), 4000)
+    heldToastTimer.current = setTimeout(() => setHeldToast(null), ms)
   }, [])
 
   useEffect(() => { setLockNotifier(msg => showToast(msg, 'info')) }, [showToast])
@@ -1228,24 +1233,23 @@ export default function POSScreen({
   }, [scaleEnabled])
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const device = await window.electron.db.getPaymentDeviceSettings('pavo')
-        if (device?.ipAddress && device.isActive) {
-          setPavoSettings({
-            ipAddress:       device.ipAddress,
-            port:            device.port,
-            serialNo:        device.serialNo ?? '',
-            cardReadTimeout: device.cardReadTimeout,
-            printWidth:      device.printWidth,
-          })
-        } else {
-          setPavoSettings(null)
-        }
-      } catch {
-        setPavoSettings(null)
+    const apply = () => {
+      const row = getPosSnapshot()
+      if (isPosDefined(row) && row?.ipAddress && row.serialNo) {
+        setPavoSettings({
+          ipAddress:       row.ipAddress,
+          port:            row.port ?? 9100,
+          serialNo:        row.serialNo,
+          cardReadTimeout: row.cardReadTimeout ?? 30,
+          printWidth:      row.printWidth === '58mm' ? '58mm' : '80mm',
+        })
+        return
       }
-    })()
+      if (isRecoveryActive() || getPavoPhase() !== 'idle') return
+      setPavoSettings(null)
+    }
+    void refreshPosReady().then(apply)
+    return subscribePosReady(apply)
   }, [])
 
   useEffect(() => {
@@ -1615,58 +1619,118 @@ export default function POSScreen({
   /* ── Global barkod okuyucu ── */
   useEffect(() => {
     let buf = ''
+    let gaps: number[] = []
+    let fast = true
+    let lastAt = 0
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const onKey = (e: KeyboardEvent) => {
+      const lock = document.querySelector('[data-pavo-lock]')
       if (isCartLocked() && getPavoPhase() !== 'open') {
+        if (lock && e.target instanceof Node && lock.contains(e.target)) return
         e.preventDefault()
         e.stopPropagation()
         notifyLocked()
         return
       }
+      if (e.key === 'Escape') {
+        if (lock) return
+        const popup = [...document.querySelectorAll<HTMLElement>('[data-pos-popup], .pos-modal')].pop()
+        if (popup) {
+          popup.querySelector<HTMLElement>('[data-pos-cancel], .pos-modal-close')?.click()
+          e.preventDefault()
+        }
+        return
+      }
       if (paymentMode || quickReturnModal || cariPaymentModal) return
 
-      // Fiyat Gör açıksa — barkodu oraya yönlendir (input odakta olsa bile)
-      if (menuOpen === 'fiyatgor') {
-        if (e.key === 'Enter') {
-          if (buf.length >= 3) applyFiyatGorScan(buf)
+      const popup = [...document.querySelectorAll<HTMLElement>('[data-pos-popup], .pos-modal')].pop()
+      if (e.key === 'Tab' && popup) {
+        const items = [...popup.querySelectorAll<HTMLElement>('input, textarea, select, button')]
+          .filter(el => !el.hasAttribute('disabled'))
+        if (items.length > 0) {
+          const i = items.indexOf(document.activeElement as HTMLElement)
+          const next = e.shiftKey
+            ? items[(i - 1 + items.length) % items.length]
+            : items[(i + 1) % items.length]
+          next?.focus()
+          e.preventDefault()
+        }
+        return
+      }
+
+      const printable = e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+      if (printable) {
+        const now = performance.now()
+        const gap = buf.length === 0 ? 0 : now - lastAt
+        if (buf.length > 0 && gap > 35) {
           buf = ''
-          if (timer) clearTimeout(timer)
-          return
+          fast = true
         }
-        if (e.key.length === 1) {
-          buf += e.key
-          if (timer) clearTimeout(timer)
-          timer = setTimeout(() => { buf = '' }, 150)
-        }
-        return
-      }
-
-      const target = e.target as HTMLElement | null
-      const tag = target?.tagName
-      const isProductSearch = target === searchRef.current
-      if ((tag === 'INPUT' || tag === 'TEXTAREA') && !isProductSearch) return
-      if (isProductSearch && e.key.length === 1) e.preventDefault()
-
-      if (e.key === 'Enter') {
-        const code = buf.length >= 2 ? buf : (numBuf.length >= 2 ? numBuf : '')
-        buf = ''
-        if (timer) clearTimeout(timer)
-        if (!code) return
-        setNumBuf('')
-        barcodeScanRef.current(code)
-        return
-      }
-
-      if (e.key.length === 1) {
+        if (buf.length > 0) gaps.push(gap)
         buf += e.key
+        lastAt = now
         if (timer) clearTimeout(timer)
-        timer = setTimeout(() => { buf = '' }, 150)
+        timer = setTimeout(() => { buf = ''; gaps = []; fast = true }, 180)
+        if (!popup && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+          const search = searchRef.current
+          if (search && e.key !== '*') {
+            search.focus()
+            const proto = HTMLInputElement.prototype
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+            setter?.call(search, search.value + e.key)
+            search.dispatchEvent(new Event('input', { bubbles: true }))
+            e.preventDefault()
+          }
+        }
+        if (e.key === '*' && !popup && /^\d+([.,]\d+)?$/.test(buf.slice(0, -1))) {
+          setNumBuf(buf.slice(0, -1).replace('.', ','))
+          buf = ''
+          e.preventDefault()
+        }
+        return
       }
+
+      if (e.key !== 'Enter') return
+      const code = buf
+      const scan = fast && gaps.every(g => g <= 35) && code.length >= 4
+      buf = ''
+      gaps = []
+      fast = true
+      if (timer) clearTimeout(timer)
+      if (!scan) return
+
+      e.preventDefault()
+      const active = document.activeElement
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        if (active.value.endsWith(code)) {
+          const proto = active instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+          const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
+          setter?.call(active, active.value.slice(0, -code.length))
+          active.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      }
+      if (menuOpen === 'fiyatgor') {
+        applyFiyatGorScan(code)
+        return
+      }
+      if (popup) {
+        const inputs = [...popup.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea')]
+        const target = (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && popup.contains(active)
+          ? active
+          : inputs[0]
+        if (!target) return
+        const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+        Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(target, code)
+        target.dispatchEvent(new Event('input', { bubbles: true }))
+        return
+      }
+      setNumBuf('')
+      barcodeScanRef.current(code)
     }
 
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [paymentMode, quickReturnModal, cariPaymentModal, menuOpen, applyFiyatGorScan, numBuf])
 
   /* ── Barkod okuyucu ── */
@@ -2444,6 +2508,10 @@ export default function POSScreen({
 
     try {
       // ── 1. Pavo AdvanceSale — parametre açıksa ───────────────────
+      if (settings.terminal.cariPaymentUsePavo && !isPosReady()) {
+        logPosBlocked()
+        return
+      }
       if (settings.terminal.cariPaymentUsePavo && pavoSettings) {
         const seq = await window.electron.db.nextPavoSequence()
         const nameParts = (cariPaymentCust.name ?? '').split(' ')
@@ -3401,9 +3469,19 @@ export default function POSScreen({
     setSelectedBrand(null)
   }
 
+  function logPosBlocked() {
+    console.log('[pos] blocked: no device defined')
+    void window.electron.app.log('[pos] blocked: no device defined').catch(() => {})
+    showInfo('Satış kapalı', POS_UNDEFINED_MESSAGE)
+  }
+
   async function completeSale(forcedLines?: PaymentLine[]) {
     const lines = forcedLines ?? paymentLines
     if (!cart.length || lines.length === 0) return
+    if (!isPosReady() && !isRecoveryActive() && getPavoPhase() === 'idle') {
+      logPosBlocked()
+      return
+    }
 
     if (saving || pavoLoading) {
       await handleDurumSorgula()
@@ -4557,6 +4635,10 @@ export default function POSScreen({
   async function completeReturn(forcedLines?: PaymentLine[]) {
     const lines = forcedLines ?? paymentLines
     if (!cart.length || lines.length === 0) return
+    if (!isPosReady()) {
+      logPosBlocked()
+      return
+    }
     setSaving(true)
 
     try {
@@ -5164,9 +5246,9 @@ export default function POSScreen({
           )}
           {selectedCustomer && (
             <span style={{
-              background: '#1f2937',
-              color: 'var(--pos-header-text)',
-              border: '1px solid #374151',
+              background: 'var(--pos-surface-alt)',
+              color: 'var(--pos-text)',
+              border: '1px solid var(--pos-border)',
               borderRadius: 6,
               padding: '3px 8px',
               fontSize: 10,
@@ -5175,7 +5257,10 @@ export default function POSScreen({
               gap: 4,
             }}>
               👤 {selectedCustomer.name}
-              <button type="button" onClick={() => applyCustomerSelection(null)} style={{ background: 'none', border: 'none', color: '#93c5fd', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
+              {settings.cashier.canEditCustomer && (
+                <button type="button" title="Düzenle" onClick={() => setCustomerForm({ mode: 'edit', customer: selectedCustomer })} style={{ background: 'none', border: 'none', color: 'var(--pos-text)', cursor: 'pointer', fontSize: 12, padding: 0 }}>✎</button>
+              )}
+              <button type="button" onClick={() => applyCustomerSelection(null)} style={{ background: 'none', border: 'none', color: 'var(--pos-text)', cursor: 'pointer', fontSize: 11, padding: 0 }}>✕</button>
             </span>
           )}
         </div>
@@ -5201,6 +5286,7 @@ export default function POSScreen({
             </button>
           )}
           <ConnectionDot status={conn} />
+          <PosUndefinedBadge onClick={logPosBlocked} />
           <CmdProgressChip />
           {commandListenerActive && (
             <button
@@ -5850,7 +5936,7 @@ export default function POSScreen({
               onChange={e => setMailAddr(e.target.value)}
               placeholder="ornek@mail.com"
               autoFocus={!touchEnabled}
-              readOnly={touchEnabled}
+             
               onFocus={() => {
                 if (!touchEnabled) return
                 openKeyboard({
@@ -6839,7 +6925,7 @@ export default function POSScreen({
           <input
             ref={holdNoteRef}
             autoFocus={!touchEnabled}
-            readOnly={touchEnabled}
+           
             maxLength={60}
             value={holdDraft.note}
             onChange={e => setHoldDraft(prev => prev ? { ...prev, note: e.target.value.slice(0, 60) } : prev)}
@@ -6870,168 +6956,134 @@ export default function POSScreen({
       {/* Müşteri seç */}
       {showCustomer && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="pos-modal" style={{ background: 'var(--pos-surface)', borderRadius: 14, padding: 24, width: 'min(720px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 15 }}>Müşteri Seç</span>
-              <button onClick={() => setShowCustomer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9E9E9E' }}>✕</button>
+          <div className="pos-modal" data-pos-popup="" tabIndex={-1} style={{ background: 'var(--pos-surface)', color: 'var(--pos-text)', border: '1px solid var(--pos-border)', borderRadius: 14, width: 'min(720px, 92vw)', maxHeight: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'var(--pos-surface-alt)' }}>
+              <span style={{ fontWeight: 700, fontSize: 15 }}>Müşteri Seç</span>
+              <button type="button" data-pos-cancel="" onClick={() => setShowCustomer(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: 'var(--pos-text)' }}>✕</button>
             </div>
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, flex: 1 }}>
             <input
-              autoFocus={!touchEnabled}
+              data-autofocus=""
+              data-kb="text"
               value={customerQ}
-              readOnly={touchEnabled}
-              onClick={() => openKeyboard({
-                title:     'Müşteri ara',
-                initial:   customerQ,
-                type:      'qwerty',
-                onSearch:  async (q) => {
-                  const all = await window.electron.db.getCustomers(companyId)
-                  return rankCustomers(all, q)
-                },
-                onSelectResult: (c) => {
-                  selectCustomer(c)
-                  setCustomerQ('')
-                },
-                onConfirm: (v) => setCustomerQ(v),
-              })}
               onChange={e => {
-                if (!touchEnabled) {
-                  setCustomerQ(e.target.value)
-                  void loadCustomersForModal(e.target.value)
-                }
+                setCustomerQ(e.target.value)
+                void loadCustomersForModal(e.target.value)
               }}
-              placeholder="Ad veya kod ile ara..."
-              style={{ border: '1px solid var(--pos-border)', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none', marginBottom: 12,
-                cursor: touchEnabled ? 'pointer' : 'text' }}
+              placeholder="Ad, telefon, vergi no…"
+              style={{ background: 'var(--pos-surface)', color: 'var(--pos-text)', border: '1px solid var(--pos-border)', borderRadius: 8, padding: '8px 12px', fontSize: 13, outline: 'none' }}
             />
             <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {customers.map(c => (
+              {customers.map(c => {
+                const active = (customerPickId ?? customers[0]?.id) === c.id
+                const tax = c.taxNo ? `${c.isPerson === false ? 'VKN' : 'TC'} ${c.taxNo}` : ''
+                return (
                   <div key={c.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => { selectCustomer(c); setCustomerQ('') }}
-                    style={{ border: '1px solid #F0F0F0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)'}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)'}
+                    onClick={() => setCustomerPickId(c.id)}
+                    onDoubleClick={() => { selectCustomer(c); setCustomerQ('') }}
+                    style={{
+                      border: `1px solid ${active ? 'var(--pos-primary)' : 'var(--pos-border)'}`,
+                      background: active ? 'var(--pos-surface-alt)' : 'var(--pos-surface)',
+                      color: 'var(--pos-text)',
+                      borderRadius: 8,
+                      padding: '10px 12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
                   >
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{c.name}</div>
-                      <div style={{ fontSize: 10, color: '#9E9E9E' }}>{c.code}{c.phone && ` · ${c.phone}`}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--pos-text-muted, var(--pos-text))', opacity: 0.75 }}>{[c.phone, tax].filter(Boolean).join(' · ')}</div>
                     </div>
-                    {c.balance !== 0 && (
-                      <span style={{ fontSize: 12, color: c.balance > 0 ? '#2E7D32' : '#C62828', fontWeight: 600 }}>
-                        {fmt(c.balance)}
-                      </span>
+                    {settings.cashier.canEditCustomer && (
+                      <button type="button" title="Düzenle" onClick={e => { e.stopPropagation(); setCustomerForm({ mode: 'edit', customer: c }) }} style={{ background: 'var(--pos-surface-alt)', color: 'var(--pos-text)', border: '1px solid var(--pos-border)', borderRadius: 8, padding: '6px 10px', cursor: 'pointer' }}>✎</button>
                     )}
                   </div>
-                ))}
+                )
+              })}
               {customers.length === 0 && customerQ.trim().length >= 2 && (
-                <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                  <div style={{ fontSize: 13, color: '#9E9E9E', marginBottom: 12 }}>
-                    "{customerQ}" bulunamadı
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewCustPrefill(customerQ)
-                      setAddCustomerModal(true)
-                      setShowCustomer(false)
-                    }}
-                    style={{
-                      background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none',
-                      borderRadius: 8, padding: '8px 18px', fontSize: 13,
-                      fontWeight: 600, cursor: 'pointer',
-                    }}
-                  >
-                    + Yeni Müşteri Ekle
-                  </button>
+                <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--pos-text)' }}>
+                  Bulunamadı
+                  {settings.cashier.canAddCustomer && (
+                    <>
+                      {' — '}
+                      <button
+                        type="button"
+                        onClick={() => setCustomerForm({ mode: 'create', query: customerQ.trim() })}
+                        style={{ background: 'none', border: 'none', color: 'var(--pos-primary)', fontWeight: 700, cursor: 'pointer' }}
+                      >
+                        + “{customerQ.trim()}” adıyla yeni müşteri
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
               {customers.length === 0 && customerQ.trim().length < 2 && (
-                <div style={{ textAlign: 'center', color: '#BDBDBD', padding: '32px 0', fontSize: 13 }}>
-                  Müşteriler yükleniyor...
+                <div style={{ textAlign: 'center', color: 'var(--pos-text)', opacity: 0.7, padding: '32px 0', fontSize: 13 }}>
+                  Aramak için en az 2 karakter yazın
                 </div>
               )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              {settings.cashier.canAddCustomer ? (
+                <button type="button" onClick={() => setCustomerForm({ mode: 'create', query: /^\d+$/.test(customerQ.trim()) || customerQ.trim().length >= 2 ? customerQ.trim() : '' })} style={{ background: 'var(--pos-surface-alt)', color: 'var(--pos-text)', border: '1px solid var(--pos-border)', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer' }}>+ Yeni Müşteri</button>
+              ) : <span />}
+              <button
+                type="button"
+                disabled={!customers.length}
+                onClick={() => {
+                  const row = customers.find(c => c.id === (customerPickId ?? customers[0]?.id))
+                  if (!row) return
+                  selectCustomer(row)
+                  setCustomerQ('')
+                }}
+                style={{ background: 'var(--pos-primary)', color: 'var(--pos-primary-text)', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 800, cursor: customers.length ? 'pointer' : 'default', opacity: customers.length ? 1 : 0.5 }}
+              >Seç</button>
+            </div>
             </div>
           </div>
         </div>
       )}
 
-      {addCustomerModal && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-        }}>
-          <div style={{
-            background: 'var(--pos-surface)', borderRadius: 14, width: '100%', maxWidth: 480,
-            maxHeight: '90vh', overflowY: 'auto', padding: 24,
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Yeni Müşteri Ekle</span>
-              <button onClick={() => setAddCustomerModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9E9E9E' }}>✕</button>
-            </div>
-            <AddCustomerForm
-              prefillTaxNo={newCustPrefill}
-              touchEnabled={touchEnabled}
-              openKeyboard={openKeyboard}
-              onClose={() => setAddCustomerModal(false)}
-              onSuccess={async (customer) => {
-                const newId = crypto.randomUUID()
-                const parts = customer.name.trim().split(/\s+/).filter(Boolean)
-                const firstName = parts[0] ?? ''
-                const lastName = parts.slice(1).join(' ')
-                await window.electron.db.upsertCustomer({
-                  id:         newId,
-                  companyId,
-                  code:       '',
-                  name:       customer.name,
-                  phone:      customer.phone ?? '',
-                  email:      customer.email ?? '',
-                  taxNo:      customer.taxNo ?? '',
-                  address:    customer.address ?? '',
-                  balance:    0,
-                  isPerson:   customer.isPerson ?? true,
-                  firstName,
-                  lastName,
-                  postalCode: '',
-                  city:       customer.city ?? '',
-                  district:   customer.district ?? '',
-                  syncedAt:   new Date().toISOString(),
-                })
-                await enqueueCustomer(companyId, {
-                  firmType:   1,
-                  isPerson:   customer.isPerson ?? true,
-                  name:       customer.name,
-                  taxNo:      customer.taxNo ?? '',
-                  taxOffice:  customer.taxOffice ?? '',
-                  phone:      customer.phone ?? '',
-                  email:      customer.email ?? '',
-                  address:    customer.address ?? '',
-                  city:       customer.city ?? '',
-                  district:   customer.district ?? '',
-                  postalCode: customer.postalCode ?? '',
-                }, customer.name)
-                selectCustomer({
-                  id:         newId,
-                  companyId,
-                  code:       '',
-                  name:       customer.name,
-                  phone:      customer.phone ?? '',
-                  email:      customer.email ?? '',
-                  taxNo:      customer.taxNo ?? '',
-                  address:    customer.address ?? '',
-                  balance:    0,
-                  isPerson:   customer.isPerson ?? true,
-                  firstName,
-                  lastName,
-                  postalCode: '',
-                  city:       customer.city ?? '',
-                  district:   customer.district ?? '',
-                })
-                setAddCustomerModal(false)
-              }}
-            />
-          </div>
-        </div>
+      {customerForm && (
+        <CustomerFormModal
+          mode={customerForm.mode}
+          query={customerForm.query}
+          customer={customerForm.customer}
+          defaultCity={settings.terminal.terminalInfo.workplace?.city ?? ''}
+          cashierId={cashier.id}
+          terminalId={terminalId ?? ''}
+          companyId={companyId}
+          online={isOnline}
+          onClose={() => setCustomerForm(null)}
+          onForbidden={message => {
+            showToast(message, 'error')
+            setCustomerForm(null)
+          }}
+          onSaved={(row, opts) => {
+            void (async () => {
+              await window.electron.db.upsertCustomer({
+                ...row,
+                previousId: opts?.previousId,
+                companyId,
+                email: row.email ?? '',
+                taxOffice: row.taxOffice ?? '',
+                syncedAt: new Date().toISOString(),
+              })
+              const selectIt = opts?.select === true || customerForm.mode === 'create' || selectedCustomer?.id === row.id || (!!opts?.previousId && selectedCustomer?.id === opts.previousId)
+              if (selectIt) selectCustomer({ ...row, companyId })
+              setCustomerForm(null)
+              if (selectIt) setShowCustomer(false)
+              void loadCustomersForModal(customerQ)
+              showToast('✓ Müşteri kaydedildi', 'success', 2000)
+            })()
+          }}
+        />
       )}
 
       {/* ── 4 PANEL — toplam %100 ── */}
@@ -7727,12 +7779,15 @@ export default function POSScreen({
                 <div className="pos-menu-grid">
 
                 {menuOpen === 'islemler' && [
-                  { icon: '💰', label: 'Cari tahsilat', disabled: false },
-                  { icon: '💸', label: 'Cari ödeme', disabled: false },
+                  { icon: '💰', label: 'Cari tahsilat', disabled: settings.terminal.cariPaymentUsePavo && !posReady, posLock: settings.terminal.cariPaymentUsePavo && !posReady },
+                  { icon: '💸', label: 'Cari ödeme', disabled: settings.terminal.cariPaymentUsePavo && !posReady, posLock: settings.terminal.cariPaymentUsePavo && !posReady },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} accent="var(--pos-btn-menu-bg)" text="var(--pos-btn-menu-text)" layout="stack"
                     onClick={() => {
-                      if (item.disabled) return
+                      if (item.disabled) {
+                        if (item.posLock) logPosBlocked()
+                        return
+                      }
                       if (item.label.startsWith('Cari tah')) {
                         setCariPaymentModal('tahsilat')
                         setCariPaymentAmt('')
@@ -7760,20 +7815,23 @@ export default function POSScreen({
                 ))}
 
                 {menuOpen === 'belge' && [
-                  { icon: '↩️', label: 'İade Al', disabled: false },
-                  { icon: '⚡', label: 'Hızlı İade', disabled: !pavoSettings },
+                  { icon: '↩️', label: 'İade Al', disabled: !posReady, posLock: !posReady },
+                  { icon: '⚡', label: 'Hızlı İade', disabled: !posReady, posLock: !posReady },
                   { icon: '%', label: docDiscountRate > 0 || docDiscountAmt > 0
                       ? `Belge İndirimi (${docDiscountRate > 0 ? `%${docDiscountRate}` : fmt(docDiscountAmt)})`
                       : 'Belge İndirimi',
-                    disabled: cart.length === 0 || !(settings.cashier.allowDocDiscount) },
-                  { icon: '✕', label: 'Ürün İptal', disabled: cart.length === 0 },
-                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0 },
-                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: false },
-                  { icon: '🚫', label: 'Belge iptal', disabled: cart.length === 0, danger: true },
+                    disabled: cart.length === 0 || !(settings.cashier.allowDocDiscount), posLock: false },
+                  { icon: '✕', label: 'Ürün İptal', disabled: cart.length === 0, posLock: false },
+                  { icon: '⏸', label: 'Beklemeye al', disabled: cart.length === 0, posLock: false },
+                  { icon: '🛒', label: `Belge getir${heldDocs.length ? ` (${heldDocs.length})` : ''}`, disabled: !posReady, posLock: !posReady },
+                  { icon: '🚫', label: 'Belge iptal', disabled: !posReady || cart.length === 0, danger: true, posLock: !posReady },
                 ].map((item, i) => (
                   <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={'danger' in item && item.danger} accent="var(--pos-btn-documents-bg)" text="var(--pos-btn-documents-text)" layout="stack"
                     onClick={() => {
-                      if (item.disabled) return
+                      if (item.disabled) {
+                        if (item.posLock) logPosBlocked()
+                        return
+                      }
                       if (item.label.startsWith('Beklemeye')) { openHoldNote(); return }
                       if (item.label.startsWith('Belge getir')) { openHeldModal(); setMenuOpen(null); return }
                       if (item.label.startsWith('Belge iptal')) {
@@ -7827,23 +7885,27 @@ export default function POSScreen({
 
                 {menuOpen === 'musteri' && [
                   { icon: '🔍', label: 'Müşteri seç', disabled: false },
-                  { icon: '👤+', label: 'Müşteri ekle', disabled: false },
-                  { icon: '✏️', label: 'Müşteri düzenle', disabled: !selectedCustomer },
+                  ...(settings.cashier.canAddCustomer ? [{ icon: '👤+', label: 'Müşteri ekle', disabled: false }] : []),
+                  ...(settings.cashier.canEditCustomer ? [{ icon: '✏️', label: 'Müşteri düzenle', disabled: !selectedCustomer }] : []),
                   {
                     icon: '❌',
                     label: selectedCustomer
                       ? `${selectedCustomer.name.split(' ')[0]} — çıkar`
                       : 'Müşteri çıkar',
                     disabled: !selectedCustomer,
-                    danger: true,
+                    danger: true as boolean,
                   },
                 ].map((item, i) => (
-                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={item.danger} accent="var(--pos-btn-customer-bg)" text="var(--pos-btn-customer-text)" layout="stack"
+                  <PopupItem key={i} icon={item.icon} label={item.label} disabled={item.disabled} danger={'danger' in item && item.danger} accent="var(--pos-btn-customer-bg)" text="var(--pos-btn-customer-text)" layout="stack"
                     onClick={() => {
                       if (item.disabled) return
                       if (item.label === 'Müşteri seç') { void loadCustomers(); setMenuOpen(null); return }
-                      if (item.label === 'Müşteri ekle') { setNewCustPrefill(''); setAddCustomerModal(true); setMenuOpen(null); return }
-                      if (item.label === 'Müşteri düzenle') { setMenuOpen(null); return }
+                      if (item.label === 'Müşteri ekle') { setCustomerForm({ mode: 'create' }); setMenuOpen(null); return }
+                      if (item.label === 'Müşteri düzenle') {
+                        if (selectedCustomer) setCustomerForm({ mode: 'edit', customer: selectedCustomer })
+                        setMenuOpen(null)
+                        return
+                      }
                       if (item.label.endsWith('— çıkar') || item.label === 'Müşteri çıkar') {
                         applyCustomerSelection(null)
                         setMenuOpen(null)
@@ -7869,7 +7931,7 @@ export default function POSScreen({
                     display: 'flex', alignItems: 'center', gap: 8 }}>
                     🔍 Fiyat Gör
                   </div>
-                  <button type="button" onClick={() => setMenuOpen(null)}
+                  <button type="button" data-pos-cancel="" onClick={() => setMenuOpen(null)}
                     style={{ background: 'none', border: 'none', fontSize: 20,
                       cursor: 'pointer', color: 'var(--pos-text-muted)', padding: 0 }}>✕</button>
                 </div>
@@ -7879,13 +7941,7 @@ export default function POSScreen({
                     ref={fiyatGorInputRef}
                     autoFocus
                     value={fiyatGorQ}
-                    readOnly={touchEnabled}
-                    onChange={e => {
-                      if (!touchEnabled) {
-                        const v = e.target.value
-                        applyFiyatGorScan(v)
-                      }
-                    }}
+                    onChange={e => applyFiyatGorScan(e.target.value)}
                     placeholder="Barkod okut veya ürün adı gir..."
                     style={{ flex: 1, padding: '12px 14px', fontSize: 15, borderRadius: 10,
                       border: '1.5px solid var(--pos-border)', outline: 'none',
@@ -8032,7 +8088,7 @@ export default function POSScreen({
                     <input
                       autoFocus={!touchEnabled}
                       value={cariPaymentQ}
-                      readOnly={touchEnabled && keyboardOpen}
+                     
                       onClick={() => {
                         if (!touchEnabled) return
                         openKeyboard({
@@ -8162,7 +8218,7 @@ export default function POSScreen({
                 <div style={{ position: 'relative' }}>
                   <input
                     value={cariPaymentDesc}
-                    readOnly={touchEnabled && keyboardOpen}
+                   
                     onClick={() => {
                       if (!touchEnabled) return
                       openKeyboard({
@@ -8247,6 +8303,8 @@ export default function POSScreen({
           }}>
             <input
               ref={searchRef}
+              data-pos-barcode=""
+              data-kb="none"
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
               onKeyDown={e => { if (e.key === 'Escape') setSearchQ('') }}
@@ -8535,6 +8593,7 @@ export default function POSScreen({
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                 <button
                   onClick={() => {
+                    if (!posReady) { logPosBlocked(); return }
                     const amt = parseFloat(numBuf.replace(',', '.')) || dueTotal
                     const line: PaymentLine = {
                       id: crypto.randomUUID(),
@@ -8546,19 +8605,20 @@ export default function POSScreen({
                     setPaymentLines([line])
                     void (returnMode ? completeReturn([line]) : completeSale([line]))
                   }}
-                  disabled={cart.length === 0}
+                  disabled={posReady && cart.length === 0}
                   style={{
-                    ...solidBtn(returnMode ? C.danger : cashBtn.bg, cart.length === 0),
-                    color: cart.length === 0 ? C.disabledFg : returnMode ? '#FFFFFF' : cashBtn.text,
+                    ...solidBtn(returnMode ? C.danger : cashBtn.bg, !posReady || cart.length === 0),
+                    color: (!posReady || cart.length === 0) ? 'var(--pos-disabled-fg)' : returnMode ? '#FFFFFF' : cashBtn.text,
                     padding: '13px 4px',
                     borderRadius: 7,
                     fontSize: 13,
                   }}
                 >
-                  {returnMode ? '💵 Nakit İade' : '💵 Nakit'}
+                  {posReady ? (returnMode ? '💵 Nakit İade' : '💵 Nakit') : '🔒 Nakit'}
                 </button>
                 <button
                   onClick={() => {
+                    if (!posReady) { logPosBlocked(); return }
                     const line: PaymentLine = {
                       id: crypto.randomUUID(),
                       method: 'card',
@@ -8569,56 +8629,58 @@ export default function POSScreen({
                     setPaymentLines([line])
                     void (returnMode ? completeReturn([line]) : completeSale([line]))
                   }}
-                  disabled={cart.length === 0 || (!returnMode && !pavoSettings)}
+                  disabled={posReady && (cart.length === 0 || (!returnMode && !pavoSettings))}
                   title={!returnMode && !pavoSettings ? 'Pavo cihazı ayarlı değil' : undefined}
                   style={{
-                    ...solidBtn(returnMode ? C.danger : cardBtn.bg, cart.length === 0 || (!returnMode && !pavoSettings)),
-                    color: (cart.length === 0 || (!returnMode && !pavoSettings)) ? C.disabledFg : returnMode ? '#FFFFFF' : cardBtn.text,
+                    ...solidBtn(returnMode ? C.danger : cardBtn.bg, !posReady || cart.length === 0 || (!returnMode && !pavoSettings)),
+                    color: (!posReady || cart.length === 0 || (!returnMode && !pavoSettings)) ? 'var(--pos-disabled-fg)' : returnMode ? '#FFFFFF' : cardBtn.text,
                     padding: '13px 4px',
                     borderRadius: 7,
                     fontSize: 13,
                   }}
                 >
-                  {returnMode ? '💳 Kart İade' : '💳 Kart'}
+                  {posReady ? (returnMode ? '💳 Kart İade' : '💳 Kart') : '🔒 Kart'}
                 </button>
                 {!returnMode && (
                 <button
                   onClick={() => {
+                    if (!posReady) { logPosBlocked(); return }
                     setPaymentLines([])
                     setActiveMethod(null)
                     setPendingAmount('')
                     setPaymentMode(true)
                   }}
-                  disabled={cart.length === 0}
+                  disabled={posReady && cart.length === 0}
                   style={{
-                    ...solidBtn(splitBtn.bg, cart.length === 0),
-                    color: cart.length === 0 ? C.disabledFg : splitBtn.text,
+                    ...solidBtn(splitBtn.bg, !posReady || cart.length === 0),
+                    color: (!posReady || cart.length === 0) ? 'var(--pos-disabled-fg)' : splitBtn.text,
                     gridColumn: otherVisibleBrands.length > 0 ? undefined : 'span 2',
                     padding: '11px 4px',
                     borderRadius: 7,
                     fontSize: 13,
                   }}
                 >
-                  🔀 Parçalı Ödeme
+                  {posReady ? '🔀 Parçalı Ödeme' : '🔒 Parçalı'}
                 </button>
                 )}
-                {!returnMode && otherVisibleBrands.length > 0 && (
+                {!returnMode && (otherVisibleBrands.length > 0 || !posReady) && (
                   <button
                     onClick={() => {
+                      if (!posReady) { logPosBlocked(); return }
                       if (cart.length === 0) return
                       setShowOtherPayments(true)
                       setSelectedBrand(null)
                     }}
-                    disabled={cart.length === 0}
+                    disabled={posReady && cart.length === 0}
                     style={{
-                      ...solidBtn(otherPayBtn.bg, cart.length === 0),
-                      color: cart.length === 0 ? C.disabledFg : otherPayBtn.text,
+                      ...solidBtn(otherPayBtn.bg, !posReady || cart.length === 0),
+                      color: (!posReady || cart.length === 0) ? 'var(--pos-disabled-fg)' : otherPayBtn.text,
                       padding: '11px 4px',
                       borderRadius: 7,
                       fontSize: 13,
                     }}
                   >
-                    🔖 Diğer
+                    {posReady ? '🔖 Diğer' : '🔒 Diğer'}
                   </button>
                 )}
               </div>
@@ -9518,392 +9580,8 @@ export default function POSScreen({
         ))}
       </div>
 
-      {keyboardProps.open && (
-        <TouchKeyboard {...keyboardProps} />
-      )}
+      <ScreenKeyboardHost />
     </div>
   )
 }
-
-const CITY_OPTIONS = [
-  'Adana', 'Adıyaman', 'Afyonkarahisar', 'Ağrı', 'Amasya', 'Ankara', 'Antalya', 'Artvin',
-  'Aydın', 'Balıkesir', 'Bilecik', 'Bingöl', 'Bitlis', 'Bolu', 'Burdur', 'Bursa', 'Çanakkale',
-  'Çankırı', 'Çorum', 'Denizli', 'Diyarbakır', 'Düzce', 'Edirne', 'Elazığ', 'Erzincan',
-  'Erzurum', 'Eskişehir', 'Gaziantep', 'Giresun', 'Gümüşhane', 'Hakkari', 'Hatay', 'Isparta',
-  'İstanbul', 'İzmir', 'Kahramanmaraş', 'Karabük', 'Karaman', 'Kars', 'Kastamonu', 'Kayseri',
-  'Kilis', 'Kırıkkale', 'Kırklareli', 'Kırşehir', 'Kocaeli', 'Konya', 'Kütahya', 'Malatya',
-  'Manisa', 'Mardin', 'Mersin', 'Muğla', 'Muş', 'Nevşehir', 'Niğde', 'Ordu', 'Osmaniye',
-  'Rize', 'Sakarya', 'Samsun', 'Siirt', 'Sinop', 'Sivas', 'Şanlıurfa', 'Şırnak', 'Tekirdağ',
-  'Tokat', 'Trabzon', 'Tunceli', 'Uşak', 'Van', 'Yalova', 'Yozgat', 'Zonguldak',
-]
-
-interface AddCustomerFormProps {
-  prefillTaxNo?: string
-  touchEnabled:  boolean
-  openKeyboard:  (opts: OpenOpts) => boolean
-  onClose: () => void
-  onSuccess: (customer: {
-    name: string
-    phone?: string
-    taxNo?: string
-    taxOffice?: string
-    email?: string
-    address?: string
-    city?: string
-    district?: string
-    postalCode?: string
-    isPerson?: boolean
-  }) => Promise<void>
-}
-
-/** firmType: 1 (Müşteri & Tedarikçi), code API'ye gönderilmez */
-function AddCustomerForm({ prefillTaxNo, touchEnabled, openKeyboard, onClose, onSuccess }: AddCustomerFormProps) {
-  const [isPerson, setIsPerson] = useState(true)
-  const [name, setName] = useState('')
-  const [taxNo, setTaxNo] = useState(prefillTaxNo ?? '')
-  const [taxOffice, setTaxOffice] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
-  const [address, setAddress] = useState('')
-  const [city, setCity] = useState('')
-  const [citySearch, setCitySearch] = useState('')
-  const [showCityDD, setShowCityDD] = useState(false)
-  const [district, setDistrict] = useState('')
-  const [postalCode, setPostalCode] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    setTaxNo(prefillTaxNo ?? '')
-  }, [prefillTaxNo])
-
-  const filteredCities = CITY_OPTIONS.filter(c =>
-    c.toLowerCase().includes(citySearch.toLowerCase()),
-  )
-
-  async function handleSave() {
-    if (!name.trim()) {
-      setError('Ad Soyad / Firma Adı zorunludur.')
-      return
-    }
-    if (!taxNo.trim()) {
-      setError('TC / VKN zorunludur.')
-      return
-    }
-    setSaving(true)
-    setError('')
-    try {
-      await onSuccess({
-        name: name.trim(),
-        phone: phone.trim(),
-        taxNo: taxNo.trim(),
-        taxOffice: taxOffice.trim(),
-        email: email.trim(),
-        address: address.trim(),
-        city,
-        district: district.trim(),
-        postalCode: postalCode.trim(),
-        isPerson,
-      })
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const s: CSSProperties = {
-    width: '100%',
-    border: '1px solid var(--pos-border)',
-    borderRadius: 8,
-    padding: '8px 12px',
-    fontSize: 13,
-    outline: 'none',
-    boxSizing: 'border-box',
-    cursor: touchEnabled ? 'pointer' : 'text',
-  }
-
-  const lbl = (txt: string, req?: boolean) => (
-    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--pos-text-muted)', display: 'block', marginBottom: 4 }}>
-      {txt}{req && <span style={{ color: '#EF4444' }}> *</span>}
-    </label>
-  )
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-
-      <div style={{ marginBottom: 14 }}>
-        {lbl('Kişi Tipi')}
-        <div style={{ display: 'flex', gap: 8 }}>
-          {[{ v: true, l: 'Bireysel' }, { v: false, l: 'Kurumsal' }].map(({ v, l }) => (
-            <button
-              key={l}
-              type="button"
-              onClick={() => setIsPerson(v)}
-              style={{
-                ...(isPerson === v ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
-                flex: 1, padding: '8px', borderRadius: 8, fontSize: 13,
-              }}
-            >
-              {l}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 12px' }}>
-
-        <div style={{ gridColumn: 'span 2' }}>
-          {lbl(isPerson ? 'Ad Soyad' : 'Firma Adı', true)}
-          <input
-            value={name}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     isPerson ? 'Ad Soyad' : 'Firma Adı',
-              initial:   name,
-              type:      'qwerty',
-              onConfirm: (v) => setName(v),
-            })}
-            onChange={e => { if (!touchEnabled) setName(e.target.value) }}
-            style={s}
-            placeholder={isPerson ? 'Ahmet Yılmaz' : 'ACME Ltd. Şti.'}
-          />
-        </div>
-
-        <div>
-          {lbl(isPerson ? 'TC Kimlik No' : 'VKN', true)}
-          <input
-            value={taxNo}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     isPerson ? 'TC Kimlik No' : 'VKN',
-              initial:   taxNo,
-              type:      'numeric',
-              onConfirm: (v) => setTaxNo(v),
-            })}
-            onChange={e => { if (!touchEnabled) setTaxNo(e.target.value) }}
-            style={s}
-            placeholder={isPerson ? '11111111111' : '1234567890'}
-          />
-        </div>
-
-        <div>
-          {lbl('Vergi Dairesi')}
-          <input
-            value={taxOffice}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'Vergi Dairesi',
-              initial:   taxOffice,
-              type:      'qwerty',
-              onConfirm: (v) => setTaxOffice(v),
-            })}
-            onChange={e => { if (!touchEnabled) setTaxOffice(e.target.value) }}
-            style={s}
-            placeholder="Bolu"
-          />
-        </div>
-
-        <div>
-          {lbl('Telefon')}
-          <input
-            value={phone}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'Telefon',
-              initial:   phone,
-              type:      'numeric',
-              onConfirm: (v) => setPhone(v),
-            })}
-            onChange={e => { if (!touchEnabled) setPhone(e.target.value) }}
-            style={s}
-            placeholder="0555 000 0000"
-          />
-        </div>
-
-        <div>
-          {lbl('E-posta')}
-          <input
-            type="email"
-            value={email}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'E-posta',
-              initial:   email,
-              type:      'qwerty',
-              onConfirm: (v) => setEmail(v),
-            })}
-            onChange={e => { if (!touchEnabled) setEmail(e.target.value) }}
-            style={s}
-            placeholder="ornek@mail.com"
-          />
-        </div>
-
-        <div style={{ gridColumn: 'span 2' }}>
-          {lbl('Adres')}
-          <input
-            value={address}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'Adres',
-              initial:   address,
-              type:      'qwerty',
-              onConfirm: (v) => setAddress(v),
-            })}
-            onChange={e => { if (!touchEnabled) setAddress(e.target.value) }}
-            style={s}
-            placeholder="Sokak, No, Mahalle"
-          />
-        </div>
-
-        <div style={{ position: 'relative' }}>
-          {lbl('Şehir')}
-          <input
-            value={city || citySearch}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'Şehir',
-              initial:   city || citySearch,
-              type:      'qwerty',
-              onConfirm: (v) => {
-                setCitySearch(v)
-                setCity('')
-                setShowCityDD(true)
-              },
-            })}
-            onChange={e => {
-              if (!touchEnabled) {
-                setCitySearch(e.target.value)
-                setCity('')
-                setShowCityDD(true)
-              }
-            }}
-            onFocus={() => { if (!touchEnabled) setShowCityDD(true) }}
-            onBlur={() => setTimeout(() => setShowCityDD(false), 150)}
-            style={s}
-            placeholder="Bolu"
-          />
-          {showCityDD && filteredCities.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              zIndex: 9999,
-              background: 'var(--pos-surface)',
-              border: '1px solid var(--pos-border)',
-              borderRadius: 8,
-              maxHeight: 160,
-              overflowY: 'auto',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-            }}
-            >
-              {filteredCities.map(c => (
-                <div
-                  key={c}
-                  onMouseDown={() => {
-                    setCity(c)
-                    setCitySearch(c)
-                    setShowCityDD(false)
-                  }}
-                  style={{ padding: '7px 12px', fontSize: 13, cursor: 'pointer' }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-hover)' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = 'var(--pos-surface)' }}
-                >
-                  {c}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div>
-          {lbl('İlçe')}
-          <input
-            value={district}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'İlçe',
-              initial:   district,
-              type:      'qwerty',
-              onConfirm: (v) => setDistrict(v),
-            })}
-            onChange={e => { if (!touchEnabled) setDistrict(e.target.value) }}
-            style={s}
-            placeholder="Merkez"
-          />
-        </div>
-
-        <div>
-          {lbl('Posta Kodu')}
-          <input
-            value={postalCode}
-            readOnly={touchEnabled}
-            onClick={() => openKeyboard({
-              title:     'Posta Kodu',
-              initial:   postalCode,
-              type:      'numeric',
-              onConfirm: (v) => setPostalCode(v),
-            })}
-            onChange={e => { if (!touchEnabled) setPostalCode(e.target.value) }}
-            style={s}
-            placeholder="14100"
-          />
-        </div>
-
-      </div>
-
-      {error && (
-        <div style={{
-          background: 'var(--pos-soft-danger)',
-          border: '1px solid #FECACA',
-          borderRadius: 8,
-          padding: '8px 12px',
-          fontSize: 12,
-          color: '#B91C1C',
-          marginTop: 12,
-        }}
-        >
-          {error}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            flex: 1,
-            padding: '11px',
-            borderRadius: 8,
-            border: '1px solid var(--pos-border)',
-            background: 'var(--pos-surface)',
-            cursor: 'pointer',
-            fontSize: 13,
-            color: 'var(--pos-text-muted)',
-          }}
-        >
-          İptal
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saving}
-          style={{
-            flex: 2,
-            padding: '11px',
-            borderRadius: 8,
-            border: 'none',
-            background: saving ? '#93C5FD' : 'var(--pos-primary)',
-            color: 'white',
-            cursor: saving ? 'wait' : 'pointer',
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          {saving ? 'Kaydediliyor...' : 'Cari Ekle'}
-        </button>
-      </div>
-    </div>
-  )
-}
+

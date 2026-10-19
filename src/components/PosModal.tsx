@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { C, solidBtn } from '../theme/colors'
 
 const SIZES = {
@@ -24,7 +24,21 @@ export function PosModal({
   zIndex?: number
   themed?: boolean
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
   const [narrow, setNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1280)
+
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null
+    const root = panelRef.current
+    const target = root?.querySelector<HTMLElement>('[data-autofocus]')
+      ?? root?.querySelector<HTMLElement>('input, textarea, select')
+      ?? root
+    target?.focus()
+    return () => {
+      if (prev && document.contains(prev)) prev.focus()
+      else document.querySelector<HTMLElement>('[data-pos-barcode]')?.focus()
+    }
+  }, [])
 
   useEffect(() => {
     const onResize = () => setNarrow(window.innerWidth < 1280)
@@ -35,25 +49,23 @@ export function PosModal({
   return (
     <div
       role="presentation"
+      className="pos-modal-overlay"
       onClick={onClose}
       style={{
-        position: 'fixed',
-        inset: 0,
         zIndex,
         background: themed ? 'var(--pos-scrim)' : 'rgba(15,23,42,0.45)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
         padding: 16,
       }}
     >
       <div
+        ref={panelRef}
         className="pos-modal"
+        data-pos-popup=""
+        tabIndex={-1}
         onClick={e => e.stopPropagation()}
         style={{
           width: narrow ? '92vw' : SIZES[size],
           maxWidth: '92vw',
-          maxHeight: '90vh',
           background: 'var(--pos-surface)',
           borderRadius: 16,
           boxShadow: '0 18px 50px rgba(0,0,0,.28)',
@@ -75,6 +87,7 @@ export function PosModal({
           <button
             type="button"
             className="pos-modal-close"
+            data-pos-cancel=""
             onClick={onClose}
             aria-label="Kapat"
             style={{
@@ -91,7 +104,7 @@ export function PosModal({
             }}
           >✕</button>
         </div>
-        <div style={{ padding: 20, overflowY: 'auto', flex: 1, fontSize: 20, color: 'var(--pos-text)' }}>
+        <div className="pos-modal-body" style={{ padding: 20, flex: 1, fontSize: 20, color: 'var(--pos-text)' }}>
           {children}
         </div>
         {footer && (

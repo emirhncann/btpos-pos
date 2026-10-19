@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { C, solidBtn } from '../theme/colors'
 import { pavoPair, pavoTestConnection } from '../lib/pavoService'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
+import { refreshPosReady } from '../store/posReady'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -101,6 +102,7 @@ export default function PaymentDeviceSettingsPanel({ companyId, terminalId, sale
       last_paired_at: pairedAt,
       is_active: active,
     })
+    await refreshPosReady()
   }
 
   async function handleTest() {

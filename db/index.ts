@@ -486,6 +486,18 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'customers_temp', 'district',    'district    TEXT NOT NULL DEFAULT \'\'')
   addColumnIfMissing(sqlite, 'customers',      'email',       'email       TEXT')
   addColumnIfMissing(sqlite, 'customers_temp', 'email',       'email       TEXT')
+  addColumnIfMissing(sqlite, 'customers',      'tax_office',  `tax_office TEXT NOT NULL DEFAULT ''`)
+  addColumnIfMissing(sqlite, 'customers_temp', 'tax_office',  `tax_office TEXT NOT NULL DEFAULT ''`)
+  addColumnIfMissing(sqlite, 'customers',      'customer_type', `customer_type TEXT NOT NULL DEFAULT ''`)
+  addColumnIfMissing(sqlite, 'customers_temp', 'customer_type', `customer_type TEXT NOT NULL DEFAULT ''`)
+  addColumnIfMissing(sqlite, 'customers',      'erp_id', `erp_id TEXT NOT NULL DEFAULT ''`)
+  addColumnIfMissing(sqlite, 'customers_temp', 'erp_id', `erp_id TEXT NOT NULL DEFAULT ''`)
+  sqlite.prepare(`
+    UPDATE customers SET erp_id = id
+    WHERE TRIM(IFNULL(erp_id, '')) = ''
+      AND TRIM(IFNULL(id, '')) != ''
+      AND id NOT LIKE '%-%'
+  `).run()
   addColumnIfMissing(sqlite, 'customers',      'balance_updated_at', 'balance_updated_at TEXT')
   addColumnIfMissing(sqlite, 'customers_temp', 'balance_updated_at', 'balance_updated_at TEXT')
 

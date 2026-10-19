@@ -4,6 +4,7 @@ import { trCount, type CommandAckResult } from '../lib/commandResult'
 import { decideUpdateCommand } from '../lib/updateCommand'
 import { parseSettingsBundle } from '../lib/settingsModel'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
+import { refreshPosReady } from '../store/posReady'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
 
 async function getWorkplaceId(): Promise<string | null> {
@@ -269,6 +270,8 @@ async function syncSettings(
       console.warn('[sync_settings] torba kuyruk retry:', e)
     }
   }
+
+  await refreshPosReady()
 
   return { success: true, inserted: 1, updated: 0, deleted: 0 }
 }

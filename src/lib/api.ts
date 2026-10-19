@@ -40,26 +40,31 @@ export const api = {
     const data = await res.json()
     const list = data?.data?.data ?? data?.data?.items ?? data?.items ?? data ?? []
     return list.map((c: Record<string, unknown>) => {
+      const rawType = String(c.type ?? '').trim()
+      const type = rawType === 'individual' || rawType === 'corporate' ? rawType : undefined
       const isPersonRaw = c.isPerson
-      const isPerson =
-        isPersonRaw === false || isPersonRaw === 0 || isPersonRaw === '0' ? false : true
+      const isPerson = type ? type === 'individual' : !(isPersonRaw === false || isPersonRaw === 0 || isPersonRaw === '0')
+      const erpId = String(c.erp_id ?? c.erpId ?? c.id ?? '').trim()
       return {
-        id:        String(c.id ?? ''),
+        id:        String(c.id ?? erpId),
+        erpId,
         companyId,
         code:      String(c.code ?? c.Code ?? ''),
         name:      String(c.name ?? c.Name ?? c.title ?? ''),
         phone:     String(c.phone ?? c.Phone ?? c.gsm ?? ''),
-        taxNo:     String(c.taxNo ?? c.vkn ?? ''),
+        taxNo:     String(c.tax_number ?? c.taxNo ?? c.vkn ?? ''),
         address:   String(c.address ?? c.Address ?? ''),
         balance:   Number(c.balance ?? c.Balance ?? 0),
         balanceKnown: c.balance != null || c.Balance != null,
         isPerson,
+        type,
         firstName: String(c.firstName ?? ''),
         lastName:  String(c.lastName ?? ''),
         postalCode: String(c.postalCode ?? c.postal_code ?? ''),
         city:       String(c.city ?? ''),
         district:   String(c.district ?? ''),
         email:      String(c.emailAddress ?? c.email ?? c.Email ?? ''),
+        taxOffice:  String(c.taxOffice ?? c.tax_office ?? ''),
       }
     })
   },

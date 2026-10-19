@@ -5,6 +5,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  --osk-h: 0px;
   --pos-bg: #E5E7EB;
   --pos-screen-bg: #E5E7EB;
   --pos-surface: #FFFFFF;
@@ -102,6 +103,99 @@ button:active:not(:disabled),
 /* PLU buton hover efekti */
 .plu-btn:hover { border-color: #1565C0 !important; background: #E3F2FD !important; }
 .plu-btn:active { transform: scale(0.97); opacity: 1; }
+
+.pos-modal-overlay {
+  position: fixed;
+  inset: 0;
+  bottom: var(--osk-h, 0px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: bottom .15s ease;
+}
+.pos-modal {
+  max-height: calc(100vh - var(--osk-h, 0px) - 24px);
+  display: flex;
+  flex-direction: column;
+}
+.pos-modal-body {
+  overflow-y: auto;
+  min-height: 0;
+}
+.pos-screen {
+  height: calc(100vh - var(--osk-h, 0px)) !important;
+}
+.pos-osk-inset {
+  bottom: var(--osk-h, 0px) !important;
+}
+
+.customer-form {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  column-gap: 16px;
+  row-gap: 12px;
+  align-items: center;
+}
+.customer-form .full { grid-column: 1 / -1; }
+.customer-form .cf-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pos-text);
+}
+.customer-form .cf-error {
+  grid-column: 2;
+  color: var(--pos-danger);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.customer-form .cf-warn {
+  grid-column: 2;
+  color: var(--pos-warning);
+  font-size: 12px;
+  line-height: 1.3;
+}
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 56px;
+  border: 1px solid var(--pos-border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.pos-modal .customer-form input,
+.pos-modal .customer-form textarea {
+  min-height: 56px !important;
+  height: 56px;
+  font-size: 18px !important;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  border: 1px solid var(--pos-border);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+.pos-modal .customer-form textarea {
+  height: auto;
+  padding: 12px;
+}
+.pos-modal .customer-form .seg button,
+.pos-modal .customer-form .cf-mini {
+  min-height: 56px !important;
+  height: 56px !important;
+  font-size: 18px !important;
+}
+.seg button {
+  background: var(--pos-surface);
+  color: var(--pos-text);
+  border: 0;
+  cursor: pointer;
+}
+.seg button[aria-pressed="true"] {
+  background: var(--pos-primary);
+  color: var(--pos-primary-text);
+  font-weight: 600;
+}
 
 /* Satış pencereleri — dokunmatik ölçü */
 .pos-modal button:not(.pos-modal-close) {

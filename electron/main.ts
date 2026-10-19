@@ -455,6 +455,13 @@ function guardDevtools(win: BrowserWindow): void {
     if (input.type !== 'keyDown') return
     const k = input.key.toLowerCase()
     const mod = process.platform === 'darwin' ? input.meta : input.control
+    const blocked = input.key === 'F5'
+      || (mod && (k === 'r' || k === 'w'))
+      || (input.alt && input.key === 'F4')
+    if (blocked) {
+      event.preventDefault()
+      return
+    }
     const isDevKey = input.key === 'F12' || (mod && input.shift && ['i', 'j', 'c'].includes(k))
     if (!isDevKey) return
     event.preventDefault()

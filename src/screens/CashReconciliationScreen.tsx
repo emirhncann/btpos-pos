@@ -613,7 +613,7 @@ export default function CashReconciliationScreen({
   const badgeBg = totalDiff === 0 ? 'var(--pos-success)' : totalDiff < 0 ? 'var(--pos-danger)' : 'var(--pos-warning)'
 
   return (
-    <div style={{
+    <div className="pos-osk-inset" style={{
       position: 'fixed', inset: 0, zIndex: 40,
       backgroundColor: 'var(--pos-screen-bg)',
       backgroundImage: 'var(--pos-bg-image)',

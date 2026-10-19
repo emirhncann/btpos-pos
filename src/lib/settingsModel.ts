@@ -47,6 +47,10 @@ export interface CashierSettings {
   buttonColors: string
   /** cashiers[].theme. Bilinmeyen değer Klasik'e düşer. */
   theme: string
+  /** cashiers[].can_add_customer. Anahtar yoksa açık. */
+  canAddCustomer: boolean
+  /** cashiers[].can_edit_customer. Anahtar yoksa açık. */
+  canEditCustomer: boolean
 }
 
 export interface PaymentAccountCache {
@@ -114,6 +118,8 @@ export const DEFAULT_CASHIER_SETTINGS: CashierSettings = {
   printMulti: false,
   buttonColors: '{}',
   theme: 'klasik',
+  canAddCustomer: true,
+  canEditCustomer: true,
 }
 
 export function asBool(value: unknown, fallback: boolean): boolean {
@@ -315,6 +321,8 @@ export function parseCashierSettings(row: Record<string, unknown>): CashierSetti
       const t = raw.trim()
       return t || 'klasik'
     })(),
+    canAddCustomer: asBool(pickRow(row, 'canAddCustomer', 'can_add_customer'), true),
+    canEditCustomer: asBool(pickRow(row, 'canEditCustomer', 'can_edit_customer'), true),
   }
 }
 
