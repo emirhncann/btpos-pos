@@ -273,6 +273,7 @@ export function getPendingInvoices(onlyAnonymous = false): (typeof sales.$inferS
     return db.select().from(sales)
       .where(and(
         eq(sales.invoiceSent, 0),
+        isNull(sales.dayEndQueueId),
         or(isNull(sales.customerId), eq(sales.customerId, '')),
         or(isNull(sales.isReturn), eq(sales.isReturn, 0)),
       ))
@@ -1882,6 +1883,196 @@ export function upsertCustomer(row: CustomerRow): void {
   )
 }
 
+export type EnqueueDayEndResult = {
+  queued: boolean
+  queueId: string | null
+  saleCount: number
+  fail: number
+  error?: string
+}
+
+/**
+ * Carisiz bekleyen satışları tek gün sonu faturasında paketler.
+ * Tek SQLite transaction: seç → kuyruk satırı → sales.day_end_queue_id işaretle.
+ * İkinci çağrı boş döner (day_end_queue_id dolu satışlar alınmaz).
+ */
+export function enqueueDayEndInvoicePackage(params: {
+  companyId: string
+  terminalId: string
+}): EnqueueDayEndResult {
+  const db = getSqlite()
+  const settings = getTerminalSettings()
+  const invoiceType: 'e_archive' | 'paper' = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
+  const endpoint = invoiceType === 'paper'
+    ? `/integration/invoice-paper/${params.companyId}`
+    : `/integration/invoice/${params.companyId}`
+  const torbaRef = { type: 'torba' as const }
+
+  type DayEndErpLine = {
+    product_code: string
+    name: string
+    quantity: number
+    vatRate: number
+    unit: string
+    product_id: number
+    unit_price_gross: number
+    gross_amount: number
+    discount_amount: number
+    net_amount: number
+  }
+
+  const run = db.transaction(() => {
+    const rows = db.prepare(`
+      SELECT id, card_amount
+      FROM sales
+      WHERE invoice_sent = 0
+        AND day_end_queue_id IS NULL
+        AND (customer_id IS NULL OR customer_id = '')
+        AND (is_return IS NULL OR is_return = 0)
+      ORDER BY created_at ASC
+      LIMIT 200
+    `).all() as Array<{ id: string; card_amount: number | null }>
+
+    if (rows.length === 0) {
+      return { queued: false, queueId: null, saleCount: 0, fail: 0 } satisfies EnqueueDayEndResult
+    }
+
+    const groupMap = new Map<string, DayEndErpLine>()
+    let expectedTotal = 0
+    const badSaleIds: string[] = []
+
+    for (const sale of rows) {
+      const items = getSaleItems(sale.id)
+      const saleBad = items.some(
+        i => !String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+      )
+      if (saleBad) {
+        badSaleIds.push(sale.id)
+        continue
+      }
+      for (const i of items) {
+        const qty = Math.abs(Number(i.quantity) || 0)
+        const unitPriceGross = Number(i.unitPriceGross ?? i.price)
+        const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
+        const discountAmount = Number(i.discountAmount ?? 0)
+        const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
+        expectedTotal = Math.round((expectedTotal + netAmount) * 100) / 100
+        const key = `${i.productCode}|${unitPriceGross}|${i.vatRate}`
+        const existing = groupMap.get(key)
+        if (existing) {
+          existing.quantity = Math.round((existing.quantity + qty) * 1000) / 1000
+          existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
+          existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
+          existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
+          if (existing.product_id === 0 && i.productId) {
+            existing.product_id = Number.parseInt(i.productId, 10) || 0
+          }
+        } else {
+          groupMap.set(key, {
+            product_code: i.productCode,
+            name:         i.productName ?? i.productCode,
+            quantity:     qty,
+            vatRate:      i.vatRate,
+            unit:         i.unit ?? 'Adet',
+            product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
+            unit_price_gross: unitPriceGross,
+            gross_amount: grossAmount,
+            discount_amount: discountAmount,
+            net_amount: netAmount,
+          })
+        }
+      }
+    }
+
+    if (badSaleIds.length > 0) {
+      const badNames: string[] = []
+      for (const sid of badSaleIds) {
+        for (const i of getSaleItems(sid)) {
+          if (!String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate))) {
+            badNames.push(i.productName ?? '?')
+          }
+        }
+      }
+      const msg = `Ürün kodu/KDV eksik: ${badNames.join(', ')}`
+      const at = new Date().toISOString()
+      const markErr = db.prepare(`
+        UPDATE sales SET invoice_sent = 2, invoice_error = ?, invoice_at = ?
+        WHERE id = ?
+      `)
+      for (const sid of badSaleIds) markErr.run(msg, at, sid)
+      return {
+        queued: false,
+        queueId: null,
+        saleCount: 0,
+        fail: rows.length,
+        error: msg,
+      } satisfies EnqueueDayEndResult
+    }
+
+    if (groupMap.size === 0) {
+      return { queued: false, queueId: null, saleCount: 0, fail: 0 } satisfies EnqueueDayEndResult
+    }
+
+    const now = new Date()
+    const saatStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const description = `Gün Sonu — ${tarihStr} ${saatStr} (${rows.length} fiş)`
+    const invoiceDate = now.toISOString().replace('T', ' ').slice(0, 19)
+    const daySaleId = 'gunsonu-' + now.toISOString().slice(0, 10)
+    const pendingSaleIds = rows.map(s => s.id)
+    const cardByBank = getCardTotalsByBank(db, pendingSaleIds)
+    const cashTotal = getCashTotal(db, pendingSaleIds)
+    const cardAmount = rows.reduce((sum, s) => sum + Number(s.card_amount ?? 0), 0)
+    const paymentAccounts = matchPaymentAccounts(db, {
+      cashAmount: cashTotal,
+      cardAmount,
+      cardAcquirerId: null,
+      cardByBank,
+    })
+
+    const queueId = randomUUID()
+    const payload = {
+      sale_id:          daySaleId,
+      day_end_sale_ids: pendingSaleIds,
+      customer_ref:     torbaRef,
+      items:            Array.from(groupMap.values()),
+      expected_total:   expectedTotal,
+      invoice_date:     invoiceDate,
+      description,
+      endpoint,
+      cash_amount:      cashTotal,
+      card_amount:      cardAmount,
+      card_acquirer_id: null as string | null,
+      card_by_bank:     cardByBank,
+      terminal_id:      params.terminalId,
+      payment_accounts: paymentAccounts,
+    }
+
+    db.prepare(`
+      INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
+      VALUES (?, ?, 'day_end_invoice', ?, 'pending', 0, ?, ?)
+    `).run(
+      queueId,
+      params.companyId,
+      JSON.stringify(payload),
+      now.toISOString(),
+      `Gün Sonu ${tarihStr} (${invoiceType === 'paper' ? 'Kağıt' : 'E-Arşiv'})`,
+    )
+
+    const mark = db.prepare(`UPDATE sales SET day_end_queue_id = ? WHERE id = ?`)
+    for (const r of rows) mark.run(queueId, r.id)
+
+    return {
+      queued: true,
+      queueId,
+      saleCount: rows.length,
+      fail: 0,
+    } satisfies EnqueueDayEndResult
+  })
+
+  return run()
+}
+
 export function enqueueOperation(params: {
   id:        string
   companyId: string
@@ -1889,27 +2080,55 @@ export function enqueueOperation(params: {
   payload:   Record<string, unknown>
   label?:    string
   status?:   'pending' | 'pending_dayend'
-}): void {
+}): { inserted: boolean } {
   const db = getSqlite()
   const status = params.status ?? 'pending'
-  if (params.type === 'terminal_local_settings' || params.type === 'payment_device' || params.type === 'app_report') {
+  const run = db.transaction(() => {
+    if (params.type === 'payment') {
+      const invoiceId = String(params.payload.invoice_id ?? '').trim()
+      if (invoiceId) {
+        const dup = db.prepare(`
+          SELECT id FROM operation_queue
+          WHERE type = 'payment'
+            AND json_extract(payload, '$.invoice_id') = ?
+          LIMIT 1
+        `).get(invoiceId)
+        if (dup) return false
+      }
+    }
+    if (params.type === 'invoice') {
+      const saleId = String(params.payload.sale_id ?? '').trim()
+      if (saleId) {
+        const dup = db.prepare(`
+          SELECT id FROM operation_queue
+          WHERE type = 'invoice'
+            AND json_extract(payload, '$.sale_id') = ?
+          LIMIT 1
+        `).get(saleId)
+        if (dup) return false
+      }
+    }
+    if (params.type === 'terminal_local_settings' || params.type === 'payment_device' || params.type === 'app_report') {
+      db.prepare(`
+        DELETE FROM operation_queue
+        WHERE company_id = ? AND type = ? AND status = 'pending'
+      `).run(params.companyId, params.type)
+    }
     db.prepare(`
-      DELETE FROM operation_queue
-      WHERE company_id = ? AND type = ? AND status = 'pending'
-    `).run(params.companyId, params.type)
-  }
-  db.prepare(`
-    INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?)
-  `).run(
-    params.id,
-    params.companyId,
-    params.type,
-    JSON.stringify(params.payload),
-    status,
-    new Date().toISOString(),
-    params.label ?? null,
-  )
+      INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+    `).run(
+      params.id,
+      params.companyId,
+      params.type,
+      JSON.stringify(params.payload),
+      status,
+      new Date().toISOString(),
+      params.label ?? null,
+    )
+    return true
+  })
+  return { inserted: run() }
 }
 
 export function markOperationDone(id: string): void {
@@ -2021,7 +2240,21 @@ export function markOperationManuallySent(id: string, note: string): void {
 
 export function deleteOperation(id: string): void {
   const db = getSqlite()
-  db.prepare(`DELETE FROM operation_queue WHERE id = ?`).run(id)
+  const run = db.transaction(() => {
+    const row = db.prepare(`
+      SELECT type FROM operation_queue WHERE id = ?
+    `).get(id) as { type: string } | undefined
+    db.prepare(`DELETE FROM operation_queue WHERE id = ?`).run(id)
+    if (row?.type === 'day_end_invoice') {
+      db.prepare(`
+        UPDATE sales
+        SET day_end_queue_id = NULL
+        WHERE day_end_queue_id = ?
+          AND invoice_sent = 0
+      `).run(id)
+    }
+  })
+  run()
 }
 
 export interface SalesReportRow {
@@ -2156,6 +2389,11 @@ export interface CariPaymentReportRow {
 
 export function saveCariPayment(row: CariPaymentSaveRow): void {
   const db = getSqlite()
+  const method = row.method ?? null
+  if (row.type === 'odeme' && method !== 'cash') {
+    console.warn('[cari-odeme] blocked non-cash', { id: row.id, method })
+    throw new Error('Cari ödeme yalnızca nakit olabilir')
+  }
   db.prepare(`
     INSERT INTO cari_payments
       (id, company_id, type, amount, customer_id, customer_name,
@@ -2166,7 +2404,7 @@ export function saveCariPayment(row: CariPaymentSaveRow): void {
     row.customerId ?? null, row.customerName ?? null,
     row.customerCode ?? null, row.cashierId ?? null,
     row.cashierName ?? null, row.description ?? null,
-    row.createdAt, row.method ?? null,
+    row.createdAt, method,
   )
 }
 
@@ -2414,6 +2652,15 @@ export function computeCashReconciliation(opts: {
       AND (? = '' OR cashier_id = ?)
   `).all(opts.companyId, opts.startIso, opts.endIso, cashier, cashier) as Array<Record<string, unknown>>
 
+  const disbursements = db.prepare(`
+    SELECT amount, method
+    FROM cari_payments
+    WHERE company_id = ?
+      AND type = 'odeme'
+      AND created_at >= ? AND created_at <= ?
+      AND (? = '' OR cashier_id = ?)
+  `).all(opts.companyId, opts.startIso, opts.endIso, cashier, cashier) as Array<Record<string, unknown>>
+
   const defs = loadReconDefs(opts.terminalId)
 
   return aggregateReconciliation({
@@ -2435,6 +2682,10 @@ export function computeCashReconciliation(opts: {
       isReturn: Number(r.is_return ?? 0) === 1,
     })),
     collections: collections.map(r => ({
+      amount: Number(r.amount ?? 0),
+      method: r.method != null ? String(r.method) : null,
+    })),
+    disbursements: disbursements.map(r => ({
       amount: Number(r.amount ?? 0),
       method: r.method != null ? String(r.method) : null,
     })),

@@ -69,10 +69,16 @@ export function expectedCash(parts: {
   cashSales: number
   cashCollections: number
   cashRefunds: number
+  cashPayments: number
   cashOut: number
 }): number {
   return round2(
-    parts.opening + parts.cashSales + parts.cashCollections - parts.cashRefunds - parts.cashOut,
+    parts.opening
+    + parts.cashSales
+    + parts.cashCollections
+    - parts.cashRefunds
+    - parts.cashPayments
+    - parts.cashOut,
   )
 }
 
@@ -140,6 +146,8 @@ export interface ReconSnapshot {
   others: ReconSystemLine[]
   cashSales: number
   cashCollections: number
+  /** Nakit cari ödemeler (kasadan çıkan) */
+  cashPayments: number
   cashRefunds: number
   onAccount: number
   discount: number
@@ -151,6 +159,8 @@ export function aggregateReconciliation(input: {
   sales: ReconSaleRow[]
   payments: ReconPaymentRow[]
   collections: ReconCariRow[]
+  /** Cari ödeme kayıtları (type=odeme) */
+  disbursements?: ReconCariRow[]
   banks: ReconBankDef[]
   brands: ReconBrandDef[]
 }): ReconSnapshot {
@@ -218,6 +228,15 @@ export function aggregateReconciliation(input: {
     else cashCollections = round2(cashCollections + amount)
   }
 
+  let cashPayments = 0
+  for (const row of input.disbursements ?? []) {
+    const amount = Number(row.amount) || 0
+    const method = String(row.method ?? 'cash')
+    // Kartlı eski cari ödemeler kasadaki nakiti etkilemez
+    if (method === 'card') continue
+    cashPayments = round2(cashPayments + amount)
+  }
+
   let onAccount = 0
   let discount = 0
   let saleCount = 0
@@ -261,6 +280,7 @@ export function aggregateReconciliation(input: {
     others,
     cashSales,
     cashCollections,
+    cashPayments,
     cashRefunds,
     onAccount,
     discount,
@@ -358,6 +378,7 @@ export function buildLockedLines(
     cashSales: snapshot.cashSales,
     cashCollections: snapshot.cashCollections,
     cashRefunds: snapshot.cashRefunds,
+    cashPayments: snapshot.cashPayments,
     cashOut: entry.cashOut,
   })
   lines.push({

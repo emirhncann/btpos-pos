@@ -27,87 +27,9 @@ export async function sendPendingInvoices(
   companyId: string,
   opts?: SendPendingInvoicesOpts,
 ): Promise<{ ok: number; fail: number }> {
-  const pending = await window.electron.db.getPendingInvoices(true)
-  if (pending.length === 0) return { ok: 0, fail: 0 }
-
   const settings = await window.electron.db.getTerminalSettings()
   const invoiceType: 'e_archive' | 'paper' = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
   const torbaRef = customerRefTorba()
-
-  type DayEndErpLine = {
-    product_code: string
-    name: string
-    quantity: number
-    vatRate: number
-    unit: string
-    product_id: number
-    unit_price_gross: number
-    gross_amount: number
-    discount_amount: number
-    net_amount: number
-  }
-
-  const groupMap = new Map<string, DayEndErpLine>()
-  let expectedTotal = 0
-
-  for (const sale of pending) {
-    const items = await window.electron.db.getSaleItems(sale.id)
-    for (const i of items) {
-      const qty = Math.abs(Number(i.quantity) || 0)
-      const unitPriceGross = Number(i.unitPriceGross ?? i.price)
-      const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
-      const discountAmount = Number(i.discountAmount ?? 0)
-      const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
-      expectedTotal = Math.round((expectedTotal + netAmount) * 100) / 100
-      const key = `${i.productCode}|${unitPriceGross}|${i.vatRate}`
-      const existing = groupMap.get(key)
-      if (existing) {
-        existing.quantity = Math.round((existing.quantity + qty) * 1000) / 1000
-        existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
-        existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
-        existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
-        if (existing.product_id === 0 && i.productId) {
-          existing.product_id = Number.parseInt(i.productId, 10) || 0
-        }
-      } else {
-        groupMap.set(key, {
-          product_code: i.productCode,
-          name:         i.productName ?? i.productCode,
-          quantity:     qty,
-          vatRate:      i.vatRate,
-          unit:         i.unit ?? 'Adet',
-          product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
-          unit_price_gross: unitPriceGross,
-          gross_amount: grossAmount,
-          discount_amount: discountAmount,
-          net_amount: netAmount,
-        })
-      }
-    }
-  }
-
-  const allItems = Array.from(groupMap.values())
-
-  // Görev 3 — kodsuz/KDV'siz satır varsa gün sonu ERP'ye gitmesin
-  const badLines = allItems.filter(
-    i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
-  )
-  if (badLines.length > 0) {
-    const msg = `Ürün kodu/KDV eksik: ${badLines.map(b => b.name).join(', ')}`
-    for (const sale of pending) {
-      const items = await window.electron.db.getSaleItems(sale.id)
-      const saleBad = items.some(
-        i => !String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
-      )
-      if (saleBad) {
-        await window.electron.db.markInvoiceError(sale.id, msg)
-      }
-    }
-    if (!opts?.silent) {
-      window.alert(`✕ Gün sonu oluşturulamadı\n${msg}`)
-    }
-    return { ok: 0, fail: pending.length }
-  }
   const now = new Date()
   const saatStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
   const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -209,9 +131,18 @@ export async function sendPendingInvoices(
     }
   }
 
-  if (allItems.length === 0 && returnBatchCount === 0) return { ok: 0, fail: 0 }
+  const dayEnd = await window.electron.db.enqueueDayEndInvoicePackage(companyId)
 
-  if (allItems.length === 0) {
+  if (!dayEnd.queued && dayEnd.fail > 0) {
+    if (!opts?.silent) {
+      window.alert(`✕ Gün sonu oluşturulamadı\n${dayEnd.error ?? 'Hata'}`)
+    }
+    return { ok: returnBatchCount, fail: dayEnd.fail }
+  }
+
+  if (!dayEnd.queued && returnBatchCount === 0) return { ok: 0, fail: 0 }
+
+  if (!dayEnd.queued) {
     if (!opts?.silent && returnBatchCount > 0) {
       window.alert(
         `✓ Gün sonu iade kuyruğa eklendi\n${returnBatchCount} iade işlenecek\nİnternet bağlantısında otomatik gönderilecek.`,
@@ -220,48 +151,15 @@ export async function sendPendingInvoices(
     return { ok: returnBatchCount, fail: 0 }
   }
 
-  const description = `Gün Sonu — ${tarihStr} ${saatStr} (${pending.length} fiş)`
-  const invoiceDate = now.toISOString().replace('T', ' ').slice(0, 19)
-  const daySaleId = 'gunsonu-' + now.toISOString().slice(0, 10)
-  const endpoint = invoiceType === 'paper'
-    ? `/integration/invoice-paper/${companyId}`
-    : `/integration/invoice/${companyId}`
-  const pendingSaleIds = pending.map(s => s.id)
-  const cardByBank = await window.electron.db.getCardTotalsByBank(pendingSaleIds)
-  const cashTotal = await window.electron.db.getCashTotal(pendingSaleIds)
-
-  const payload = {
-    sale_id:           daySaleId,
-    day_end_sale_ids:  pending.map(s => s.id),
-    customer_ref:      torbaRef,
-    items:             allItems,
-    expected_total:    expectedTotal,
-    invoice_date:      invoiceDate,
-    description,
-    endpoint,
-    cash_amount: cashTotal,
-    card_amount: pending.reduce((sum, s) => sum + Number(s.cardAmount ?? 0), 0),
-    card_acquirer_id: null as string | null,
-    card_by_bank: cardByBank,
-  }
-
-  await window.electron.db.enqueueOperation({
-    id:        crypto.randomUUID(),
-    companyId,
-    type:      'day_end_invoice',
-    payload:   await withTerminalPayment(payload),
-    label:     `Gün Sonu ${tarihStr} (${invoiceType === 'paper' ? 'Kağıt' : 'E-Arşiv'})`,
-  })
-
   if (!opts?.silent) {
-    const parts = [`${pending.length} fiş`]
+    const parts = [`${dayEnd.saleCount} fiş`]
     if (returnBatchCount > 0) parts.push(`${returnBatchCount} iade`)
     window.alert(
       `✓ Gün sonu kuyruğa eklendi\n${parts.join(', ')} işlenecek\nİnternet bağlantısında otomatik gönderilecek.`,
     )
   }
 
-  return { ok: pending.length + returnBatchCount, fail: 0 }
+  return { ok: dayEnd.saleCount + returnBatchCount, fail: 0 }
 }
 
 /** Cari seçili satış sonrası fatura — kuyruğa yazılır */

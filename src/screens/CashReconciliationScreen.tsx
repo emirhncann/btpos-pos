@@ -439,6 +439,7 @@ export default function CashReconciliationScreen({
         opening: openingN,
         cash_sales: snapshot.cashSales,
         cash_collections: snapshot.cashCollections,
+        cash_payments: snapshot.cashPayments,
         cash_refunds: snapshot.cashRefunds,
         cash_out: cashOutN,
         expected: built.expected,
@@ -740,7 +741,10 @@ export default function CashReconciliationScreen({
               })}
             </div>
             <div style={{ color: 'var(--pos-text-muted)' }}>
-              Devir {money(openingN)} + Nakit satış {money(snap.cashSales)} + Nakit tahsilat {money(snap.cashCollections)} − Nakit iade {money(snap.cashRefunds)} − Çıkan {money(cashOutN)}
+              Devir {money(openingN)} + Nakit satış {money(snap.cashSales)} + Nakit tahsilat {money(snap.cashCollections)}
+              {' '}− Nakit iade {money(snap.cashRefunds)}
+              {' '}− Cari ödeme {money(snap.cashPayments)}
+              {' '}− Çıkan {money(cashOutN)}
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>Olması gereken</span><strong>{money(expected)}</strong>

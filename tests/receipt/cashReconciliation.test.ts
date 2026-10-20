@@ -54,6 +54,11 @@ describe('hesap alma', () => {
         { amount: 150, method: 'cash' },
         { amount: 20, method: 'card' },
       ],
+      disbursements: [
+        { amount: 1250, method: 'cash' },
+        { amount: 200, method: 'card' },
+        { amount: 50, method: null },
+      ],
     })
     expect(snap.cards.map(c => [c.label, c.system])).toEqual([
       ['AktifBank', 1220],
@@ -65,6 +70,7 @@ describe('hesap alma', () => {
       ['Sodexo', 0],
     ])
     expect(snap.cashCollections).toBe(150)
+    expect(snap.cashPayments).toBe(1300)
     expect(snap.onAccount).toBe(16)
     expect(snap.discount).toBe(10)
     expect(snap.saleCount).toBe(2)
@@ -77,8 +83,17 @@ describe('hesap alma', () => {
       cashSales: 3200,
       cashCollections: 150,
       cashRefunds: 80,
+      cashPayments: 0,
       cashOut: 0,
     })).toBe(3770)
+    expect(expectedCash({
+      opening: 500,
+      cashSales: 3200,
+      cashCollections: 150,
+      cashRefunds: 80,
+      cashPayments: 1250,
+      cashOut: 100,
+    })).toBe(2420)
     expect(enteredDiff(3765, 3770)).toBe(-5)
     expect(denominationTotal({ '200': 1, '100': 1, '050': 2, '005': 1 })).toBe(301.05)
     expect(diffTone(0)).toBe('ok')
@@ -110,6 +125,7 @@ describe('hesap alma', () => {
       others: [{ group: 'other', key: '14', label: 'Multinet', system: 120 }],
       cashSales: 3200,
       cashCollections: 150,
+      cashPayments: 0,
       cashRefunds: 80,
       onAccount: 900,
       discount: 45,

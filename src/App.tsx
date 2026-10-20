@@ -190,7 +190,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isOnline || !companyId) return
-    window.electron.db.getPendingInvoices()
+    window.electron.db.getPendingInvoices(true)
       .then(async pending => {
         if (pending.length > 0) {
           await sendPendingInvoices(companyId, { silent: true })

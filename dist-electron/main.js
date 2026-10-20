@@ -6,5 +6,5 @@ require("fs");
 require("path");
 require("os");
 require("electron-store");
-const main = require("./main-BxThzexh.js");
+const main = require("./main-C-zLTCit.js");
 exports.applyCustomerDisplay = main.applyCustomerDisplay;

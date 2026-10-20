@@ -1320,6 +1320,12 @@ app.whenReady().then(async () => {
     upsertCustomer(row as import('../db/operations').CustomerRow)
   })
 
+  ipcMain.handle('db:enqueueDayEndInvoicePackage', async (_e, companyId: string) => {
+    const { enqueueDayEndInvoicePackage } = await import('../db/operations')
+    const terminalId = String(store.get('terminal_id') ?? '')
+    return enqueueDayEndInvoicePackage({ companyId, terminalId })
+  })
+
   ipcMain.handle('db:enqueueOperation', async (_e, params: {
     id: string
     companyId: string
@@ -1329,7 +1335,7 @@ app.whenReady().then(async () => {
     status?: 'pending' | 'pending_dayend'
   }) => {
     const { enqueueOperation } = await import('../db/operations')
-    enqueueOperation(params)
+    return enqueueOperation(params)
   })
 
   ipcMain.handle('db:getPendingReturnInvoices', async (_e, companyId: string) => {

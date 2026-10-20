@@ -178,6 +178,8 @@ contextBridge.exposeInMainWorld('electron', {
     getProductByName:  (name: string) => ipcRenderer.invoke('db:getProductByName', name),
     getProductIdByCode: (code: string) => ipcRenderer.invoke('db:getProductIdByCode', code),
     upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),
+    enqueueDayEndInvoicePackage: (companyId: string) =>
+      ipcRenderer.invoke('db:enqueueDayEndInvoicePackage', companyId),
     enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
     getPendingReturnInvoices: (companyId: string) =>
       ipcRenderer.invoke('db:getPendingReturnInvoices', companyId),

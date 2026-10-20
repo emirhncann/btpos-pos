@@ -51,6 +51,8 @@ export const sales = sqliteTable('sales', {
   paymentProvider:   text('payment_provider'),
   paymentDeviceData: text('payment_device_data'),
   isReturn:          integer('is_return').default(0),
+  /** Gün sonu kuyruk satırı id — doluysa ikinci pakete girmez */
+  dayEndQueueId:     text('day_end_queue_id'),
 })
 
 export const saleItems = sqliteTable('sale_items', {

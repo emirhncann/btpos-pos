@@ -235,6 +235,13 @@ declare global {
         } | null>
         getProductIdByCode: (code: string) => Promise<string | null>
         upsertCustomer:    (row: CustomerRow) => Promise<void>
+        enqueueDayEndInvoicePackage: (companyId: string) => Promise<{
+          queued: boolean
+          queueId: string | null
+          saleCount: number
+          fail: number
+          error?: string
+        }>
         enqueueOperation:  (params: {
           id: string
           companyId: string
@@ -242,7 +249,7 @@ declare global {
           payload: Record<string, unknown>
           label?: string
           status?: 'pending' | 'pending_dayend'
-        }) => Promise<void>
+        }) => Promise<{ inserted: boolean }>
         getPendingReturnInvoices(companyId: string): Promise<OperationQueueRow[]>
         markOperationDone(id: string): Promise<{ success: boolean }>
         getPendingOperations: (companyId: string) => Promise<OperationQueueRow[]>
@@ -494,6 +501,7 @@ declare global {
     others: Array<{ group: 'card' | 'other'; key: string; label: string; system: number }>
     cashSales: number
     cashCollections: number
+    cashPayments: number
     cashRefunds: number
     onAccount: number
     discount: number

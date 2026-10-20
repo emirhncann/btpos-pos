@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 11
+export const SCHEMA_VERSION = 13
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -108,7 +108,8 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       card_acquirer_id TEXT,
       payment_provider TEXT,
       payment_device_data TEXT,
-      is_return INTEGER DEFAULT 0
+      is_return INTEGER DEFAULT 0,
+      day_end_queue_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -515,6 +516,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   if (!salesCols.includes('payment_provider')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_provider TEXT')
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
   if (!salesCols.includes('is_return')) sqlite.exec('ALTER TABLE sales ADD COLUMN is_return INTEGER DEFAULT 0')
+  if (!salesCols.includes('day_end_queue_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN day_end_queue_id TEXT')
 
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
