@@ -1,6 +1,7 @@
 /** Kasa ve kasiyer ayarları. İki nesne birleştirilmez. */
 
 import { buttonColorsToJson } from '../theme/buttonColors'
+import { parseInvoiceMode } from './invoiceMode'
 
 export interface TerminalInfo {
   terminalName?: string
@@ -12,6 +13,8 @@ export interface TerminalSettings {
   touchKeyboard: boolean
   customerDisplay: boolean
   invoiceType: 'e_archive' | 'paper'
+  /** Carisiz satış: z_single gün sonunda tek fatura, per_sale her satış ayrı. */
+  invoiceMode: 'z_single' | 'per_sale'
   torbaCariId: string | null
   torbaCariName: string | null
   cariPaymentUsePavo: boolean
@@ -86,6 +89,7 @@ export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   touchKeyboard: true,
   customerDisplay: false,
   invoiceType: 'e_archive',
+  invoiceMode: 'z_single',
   torbaCariId: null,
   torbaCariName: null,
   cariPaymentUsePavo: false,
@@ -269,6 +273,7 @@ export function parseTerminalSettings(row: Record<string, unknown>): TerminalSet
     touchKeyboard: asBool(pickRow(row, 'touchKeyboard', 'touch_keyboard'), true),
     customerDisplay: asBool(pickRow(row, 'customerDisplay', 'customer_display'), false),
     invoiceType: invoice === 'paper' ? 'paper' : 'e_archive',
+    invoiceMode: parseInvoiceMode(pickRow(row, 'invoiceMode', 'invoice_mode')),
     torbaCariId: strOrNull(pickRow(row, 'torbaCariId', 'torba_cari_id')),
     torbaCariName: strOrNull(pickRow(row, 'torbaCariName', 'torba_cari_name')),
     cariPaymentUsePavo: asBool(pickRow(row, 'cariPaymentUsePavo', 'cari_payment_use_pavo'), false),

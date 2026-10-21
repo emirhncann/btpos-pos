@@ -45,6 +45,7 @@ export const sales = sqliteTable('sales', {
   cashierName:    text('cashier_name'),
   invoiceSent:    integer('invoice_sent').notNull().default(0),
   invoiceId:      text('invoice_id'),
+  invoiceNumber:  text('invoice_number'),
   invoiceError:   text('invoice_error'),
   invoiceAt:      text('invoice_at'),
   cardAcquirerId: text('card_acquirer_id'),
@@ -53,6 +54,10 @@ export const sales = sqliteTable('sales', {
   isReturn:          integer('is_return').default(0),
   /** Gün sonu kuyruk satırı id — doluysa ikinci pakete girmez */
   dayEndQueueId:     text('day_end_queue_id'),
+  /** Satış anındaki fatura gönderim şekli: z_single | per_sale */
+  invoiceMode:       text('invoice_mode'),
+  /** Admin gün sonu koşusu. Doluysa satış o koşuya bağlıdır. */
+  dayEndRunId:       text('day_end_run_id'),
 })
 
 export const saleItems = sqliteTable('sale_items', {

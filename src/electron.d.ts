@@ -220,7 +220,7 @@ declare global {
         getSaleErpEffect: (key: string) => Promise<{ invoiceSent: boolean; paymentsSentTotal: number }>
         getCustomerByCode:  (companyId: string, code: string) => Promise<CustomerRow | null>
         getPendingInvoices: (onlyAnonymous?: boolean) => Promise<SaleDbRow[]>
-        markInvoiceSent:   (saleId: string, invoiceId: string) => Promise<void>
+        markInvoiceSent:   (saleId: string, invoiceId: string, invoiceNumber?: string | null) => Promise<void>
         markInvoiceError:  (saleId: string, error: string) => Promise<void>
         getSaleItems:      (saleId: string) => Promise<SaleItemRow[]>
         getSaleByReceiptNo(receiptNo: string): Promise<{ id: string; receiptNo: string } | null>
@@ -235,7 +235,31 @@ declare global {
         } | null>
         getProductIdByCode: (code: string) => Promise<string | null>
         upsertCustomer:    (row: CustomerRow) => Promise<void>
-        enqueueDayEndInvoicePackage: (companyId: string) => Promise<{
+        applyDayEndRun: (input: {
+          companyId: string
+          terminalId: string
+          runId: string
+          rangeStart: string
+          rangeEnd: string
+          rangeLabel: string
+          invoiceMode?: string
+          terminalNo?: string
+        }) => Promise<{ empty: boolean; saleCount: number; refundCount: number; docCount: number }>
+        dayEndRunStatus: (runId: string) => Promise<string | null>
+        countDayEndProcessing: (runId: string) => Promise<number>
+        releaseDayEndRun: (runId: string) => Promise<void>
+        markDayEndRunStatus: (runId: string, status: string) => Promise<void>
+        rememberQueueInvoice: (queueId: string, invoiceId: string, invoiceNumber?: string | null) => Promise<void>
+        enqueueDayEndPayments: (input: {
+          queueId: string
+          invoiceId: string
+          invoiceNumber?: string | null
+          customerId?: number
+          customerCode?: string
+          customerName?: string
+        }) => Promise<number>
+        settleDayEndRuns: (companyId: string) => Promise<Array<{ runId: string; body: Record<string, unknown> }>>
+        enqueueDayEndInvoicePackage: (companyId: string, scope?: 'z' | 'previous_days') => Promise<{
           queued: boolean
           queueId: string | null
           saleCount: number
@@ -487,7 +511,9 @@ declare global {
     createdAt:    string
     invoiceSent:  number
     invoiceId:    string | null
+    invoiceNumber: string | null
     invoiceError: string | null
+    dayEndRunId:  string | null
     isReturn:     number
     payments: Array<{
       method:       string
@@ -541,6 +567,7 @@ declare global {
     createdAt:   string
     sentAt:      string | null
     label:       string | null
+    invoiceNumber: string | null
   }
 
   interface CommandHistoryRow {
@@ -642,6 +669,7 @@ declare global {
   interface SaveSaleResult {
     saleId:    string
     receiptNo: string
+    invoiceMode: 'z_single' | 'per_sale'
   }
 
   interface SaleRow {

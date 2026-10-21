@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import AppLogo from '../components/AppLogo'
-import { sendPendingInvoices } from '../lib/invoiceSend'
+import { nowLocalInput, periodBoundIso } from '../lib/cashReconciliation'
+import { setPosBoot, type PosBoot } from '../lib/posBoot'
+import { useSettings } from '../hooks/useSettings'
+import { CashierHome, EMPTY_HOME_STATS, ManagerGate, type Gate, type HomeStats } from './CashierHome'
+import { CommandsScreen } from './CommandsScreen'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
 import { scheduleProcessQueue, useQueueWorker } from '../hooks/useQueueWorker'
 import { DocumentQueueScreen } from './DocumentQueueScreen'
@@ -16,39 +19,8 @@ import { scheduleLocalSettingsBackup } from '../lib/localSettings'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
 import { C, solidBtn } from '../theme/colors'
-import { PosUndefinedBadge } from '../components/PosUndefinedBadge'
-import { POS_UNDEFINED_MESSAGE } from '../services/pos/posReadiness'
-import { isPosReady, refreshPosReady, usePosReady } from '../store/posReady'
-
-const CMD_LABELS: Record<string, string> = {
-  sync_all:       'Tüm veriler güncellendi',
-  sync_products:  'Ürünler güncellendi',
-  sync_prices:    'Fiyatlar güncellendi',
-  sync_plu:       'PLU grupları güncellendi',
-  sync_cashiers:  'Kasiyerler güncellendi',
-  sync_customers: 'Cariler güncellendi',
-  sync_settings:  'Ayarlar güncellendi',
-  sync_templates: 'Fiş şablonları güncellendi',
-  logout:         'Kasiyer çıkışı yapıldı',
-  message:        'Yönetici mesajı alındı',
-  restart:        'Uygulama yeniden başlatıldı',
-  lock:           'Kasa kilitlendi',
-}
-
-const CMD_COLORS: Record<string, { bg: string; icon: string }> = {
-  sync_all:       { bg: C.primary, icon: '📦' },
-  sync_products:  { bg: C.primary, icon: '🔄' },
-  sync_prices:    { bg: C.success, icon: '💰' },
-  sync_plu:       { bg: C.warning, icon: '🏷️' },
-  sync_cashiers:  { bg: C.online, icon: '👤' },
-  sync_customers: { bg: C.meal, icon: '🏢' },
-  sync_settings:  { bg: C.neutral, icon: '⚙️' },
-  sync_templates: { bg: C.success, icon: '🧾' },
-  logout:         { bg: C.warning, icon: '🚪' },
-  message:        { bg: C.success, icon: '💬' },
-  restart:        { bg: C.warning, icon: '🔁' },
-  lock:           { bg: C.danger, icon: '🔒' },
-}
+import { isPosDefined } from '../services/pos/posReadiness'
+import { getPosSnapshot, refreshPosReady, usePosReady } from '../store/posReady'
 
 interface Props {
   companyId:              string
@@ -67,11 +39,17 @@ interface Props {
   cartActive?:            boolean
 }
 
-interface DailySummary {
-  saleCount:  number
-  totalSales: number
-  totalCash:  number
-  totalCard:  number
+function istanbulDayStart(): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const y = parts.find(p => p.type === 'year')?.value ?? '1970'
+  const m = parts.find(p => p.type === 'month')?.value ?? '01'
+  const d = parts.find(p => p.type === 'day')?.value ?? '01'
+  return `${y}-${m}-${d}T00:00:00`
 }
 
 export default function DashboardScreen({
@@ -88,11 +66,16 @@ export default function DashboardScreen({
 }: Props) {
   void _onPluUpdated
   void _onSettingsUpdated
-  const [summary, setSummary]       = useState<DailySummary>({ saleCount: 0, totalSales: 0, totalCash: 0, totalCard: 0 })
-  const [time, setTime]             = useState(new Date())
+  void commandSyncing
   const [toast, setToast]           = useState<string | null>(null)
-  const [cmdHistory, setCmdHistory] = useState<CommandHistoryRow[]>([])
   const [heldCount, setHeldCount]   = useState(0)
+  const [home, setHome]             = useState<HomeStats>(EMPTY_HOME_STATS)
+  const homeKey = useRef('')
+  const [appVersion, setAppVersion] = useState('')
+  const [gate, setGate]             = useState<Gate | null>(null)
+  const [amountsUntil, setAmountsUntil] = useState(0)
+  const overlayWas = useRef(false)
+  const terminal = useSettings().terminal
   const [showSettings, setShowSettings] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'screen' | 'payment' | 'device' | 'general' | 'update' | 'license'>('screen')
   const [generalUnlocked, setGeneralUnlocked] = useState(false)
@@ -107,42 +90,106 @@ export default function DashboardScreen({
   const [pavoDeviceInfo, setPavoDeviceInfo] = useState<{ ip: string; port: number } | null>(null)
   const [showQueue, setShowQueue] = useState(false)
   const [showSalesReport, setShowSalesReport] = useState(false)
+  const [showCommands, setShowCommands] = useState(false)
   const [showRecon, setShowRecon] = useState(false)
   const [showReconHistory, setShowReconHistory] = useState(false)
   const [pavoPendingCount, setPavoPendingCount] = useState(0)
   const [reconBlock, setReconBlock] = useState(false)
-  const [invoiceSending, setInvoiceSending] = useState(false)
 
   const isOnline = useConnectionStatus(30) === 'online'
+  const [statsTick, setStatsTick] = useState(0)
   const { processQueue } = useQueueWorker({
     companyId,
     isOnline,
-    onToast: () => {},
+    onToast: () => setStatsTick(n => n + 1),
   })
   const { dialogProps, showError, showInfo } = useAlertDialog()
-  const posReady = usePosReady()
+  usePosReady()
+  const posDefined = isPosDefined(getPosSnapshot())
+
+  const loadHome = useCallback(async () => {
+    try {
+      const startIso = periodBoundIso(istanbulDayStart(), 'start')
+      const endIso = periodBoundIso(nowLocalInput(), 'end')
+      const [ops, lastSale, held, printer, docPrinter, scale, recons, snap] = await Promise.all([
+        window.electron.db.getAllOperations(companyId, 500),
+        window.electron.db.getLastSale(),
+        window.electron.db.getHeldDocuments(companyId),
+        window.electron.printer.getSettings().catch(() => null),
+        window.electron.printer.getDocSettings().catch(() => null),
+        window.electron.scale.getSettings().catch(() => null),
+        window.electron.db.listCashReconciliations(terminalId),
+        startIso && endIso
+          ? window.electron.db.computeCashReconciliation({ companyId, terminalId, startIso, endIso, cashierId: null })
+          : Promise.resolve(null),
+      ])
+      let pending = 0
+      let failed = 0
+      let lastSent: string | null = null
+      for (const op of ops) {
+        if (op.status === 'pending' || op.status === 'pending_dayend' || op.status === 'processing') pending += 1
+        else if (op.status === 'failed') failed += 1
+        if (op.status === 'success' && op.sentAt && (!lastSent || op.sentAt > lastSent)) lastSent = op.sentAt
+      }
+      const card = snap ? snap.cards.reduce((s, line) => s + line.system, 0) : 0
+      const other = snap ? snap.others.reduce((s, line) => s + line.system, 0) : 0
+      const cash = snap ? snap.cashSales - snap.cashRefunds : 0
+      const next: HomeStats = {
+        pending,
+        failed,
+        lastSent,
+        lastReceipt: lastSale?.receiptNo ?? null,
+        held: held.length,
+        saleCount: snap?.saleCount ?? 0,
+        cash,
+        card,
+        total: cash + card + other,
+        printer: Boolean(
+          (printer && printer.is_active !== 0 && printer.is_active !== false && (printer.printer_name || printer.printer_ip))
+          || docPrinter?.printer_name,
+        ),
+        scale: Boolean(scale && Number(scale.enabled) === 1 && scale.port_path),
+        lastReconAt: recons[0]?.lockedAt || recons[0]?.createdAt || null,
+        lastReconDiff: recons[0] ? recons[0].totalDiff : null,
+      }
+      const key = JSON.stringify(next)
+      if (key === homeKey.current) return
+      homeKey.current = key
+      setHome(next)
+      setHeldCount(next.held)
+    } catch { /* yerel okuma */ }
+  }, [companyId, terminalId])
 
   useEffect(() => {
     void countPavoPendingSales().then(setPavoPendingCount).catch(() => setPavoPendingCount(0))
     void refreshPosReady()
+    window.electron.update.getVersion().then(setAppVersion).catch(() => {})
   }, [])
 
-  const refreshCmdHistory = useCallback(() => {
-    window.electron.db.getCommandHistory(10).then(setCmdHistory).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    loadDailySummary()
-    const tick = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(tick)
-  }, [])
+  useEffect(() => { void loadHome() }, [loadHome, statsTick, cmdPollTick])
 
   useEffect(() => {
-    refreshCmdHistory()
-    window.electron.db.getHeldDocuments(companyId)
-      .then(docs => setHeldCount(docs.length))
-      .catch(() => {})
-  }, [companyId, refreshCmdHistory, cmdPollTick])
+    const tick = setInterval(() => void loadHome(), 15_000)
+    const onFocus = () => void loadHome()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(tick)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [loadHome])
+
+  useEffect(() => {
+    const open = showQueue || showRecon || showReconHistory || showSalesReport || showCommands
+    if (overlayWas.current && !open) void loadHome()
+    overlayWas.current = open
+  }, [showQueue, showRecon, showReconHistory, showSalesReport, showCommands, loadHome])
+
+  useEffect(() => {
+    if (!amountsUntil) return
+    const wait = Math.max(0, amountsUntil - Date.now())
+    const t = setTimeout(() => setAmountsUntil(0), wait)
+    return () => clearTimeout(t)
+  }, [amountsUntil])
 
   useEffect(() => {
     const cleanup = window.electron.app.onExitBlocked(({ heldCount }) => {
@@ -167,40 +214,46 @@ export default function DashboardScreen({
       .catch(() => setPavoDeviceInfo(null))
   }, [showSettings, settingsTab])
 
-  async function loadDailySummary() {
-    try {
-      const today = new Date().toISOString().split('T')[0]
-      const sales = await window.electron.db.getSales(
-        today + 'T00:00:00',
-        today + 'T23:59:59'
-      )
-      const totalSales = sales.reduce((s, r) => s + r.totalAmount, 0)
-      const totalCash  = sales.filter(r => r.paymentType === 'cash').reduce((s, r) => s + r.totalAmount, 0)
-      const totalCard  = sales.filter(r => r.paymentType === 'card').reduce((s, r) => s + r.totalAmount, 0)
-      setSummary({ saleCount: sales.length, totalSales, totalCash, totalCard })
-    } catch {}
+  function handlePavoDayEnd() {
+    showInfo(
+      'Pavo Z raporu',
+      'Z raporu Pavo cihazından alınır. ERP faturaları yönetim panelinden gönderilir.',
+    )
   }
 
-  async function handleSendPendingInvoices() {
-    if (!isPosReady()) {
-      showInfo('Satış kapalı', POS_UNDEFINED_MESSAGE)
-      return
-    }
-    if (invoiceSending) return
-    setInvoiceSending(true)
-    try {
-      await sendPendingInvoices(companyId, { silent: false })
-      scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
-      await loadDailySummary()
-      window.dispatchEvent(new Event('btpos-day-end-done'))
-    } catch {
-      showError('Hata', 'Fatura gönderimi başlatılamadı.')
-    } finally {
-      setInvoiceSending(false)
-    }
+  const hideAmounts = useCallback(() => setAmountsUntil(0), [])
+
+  function openSettingsPanel() {
+    printerSnap.current = null
+    scaleSnap.current = null
+    cartSnap.current = JSON.stringify(cartSettings)
+    setPrinterDraft(null)
+    setScaleDraft(null)
+    setDraftCart(cartSettings)
+    setSettingsTab('screen')
+    setGeneralUnlocked(false)
+    titleTapRef.current = { count: 0, at: 0 }
+    setShowSettings(true)
   }
 
-  const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  function openRecon() {
+    hideAmounts()
+    void countPavoPendingSales().then(n => {
+      setPavoPendingCount(n)
+      if (n > 0) {
+        setReconBlock(true)
+        return
+      }
+      setReconBlock(false)
+      setShowRecon(true)
+    }).catch(() => setShowRecon(true))
+  }
+
+  function goSale(boot?: PosBoot) {
+    hideAmounts()
+    if (boot) setPosBoot(boot)
+    onStartSale()
+  }
 
   const onPrinterDraft = useCallback((d: PrinterDraft) => {
     setPrinterDraft(d)
@@ -287,229 +340,50 @@ export default function DashboardScreen({
     }
   }
 
+  const keysEnabled = !showSettings && !showQueue && !showRecon && !showReconHistory && !showSalesReport && !showCommands && !reconBlock && gate == null
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#F0F2F5' }}>
+    <>
+      <CashierHome
+        cashier={cashier}
+        workplaceName={terminal.terminalInfo.workplace?.name ?? ''}
+        terminalNumber={terminal.terminalInfo.terminalNumber ?? ''}
+        appVersion={appVersion}
+        isOnline={isOnline}
+        posDefined={posDefined}
+        stats={home}
+        amountsVisible={amountsUntil > Date.now()}
+        reconOpen={showRecon}
+        keysEnabled={keysEnabled}
+        onSale={goSale}
+        onLogout={() => { hideAmounts(); onLogout() }}
+        onQueue={() => setShowQueue(true)}
+        onReport={() => setShowSalesReport(true)}
+        onAskSettings={() => setGate('settings')}
+        onRecon={openRecon}
+        onReconHistory={() => setShowReconHistory(true)}
+        onDayEnd={handlePavoDayEnd}
+        onReveal={() => setGate('amounts')}
+        onHideAmounts={hideAmounts}
+        onCommands={() => setShowCommands(true)}
+        commandTick={cmdPollTick}
+      />
+      {showCommands && (
+        <CommandsScreen isOnline={isOnline} onClose={() => setShowCommands(false)} />
+      )}
+      {gate && (
+        <ManagerGate
+          title={gate === 'settings' ? 'Kasa ayarları için yetkili şifresi' : 'Tutarları görmek için yetkili şifresi'}
+          onCancel={() => setGate(null)}
+          onOk={() => {
+            const which = gate
+            setGate(null)
+            if (which === 'settings') openSettingsPanel()
+            else setAmountsUntil(Date.now() + 30_000)
+          }}
+        />
+      )}
 
-      {/* Header — kasiyer girişi ile aynı koyu tema */}
-      <div style={{
-        background: '#030712',
-        borderBottom: '1px solid #1f2937',
-        padding: '0 24px',
-        height: 52,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexShrink: 0,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <AppLogo height={30} />
-          <span style={{ color: '#9ca3af', fontSize: 13 }}>Hoş geldiniz</span>
-        </div>
-        <span style={{ color: '#9ca3af', fontSize: 13 }}>
-          {time.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}
-          {' — '}
-          <span style={{ fontWeight: 600, fontSize: 15, color: '#e5e7eb' }}>
-            {time.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </span>
-        </span>
-      </div>
-
-      {/* Ana içerik — butonlar + feed yan yana */}
-      <div style={{ flex: 1, display: 'flex', gap: 32, alignItems: 'flex-start', justifyContent: 'center', padding: 40, flexWrap: 'wrap' }}>
-
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, flex: '0 1 auto' }}>
-
-        {/* Kasiyer kartı */}
-        <div style={{ background: 'white', borderRadius: 16, padding: '24px 40px', textAlign: 'center', border: '1px solid #E0E0E0', minWidth: 320 }}>
-          <div style={{ width: 72, height: 72, borderRadius: '50%', background: C.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', fontSize: 28, fontWeight: 700, color: '#FFFFFF' }}>
-            {cashier.fullName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase()}
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 600, color: '#212121' }}>{cashier.fullName}</div>
-          <div style={{ fontSize: 13, color: '#9E9E9E', marginTop: 4 }}>
-            Kod: {cashier.cashierCode} · {cashier.role === 'manager' ? 'Yönetici' : 'Kasiyer'}
-          </div>
-        </div>
-
-        {/* Günlük özet */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 160px)', gap: 16 }}>
-          {[
-            { label: 'Satış Sayısı', value: String(summary.saleCount), unit: 'adet', color: C.primary },
-            { label: 'Günlük Ciro',  value: fmt(summary.totalSales),   unit: '₺',    color: C.success },
-            { label: 'Nakit',        value: fmt(summary.totalCash),    unit: '₺',    color: C.meal },
-            { label: 'Kart',         value: fmt(summary.totalCard),    unit: '₺',    color: C.online },
-          ].map(card => (
-            <div key={card.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderTop: `4px solid ${card.color}`, borderRadius: 12, padding: '16px 20px', textAlign: 'center' }}>
-              <div style={{ fontSize: 11, color: card.color, marginBottom: 6, fontWeight: 500 }}>{card.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 600, color: card.color }}>{card.value}</div>
-              <div style={{ fontSize: 11, color: card.color, marginTop: 2 }}>{card.unit}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Butonlar */}
-        <PosUndefinedBadge onClick={() => showInfo('Satış kapalı', POS_UNDEFINED_MESSAGE)} />
-        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
-          <button
-            type="button"
-            onClick={() => {
-              printerSnap.current = null
-              scaleSnap.current = null
-              cartSnap.current = JSON.stringify(cartSettings)
-              setPrinterDraft(null)
-              setScaleDraft(null)
-              setDraftCart(cartSettings)
-              setSettingsTab('screen')
-              setGeneralUnlocked(false)
-              titleTapRef.current = { count: 0, at: 0 }
-              setShowSettings(true)
-            }}
-            style={{
-              ...solidBtn(C.neutral),
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, fontSize: 13,
-            }}
-          >
-            ⚙ Kasa Ayarları
-          </button>
-          <button
-            type="button"
-            disabled={invoiceSending}
-            onClick={() => void handleSendPendingInvoices()}
-            style={{
-              ...solidBtn(C.success, invoiceSending || !posReady),
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, fontSize: 13,
-              cursor: invoiceSending ? 'wait' : 'pointer',
-            }}
-            title="Bekleyen POS faturalarını ERP’ye gönderir (Z raporu / toplu)"
-          >
-            {invoiceSending ? '⏳ Gönderiliyor…' : !posReady ? '🔒 Bekleyen faturalar' : '📄 Bekleyen faturalar'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowQueue(true)}
-            style={{
-              ...solidBtn(C.primary),
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, fontSize: 13,
-            }}
-          >
-            📤 Belge Aktarım
-          </button>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <button
-              type="button"
-              onClick={() => {
-                void countPavoPendingSales().then(n => {
-                  setPavoPendingCount(n)
-                  if (n > 0) {
-                    setReconBlock(true)
-                    return
-                  }
-                  setReconBlock(false)
-                  setShowRecon(true)
-                }).catch(() => setShowRecon(true))
-              }}
-              style={{
-                ...solidBtn(C.meal),
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '10px 18px', borderRadius: 10, fontSize: 13,
-                position: 'relative',
-              }}
-            >
-              💰 Hesap Alma
-              {pavoPendingCount > 0 && (
-                <span style={{
-                  position: 'absolute', top: -6, right: -6,
-                  background: C.danger, color: 'var(--pos-primary-text)', borderRadius: 10,
-                  fontSize: 11, padding: '2px 6px',
-                }}>Askıda</span>
-              )}
-            </button>
-            <button type="button" onClick={() => setShowReconHistory(true)} style={{ background: 'transparent', border: 'none', color: C.primary, fontSize: 12, cursor: 'pointer', fontWeight: 700 }}>
-              Geçmiş
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowSalesReport(true)}
-            style={{
-              ...solidBtn(C.online),
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '10px 18px', borderRadius: 10, fontSize: 13,
-            }}
-          >
-            📈 Belge Raporu
-          </button>
-          <button
-            type="button"
-            onClick={onStartSale}
-            style={{ ...solidBtn(C.primary), borderRadius: 16, width: 280, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 22 }}
-          >
-            <span style={{ fontSize: 36 }}>🛒</span>
-            <span>Satış Başlat</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onLogout}
-            style={{ ...solidBtn(C.danger), borderRadius: 16, width: 160, height: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 14 }}
-          >
-            <span style={{ fontSize: 28 }}>🚪</span>
-            <span>Kasiyer Çıkışı</span>
-          </button>
-        </div>
-
-        </div>
-
-        {/* Sağ — aktivite feed */}
-        <div style={{ width: 340, display: 'flex', flexDirection: 'column', gap: 16, flexShrink: 0 }}>
-
-          {heldCount > 0 && (
-            <div style={{ background: C.online, borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 24 }}>⏸</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#FFFFFF' }}>{heldCount} Bekletilen Belge</div>
-                <div style={{ fontSize: 11, color: '#FFFFFF' }}>Satış ekranından getirilebilir</div>
-              </div>
-            </div>
-          )}
-
-          <div style={{ background: 'white', borderRadius: 12, border: '1px solid #E0E0E0', overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid #F0F0F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#212121' }}>Son Komutlar</span>
-              <span style={{ fontSize: 10, color: '#9E9E9E' }}>Son {cmdHistory.length} işlem</span>
-            </div>
-            {cmdHistory.length === 0 ? (
-              <div style={{ padding: '24px 16px', textAlign: 'center', color: '#BDBDBD', fontSize: 12 }}>
-                Henüz komut alınmadı
-              </div>
-            ) : (
-              cmdHistory.map(cmd => (
-                <div key={cmd.id} style={{ padding: '10px 16px', borderBottom: '1px solid #F9F9F9', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: CMD_COLORS[cmd.command]?.bg ?? '#F5F5F5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
-                    {CMD_COLORS[cmd.command]?.icon ?? '📋'}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: '#212121' }}>
-                      {CMD_LABELS[cmd.command] ?? cmd.command}
-                      {cmd.command === 'message' && cmd.payload.text != null && String(cmd.payload.text).length > 0 && (
-                        <span style={{ fontWeight: 400, color: '#757575' }}>
-                          {` — "${String(cmd.payload.text).slice(0, 30)}${String(cmd.payload.text).length > 30 ? '...' : ''}"`}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 10, color: '#9E9E9E', marginTop: 1 }}>
-                      {new Date(cmd.receivedAt).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}
-                    </div>
-                  </div>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: cmd.status === 'done' ? '#4CAF50' : '#F44336', flexShrink: 0 }} />
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
 
       {showQueue && (
         <div style={{
@@ -575,34 +449,11 @@ export default function DashboardScreen({
       )}
 
       {showSalesReport && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.45)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 16,
-          overflow: 'auto',
-        }}>
-          <div style={{
-            background: 'white', borderRadius: 14, width: '100%', maxWidth: 900,
-            maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '12px 16px', borderBottom: '1px solid #F0F0F0', flexShrink: 0,
-            }}>
-              <span style={{ fontSize: 15, fontWeight: 700 }}>Belge Raporu</span>
-              <button
-                type="button"
-                onClick={() => setShowSalesReport(false)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9E9E9E' }}
-              >✕</button>
-            </div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              <SalesReportScreen companyId={companyId} />
-            </div>
-          </div>
-        </div>
+        <SalesReportScreen
+          companyId={companyId}
+          onClose={() => setShowSalesReport(false)}
+          onOpenHeld={() => { setShowSalesReport(false); goSale({ held: true }) }}
+        />
       )}
 
       {showSettings && (
@@ -838,6 +689,6 @@ export default function DashboardScreen({
         </div>
       )}
       <AlertDialog {...dialogProps} />
-    </div>
+    </>
   )
 }

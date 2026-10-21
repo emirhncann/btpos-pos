@@ -5,11 +5,15 @@ import {
   applyCustomerToInvoicePayload,
   queueCustomerErrorMessage,
 } from '../lib/queueCustomer'
+import { formatDayEndPaymentLabel, formatTrDay, invoiceStampToIso, istanbulDayKey } from '../lib/invoiceMode'
+import { postDayEndStatus } from '../lib/dayEndApi'
 
 const POLL_INTERVAL = 15_000
 
 function pickInvoiceNumber(res: Record<string, unknown>): string {
+  const doc = res.doc && typeof res.doc === 'object' ? res.doc as Record<string, unknown> : null
   const direct = [
+    doc?.erp_number,
     res.invoice_number,
     res.invoiceNo,
     res.invoice_no,
@@ -78,9 +82,7 @@ export async function processOperationQueue({
       if (op.type === 'return_invoice') return includeDayEnd === true
       return true
     })
-    if (toProcess.length === 0) return
-
-    for (const op of toProcess) {
+    if (toProcess.length > 0) for (const op of toProcess) {
         await window.electron.db.markOperationProcessing(op.id)
         const payload = JSON.parse(op.payload) as Record<string, unknown>
 
@@ -142,7 +144,22 @@ export async function processOperationQueue({
             error = res.message ?? null
             const invoiceNumber = pickInvoiceNumber(res as unknown as Record<string, unknown>)
 
-            if (success && res.invoice_id) {
+            if (success && res.invoice_id && payload.day_end_run_id) {
+              const resolved = sendPayload as {
+                customer_erp_id?: unknown
+                customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
+              }
+              const customer = resolved.customer ?? {}
+              await window.electron.db.rememberQueueInvoice(op.id, String(res.invoice_id), invoiceNumber)
+              await window.electron.db.enqueueDayEndPayments({
+                queueId: op.id,
+                invoiceId: String(res.invoice_id),
+                invoiceNumber,
+                customerId: Number(resolved.customer_erp_id ?? customer.erp_id ?? customer.id ?? 0),
+                customerCode: String(customer.code ?? ''),
+                customerName: String(customer.name ?? ''),
+              })
+            } else if (success && res.invoice_id) {
               const saleData = sendPayload as {
                 sale_id?: string
                 cash_amount?: number
@@ -226,9 +243,9 @@ export async function processOperationQueue({
             }
 
             const sid = sendPayload.sale_id
-            if (typeof sid === 'string' && !sid.startsWith('gunsonu-')) {
+            if (!payload.day_end_run_id && typeof sid === 'string' && !sid.startsWith('gunsonu-')) {
               if (success && res.invoice_id) {
-                await window.electron.db.markInvoiceSent(sid, String(res.invoice_id))
+                await window.electron.db.markInvoiceSent(sid, String(res.invoice_id), invoiceNumber)
               } else if (!success) {
                 await window.electron.db.markInvoiceError(sid, error ?? 'Hata')
               }
@@ -262,6 +279,7 @@ export async function processOperationQueue({
             if (success && res.invoice_id) {
               const saleData = sendPayload as {
                 sale_id?: string
+                invoice_date?: string
                 cash_amount?: number
                 card_amount?: number
                 card_acquirer_id?: string | null
@@ -276,6 +294,14 @@ export async function processOperationQueue({
                 const dayCard = Number(saleData.card_amount ?? 0)
                 const dayAcquirer = saleData.card_acquirer_id ?? null
                 const dayByBank = saleData.card_by_bank ?? {}
+                const dayKey = istanbulDayKey(invoiceStampToIso(String(saleData.invoice_date ?? '')))
+                const dayEndLabel = dayKey
+                  ? formatDayEndPaymentLabel({
+                    dayLabel: formatTrDay(dayKey),
+                    cashAmount: dayCash,
+                    cardByBank: dayByBank,
+                  })
+                  : `Tahsilat — ${String(customer.name ?? '')}`
                 const paymentAccounts = await window.electron.db.matchPaymentAccounts({
                   cashAmount: dayCash,
                   cardAmount: dayCard,
@@ -305,7 +331,7 @@ export async function processOperationQueue({
                     terminal_id:      terminalId,
                     payment_accounts: paymentAccounts,
                   },
-                  label: `Tahsilat — ${String(customer.name ?? '')}`,
+                  label: dayEndLabel,
                 })
               }
             }
@@ -314,7 +340,7 @@ export async function processOperationQueue({
             if (Array.isArray(ids) && ids.every((x): x is string => typeof x === 'string')) {
               if (success && res.invoice_id) {
                 for (const saleId of ids) {
-                  await window.electron.db.markInvoiceSent(saleId, String(res.invoice_id))
+                  await window.electron.db.markInvoiceSent(saleId, String(res.invoice_id), invoiceNumber)
                 }
               } else if (!success) {
                 for (const saleId of ids) {
@@ -331,11 +357,28 @@ export async function processOperationQueue({
             const data = await res.json() as { success?: boolean; message?: string; invoice_id?: string }
             success = data.success === true
             error = data.message ?? null
+            const returnNumber = pickInvoiceNumber(data as unknown as Record<string, unknown>)
 
+            if (success && data.invoice_id && payload.day_end_run_id) {
+              const resolved = sendPayload as {
+                customer_erp_id?: unknown
+                customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
+              }
+              const customer = resolved.customer ?? {}
+              await window.electron.db.rememberQueueInvoice(op.id, String(data.invoice_id), returnNumber)
+              await window.electron.db.enqueueDayEndPayments({
+                queueId: op.id,
+                invoiceId: String(data.invoice_id),
+                invoiceNumber: returnNumber,
+                customerId: Number(resolved.customer_erp_id ?? customer.erp_id ?? customer.id ?? 0),
+                customerCode: String(customer.code ?? ''),
+                customerName: String(customer.name ?? ''),
+              })
+            }
             const returnSaleId = sendPayload.sale_id
-            if (typeof returnSaleId === 'string') {
+            if (!payload.day_end_run_id && typeof returnSaleId === 'string') {
               if (success && data.invoice_id) {
-                await window.electron.db.markInvoiceSent(returnSaleId, String(data.invoice_id))
+                await window.electron.db.markInvoiceSent(returnSaleId, String(data.invoice_id), returnNumber)
               } else if (!success) {
                 await window.electron.db.markInvoiceError(returnSaleId, error ?? 'İade faturası gönderilemedi')
               }
@@ -407,6 +450,15 @@ export async function processOperationQueue({
           await window.electron.db.markOperationFailed(op.id, errMsg)
           onToast({ id: op.id, type: op.type, label: op.label, status: 'failed', error: errMsg })
         }
+    }
+    try {
+      const actions = await window.electron.db.settleDayEndRuns(companyId)
+      for (const action of actions) {
+        await postDayEndStatus(action.runId, action.body)
+        await window.electron.db.markDayEndRunStatus(action.runId, String(action.body.status ?? ''))
+      }
+    } catch (e) {
+      console.warn('[worker] gün sonu kapanışı:', e)
     }
   } finally {
     queueRunning = false

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { C, solidBtn } from '../theme/colors'
 import AlertDialog from '../components/AlertDialog'
 import { useAlertDialog } from '../hooks/useAlertDialog'
+import { formatIstanbulDateTime, istanbulDay, istanbulToday } from '../lib/commandView'
+import { formatSentInvoice } from '../lib/invoiceMode'
 import {
   customerRefFromCustomerRow,
   customerRefTorba,
@@ -22,6 +24,7 @@ interface OpRow {
   createdAt:   string
   sentAt:      string | null
   payload:     string
+  invoiceNumber: string | null
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -52,7 +55,16 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
 type TypeFilter = 'all' | 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return istanbulToday()
+}
+
+function erpIdentity(payload: string): string {
+  try {
+    const body = JSON.parse(payload) as { erp_invoice_id?: unknown; invoice_id?: unknown }
+    return String(body.erp_invoice_id ?? body.invoice_id ?? '').trim()
+  } catch {
+    return ''
+  }
 }
 
 function formatError(error: string): string {
@@ -76,7 +88,7 @@ export function DocumentQueueScreen({
 }) {
   const [ops,          setOps]          = useState<OpRow[]>([])
   const [loading,      setLoading]      = useState(true)
-  const [statusFilter, setStatusFilter] = useState<OpStatus | 'all'>('all')
+  const [statusFilter, setStatusFilter] = useState<'waiting' | 'failed' | 'sent' | 'all'>('waiting')
   const [typeFilter,   setTypeFilter]   = useState<TypeFilter>('all')
   const [dateFrom,     setDateFrom]     = useState(todayStr())
   const [dateTo,       setDateTo]       = useState(todayStr())
@@ -102,23 +114,40 @@ export function DocumentQueueScreen({
   useEffect(() => { void reload() }, [reload])
 
   const dateTypeFiltered = ops.filter(op => {
-    const opDate = op.createdAt?.slice(0, 10) ?? ''
+    const opDate = istanbulDay(op.createdAt) ?? ''
     if (dateFrom && opDate < dateFrom) return false
     if (dateTo   && opDate > dateTo)   return false
     if (typeFilter !== 'all' && op.type !== typeFilter) return false
     return true
   })
 
-  const filtered = dateTypeFiltered.filter(op =>
-    statusFilter === 'all' || op.status === statusFilter,
-  )
+  const waitingRank = (status: string) => {
+    if (status === 'failed') return 0
+    if (status === 'processing') return 1
+    if (status === 'pending') return 2
+    if (status === 'pending_dayend') return 3
+    return 4
+  }
+  const isWaiting = (status: string) => status !== 'success' && status !== 'done' && status !== 'cancelled'
+  const filteredRaw = dateTypeFiltered.filter(op => {
+    if (statusFilter === 'all') return true
+    if (statusFilter === 'failed') return op.status === 'failed'
+    if (statusFilter === 'sent') return op.status === 'success' || op.status === 'done'
+    return isWaiting(op.status)
+  })
+  const filtered = statusFilter === 'waiting'
+    ? [...filteredRaw].sort((a, b) => {
+        const rank = waitingRank(a.status) - waitingRank(b.status)
+        if (rank !== 0) return rank
+        return a.createdAt < b.createdAt ? -1 : 1
+      })
+    : filteredRaw
 
   const counts = {
-    all:            dateTypeFiltered.length,
-    pending:        dateTypeFiltered.filter(o => o.status === 'pending').length,
-    pending_dayend: dateTypeFiltered.filter(o => o.status === 'pending_dayend').length,
-    failed:         dateTypeFiltered.filter(o => o.status === 'failed').length,
-    success:        dateTypeFiltered.filter(o => o.status === 'success').length,
+    all:     dateTypeFiltered.length,
+    waiting: dateTypeFiltered.filter(o => isWaiting(o.status)).length,
+    failed:  dateTypeFiltered.filter(o => o.status === 'failed').length,
+    sent:    dateTypeFiltered.filter(o => o.status === 'success' || o.status === 'done').length,
   }
 
   const pendingReturns = ops.filter(o =>
@@ -290,24 +319,19 @@ export function DocumentQueueScreen({
 
       <div style={{ display: 'flex', gap: 5, marginBottom: 14, flexWrap: 'wrap' }}>
         {([
-          ['all',            'Tümü'],
-          ['pending',        'Bekliyor'],
-          ['pending_dayend', 'Gün Sonu Bekliyor'],
-          ['failed',         'Hata'],
-          ['success',        'Gönderildi'],
-        ] as [OpStatus | 'all', string][]).map(([k, l]) => {
-          const count = k === 'all' ? counts.all
-            : counts[k as keyof typeof counts] ?? 0
-          return (
-            <button key={k} type="button" onClick={() => setStatusFilter(k)}
-              style={{
-                ...(statusFilter === k ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
-                padding: '5px 12px', borderRadius: 20, fontSize: 12,
-              }}>
-              {l} {count > 0 && <span>({count})</span>}
-            </button>
-          )
-        })}
+          ['waiting', 'Gönderilmeyi bekleyen'],
+          ['failed',  'Hatalı'],
+          ['sent',    'Gönderilen'],
+          ['all',     'Tümü'],
+        ] as Array<['waiting' | 'failed' | 'sent' | 'all', string]>).map(([k, l]) => (
+          <button key={k} type="button" onClick={() => setStatusFilter(k)}
+            style={{
+              ...(statusFilter === k ? solidBtn(C.primary, false, true) : solidBtn(C.neutral)),
+              padding: '5px 12px', borderRadius: 20, fontSize: 12,
+            }}>
+            {l} ({counts[k]})
+          </button>
+        ))}
       </div>
 
       {pendingReturns.length > 0 && (
@@ -377,7 +401,18 @@ export function DocumentQueueScreen({
         </div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 13 }}>
-          Bu filtrede işlem yok
+          {statusFilter === 'waiting' ? (
+            <>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
+              Gönderilmeyi bekleyen belge yok
+              <div>
+                <button type="button" onClick={() => setStatusFilter('sent')}
+                  style={{ marginTop: 12, ...solidBtn(C.primary), borderRadius: 8, padding: '8px 14px', fontSize: 13 }}>
+                  Gönderilenleri göster
+                </button>
+              </div>
+            </>
+          ) : 'Bu filtrede işlem yok'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -401,10 +436,10 @@ export function DocumentQueueScreen({
                   <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
                     {TYPE_LABEL[op.type] ?? op.type}
                     {' · '}
-                    {new Date(op.createdAt).toLocaleString('tr-TR')}
+                    {formatIstanbulDateTime(op.createdAt) || '—'}
                     {op.sentAt && (
                       <span style={{ color: '#2E7D32' }}>
-                        {' · ✓ '}{new Date(op.sentAt).toLocaleString('tr-TR')}
+                        {' · ✓ '}{formatIstanbulDateTime(op.sentAt)}
                       </span>
                     )}
                   </div>
@@ -428,7 +463,9 @@ export function DocumentQueueScreen({
                 <div style={{ background: ss.bg, color: ss.color,
                   borderRadius: 6, padding: '3px 10px',
                   fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
-                  {ss.label}
+                  {(op.status === 'success' || op.status === 'done') && INVOICE_TYPES.has(op.type)
+                    ? formatSentInvoice(op.invoiceNumber)
+                    : ss.label}
                 </div>
 
                 <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
@@ -503,6 +540,11 @@ export function DocumentQueueScreen({
                     ? `${summary.expectedTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
                     : '—'}</div>
                   <div><strong>Tarih:</strong> {summary.invoiceDate}</div>
+                  {INVOICE_TYPES.has(detailOp.type) && (detailOp.status === 'success' || detailOp.status === 'done') && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: '#9CA3AF' }}>
+                      İşbaşı kimliği: {erpIdentity(full?.payload ?? detailOp.payload) || '—'}
+                    </div>
+                  )}
                   {detailOp.error && (
                     <div style={{ marginTop: 10, color: '#C62828', fontSize: 12,
                       background: '#FEF2F2', padding: 8, borderRadius: 6 }}>

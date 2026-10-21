@@ -163,8 +163,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:getCustomerByCode', companyId, code),
     getPendingInvoices: (onlyAnonymous?: boolean) =>
       ipcRenderer.invoke('db:getPendingInvoices', onlyAnonymous),
-    markInvoiceSent:   (saleId: string, invoiceId: string) =>
-      ipcRenderer.invoke('db:markInvoiceSent', saleId, invoiceId),
+    markInvoiceSent:   (saleId: string, invoiceId: string, invoiceNumber?: string | null) =>
+      ipcRenderer.invoke('db:markInvoiceSent', saleId, invoiceId, invoiceNumber ?? null),
     markInvoiceError:  (saleId: string, error: string) =>
       ipcRenderer.invoke('db:markInvoiceError', saleId, error),
     getSaleItems:      (saleId: string) => ipcRenderer.invoke('db:getSaleItems', saleId),
@@ -178,8 +178,16 @@ contextBridge.exposeInMainWorld('electron', {
     getProductByName:  (name: string) => ipcRenderer.invoke('db:getProductByName', name),
     getProductIdByCode: (code: string) => ipcRenderer.invoke('db:getProductIdByCode', code),
     upsertCustomer:    (row: unknown) => ipcRenderer.invoke('db:upsertCustomer', row),
-    enqueueDayEndInvoicePackage: (companyId: string) =>
-      ipcRenderer.invoke('db:enqueueDayEndInvoicePackage', companyId),
+    applyDayEndRun: (input: unknown) => ipcRenderer.invoke('db:applyDayEndRun', input),
+    dayEndRunStatus: (runId: string) => ipcRenderer.invoke('db:dayEndRunStatus', runId),
+    countDayEndProcessing: (runId: string) => ipcRenderer.invoke('db:countDayEndProcessing', runId),
+    releaseDayEndRun: (runId: string) => ipcRenderer.invoke('db:releaseDayEndRun', runId),
+    markDayEndRunStatus: (runId: string, status: string) => ipcRenderer.invoke('db:markDayEndRunStatus', runId, status),
+    rememberQueueInvoice: (queueId: string, invoiceId: string, invoiceNumber?: string | null) => ipcRenderer.invoke('db:rememberQueueInvoice', queueId, invoiceId, invoiceNumber ?? null),
+    enqueueDayEndPayments: (input: unknown) => ipcRenderer.invoke('db:enqueueDayEndPayments', input),
+    settleDayEndRuns: (companyId: string) => ipcRenderer.invoke('db:settleDayEndRuns', companyId),
+    enqueueDayEndInvoicePackage: (companyId: string, scope?: 'z' | 'previous_days') =>
+      ipcRenderer.invoke('db:enqueueDayEndInvoicePackage', companyId, scope),
     enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
     getPendingReturnInvoices: (companyId: string) =>
       ipcRenderer.invoke('db:getPendingReturnInvoices', companyId),

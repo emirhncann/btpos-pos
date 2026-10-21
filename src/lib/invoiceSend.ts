@@ -3,8 +3,9 @@ import {
   customerRefTorba,
   tryResolveTorbaCustomer,
 } from './queueCustomer'
+import { formatPerSaleInvoiceLabel, type DayEndScope } from './invoiceMode'
 
-export type SendPendingInvoicesOpts = { silent?: boolean }
+export type SendPendingInvoicesOpts = { silent?: boolean; scope?: DayEndScope }
 
 export { tryResolveTorbaCustomer }
 
@@ -131,7 +132,10 @@ export async function sendPendingInvoices(
     }
   }
 
-  const dayEnd = await window.electron.db.enqueueDayEndInvoicePackage(companyId)
+  const dayEnd = await window.electron.db.enqueueDayEndInvoicePackage(
+    companyId,
+    opts?.scope === 'z' ? 'z' : 'previous_days',
+  )
 
   if (!dayEnd.queued && dayEnd.fail > 0) {
     if (!opts?.silent) {
@@ -242,6 +246,83 @@ export async function sendInvoiceForSale(
     type:      'invoice',
     payload:   await withTerminalPayment(payload),
     label:     `${customer.name} faturası`,
+  })
+}
+
+/** Carisiz per_sale: tek satış, müşteri gün sonu faturasındaki torba cari. */
+export async function sendAnonymousPerSaleInvoice(
+  companyId: string,
+  saleId: string,
+  receiptNo: string,
+  invoiceType: 'e_archive' | 'paper' = 'e_archive',
+  payment?: {
+    cashAmount: number
+    cardAmount: number
+    cardAcquirerId: string | null
+    cardByBank?: Record<string, { amount: number; acquirerName: string }>
+  },
+): Promise<void> {
+  const endpoint = invoiceType === 'paper'
+    ? `/integration/invoice-paper/${companyId}`
+    : `/integration/invoice/${companyId}`
+  const items = await window.electron.db.getSaleItems(saleId)
+  const mappedItems = await Promise.all(items.map(async i => {
+    let productId = 0
+    let unitCode = 'C62'
+    if (invoiceType === 'paper') {
+      const product = await window.electron.db.getProductByCode(i.productCode)
+      const productIdRaw = await window.electron.db.getProductIdByCode(i.productCode)
+      productId = Number.parseInt(productIdRaw ?? '0', 10) || 0
+      unitCode = await window.electron.db.getUnitPavoCode(product?.unit ?? 'Adet')
+    }
+    const qty = Math.abs(Number(i.quantity) || 0)
+    const unitPriceGross = Number(i.unitPriceGross ?? i.price)
+    const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
+    const discountAmount = Number(i.discountAmount ?? 0)
+    const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
+    return {
+      product_code: i.productCode,
+      name:         i.productName ?? i.productCode,
+      quantity:     qty,
+      vatRate:      i.vatRate,
+      unit:         i.unit ?? 'Adet',
+      product_id:   productId,
+      unit_code:    unitCode,
+      unit_price_gross: unitPriceGross,
+      gross_amount: grossAmount,
+      discount_amount: discountAmount,
+      net_amount: netAmount,
+    }
+  }))
+  const expectedTotal = Math.round(
+    mappedItems.reduce((s, i) => s + Number(i.net_amount), 0) * 100,
+  ) / 100
+  const badInvoiceItems = mappedItems.filter(
+    i => !String(i.product_code ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+  )
+  if (badInvoiceItems.length > 0) {
+    const msg = `Ürün kodu/KDV eksik: ${badInvoiceItems.map(b => b.name ?? '?').join(', ')}`
+    await window.electron.db.markInvoiceError(saleId, msg)
+    return
+  }
+  await window.electron.db.enqueueOperation({
+    id:        crypto.randomUUID(),
+    companyId,
+    type:      'invoice',
+    payload:   await withTerminalPayment({
+      sale_id:          saleId,
+      customer_ref:     customerRefTorba(),
+      items:            mappedItems,
+      expected_total:   expectedTotal,
+      invoice_date:     new Date().toISOString().replace('T', ' ').slice(0, 19),
+      description:      formatPerSaleInvoiceLabel(receiptNo),
+      endpoint,
+      cash_amount:      payment?.cashAmount ?? 0,
+      card_amount:      payment?.cardAmount ?? 0,
+      card_acquirer_id: payment?.cardAcquirerId ?? null,
+      card_by_bank:     payment?.cardByBank ?? {},
+    }),
+    label: formatPerSaleInvoiceLabel(receiptNo),
   })
 }
 

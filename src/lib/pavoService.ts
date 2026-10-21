@@ -8,6 +8,7 @@ import {
   type PavoFinalSale,
   type PavoFinalPayment,
 } from './paymentDevice'
+import { customerTypeOf, digitsOnly, splitPersonName } from './customerIdentity'
 
 export {
   normalizePavoSaleResult,
@@ -194,6 +195,156 @@ function transactionHandle(settings: PavoSettings, seq: number) {
     TransactionSequence: seq,
     Fingerprint: 'test1',
   }
+}
+
+const CARI_TAX_MISSING = 'Carinin vergi/TC numarası eksik. Önce müşteri bilgisini düzenleyin.'
+
+function maskTail(value: string): string {
+  const s = String(value ?? '')
+  if (s.length <= 4) return s ? '****' : ''
+  return `${'*'.repeat(s.length - 4)}${s.slice(-4)}`
+}
+
+export type PavoAdvanceSaleBody = {
+  TransactionHandle: ReturnType<typeof transactionHandle>
+  Sale: {
+    RefererApp: 'BTPOS'
+    RefererAppVersion: string
+    OrderNo: string
+    TotalAmount: number
+    SaleReason: string
+    SendPhoneNotification: false
+    SendEMailNotification: false
+    SkipAmountCash: boolean
+    AllowDismissCardRead: false
+    CardReadTimeout: 60
+    AskCustomer: false
+    PaymentInformations: Array<{
+      Mediator: number
+      Amount: number
+      CurrencyCode: 'TRY'
+      ExchangeRate: 1
+      IsVoid: false
+    }>
+    ReceiptInformation: {
+      ReceiptWidth: '80mm'
+      PrintCustomerReceipt: true
+      PrintCustomerReceiptCopy: false
+      PrintMerchantReceipt: true
+    }
+    CustomerParty: {
+      CustomerType: 1 | 2
+      FirstName: string
+      MiddleName: ''
+      FamilyName: string
+      CompanyName: string
+      TaxOfficeCode: ''
+      TaxNumber: string
+      Phone: string
+      EMail: string
+      Country: 'Türkiye'
+      City: string
+      District: string
+      Neighborhood: ''
+      Address: string
+    }
+  }
+}
+
+/** Cari tahsilat AdvanceSale gövdesi. Normal satış (/CompleteSale) bunu kullanmaz. */
+export function buildPavoAdvanceSale(input: {
+  settings: PavoSettings
+  seq: number
+  orderNo: string
+  appVersion: string
+  amount: number
+  mediator: number
+  customer: CustomerRow
+  workplaceCity?: string | null
+}): { ok: true; body: PavoAdvanceSaleBody } | { ok: false; message: string } {
+  const tax = digitsOnly(String(input.customer.taxNo ?? ''))
+  if (tax.length !== 10 && tax.length !== 11) {
+    return { ok: false, message: CARI_TAX_MISSING }
+  }
+  if (input.mediator !== 1 && input.mediator !== 2) {
+    return { ok: false, message: 'Ödeme yöntemi seçin.' }
+  }
+
+  const corporate = customerTypeOf({ type: input.customer.type, taxNo: tax }) === 'corporate'
+  const city = String(input.customer.city ?? '').trim() || String(input.workplaceCity ?? '').trim()
+  const district = String(input.customer.district ?? '').trim() || city
+  const address = String(input.customer.address ?? '').trim() || (city ? `${city} Merkez` : '')
+  const split = splitPersonName(input.customer.name ?? '')
+  const storedFirst = String(input.customer.firstName ?? '').trim()
+  const storedLast = String(input.customer.lastName ?? '').trim()
+  const firstName = corporate ? '' : (storedFirst || split.first_name)
+  const familyName = corporate ? '' : (storedLast || (storedFirst ? '' : split.last_name))
+  const amount = Math.round(Number(input.amount) * 100) / 100
+  const reason = `Tahsilat — ${String(input.customer.name ?? '').trim()}`.slice(0, 60)
+
+  return {
+    ok: true,
+    body: {
+      TransactionHandle: transactionHandle(input.settings, input.seq),
+      Sale: {
+        RefererApp: 'BTPOS',
+        RefererAppVersion: String(input.appVersion ?? ''),
+        OrderNo: input.orderNo,
+        TotalAmount: amount,
+        SaleReason: reason,
+        SendPhoneNotification: false,
+        SendEMailNotification: false,
+        SkipAmountCash: input.mediator === 1,
+        AllowDismissCardRead: false,
+        CardReadTimeout: 60,
+        AskCustomer: false,
+        PaymentInformations: [{
+          Mediator: input.mediator,
+          Amount: amount,
+          CurrencyCode: 'TRY',
+          ExchangeRate: 1,
+          IsVoid: false,
+        }],
+        ReceiptInformation: {
+          ReceiptWidth: '80mm',
+          PrintCustomerReceipt: true,
+          PrintCustomerReceiptCopy: false,
+          PrintMerchantReceipt: true,
+        },
+        CustomerParty: {
+          CustomerType: corporate ? 2 : 1,
+          FirstName: firstName,
+          MiddleName: '',
+          FamilyName: familyName,
+          CompanyName: corporate ? String(input.customer.name ?? '').trim() : '',
+          TaxOfficeCode: '',
+          TaxNumber: tax,
+          Phone: String(input.customer.phone ?? ''),
+          EMail: String(input.customer.email ?? ''),
+          Country: 'Türkiye',
+          City: city,
+          District: district,
+          Neighborhood: '',
+          Address: address,
+        },
+      },
+    },
+  }
+}
+
+function logAdvanceSaleBody(body: PavoAdvanceSaleBody): void {
+  const party = body.Sale.CustomerParty
+  console.debug('[pavo-advance] body', {
+    ...body,
+    Sale: {
+      ...body.Sale,
+      CustomerParty: {
+        ...party,
+        TaxNumber: maskTail(party.TaxNumber),
+        Phone: maskTail(party.Phone),
+      },
+    },
+  })
 }
 
 function isPavoSequenceError(data: Record<string, unknown>): boolean {
@@ -1065,99 +1216,13 @@ export async function pavoPartialReturn(
   }
 }
 
-/** Pavo AdvanceSale — cari tahsilat / avans (ürün satırı yok) */
+/** Pavo AdvanceSale — cari tahsilat. Gövde yalnızca buildPavoAdvanceSale'den gelir. */
 export async function pavoAdvanceSale(
   settings: PavoSettings,
-  seq: number,
-  opts: {
-    orderNo: string
-    amount: number
-    reason: string
-    mediator?: number // 1=nakit, 2=kart, undefined=cihazdan seçsin
-    customer: {
-      isPerson: boolean
-      firstName: string
-      lastName: string
-      companyName?: string
-      taxNo: string
-      phone?: string
-      email?: string
-      country: string
-      city: string
-      district: string
-      address?: string
-    }
-    notify?: {
-      sendSms: boolean
-      phone: string
-      sendMail: boolean
-      mail: string
-    }
-  },
+  body: PavoAdvanceSaleBody,
 ): Promise<{ success: boolean; message?: string; data?: unknown }> {
   try {
-    const paymentInformations = opts.mediator !== undefined ? [{
-      Mediator:     opts.mediator,
-      Amount:       opts.amount,
-      CurrencyCode: 'TRY',
-      ExchangeRate: 1,
-      IsVoid:       false,
-    }] : []
-
-    const body = {
-      TransactionHandle: transactionHandle(settings, seq),
-      Sale: {
-        RefererApp:            'BTPOS',
-        RefererAppVersion:     '1.0.0',
-        OrderNo:               opts.orderNo,
-        TotalAmount:           opts.amount,
-        SaleReason:            opts.reason,
-        BottomPrintableItems: [
-          {
-            type:      'text',
-            value:     opts.reason,
-            alignment: 'left',
-            fontSize:  25,
-          },
-        ],
-        SendPhoneNotification: Boolean(opts.notify?.sendSms && opts.notify?.phone),
-        SendEMailNotification: Boolean(opts.notify?.sendMail && opts.notify?.mail),
-        ...(opts.notify?.sendSms && opts.notify?.phone
-          ? { NotificationPhone: opts.notify.phone } : {}),
-        ...(opts.notify?.sendMail && opts.notify?.mail
-          ? { NotificationEMail: opts.notify.mail } : {}),
-        SkipAmountCash:       opts.mediator === 1, // nakit ise tutar girişini atla
-        AllowDismissCardRead: false,
-        CardReadTimeout:      settings.cardReadTimeout ?? 60,
-        AskCustomer:          false,
-        ...(paymentInformations.length > 0
-          ? { PaymentInformations: paymentInformations } : {}),
-        ReceiptInformation: {
-          ReceiptWidth:             settings.printWidth ?? '80mm',
-          PrintCustomerReceipt:     true,
-          PrintCustomerReceiptCopy: false,
-          PrintMerchantReceipt:     true,
-        },
-        CustomerParty: {
-          CustomerType:  opts.customer.isPerson ? 1 : 2,
-          FirstName:     opts.customer.isPerson ? opts.customer.firstName : '',
-          MiddleName:    '',
-          FamilyName:    opts.customer.isPerson ? opts.customer.lastName : '',
-          CompanyName:   opts.customer.isPerson ? '' : (opts.customer.companyName ?? ''),
-          TaxOfficeCode: '',
-          TaxNumber:     opts.customer.taxNo ?? '',
-          Phone:         opts.customer.phone ?? '',
-          EMail:         opts.customer.email ?? '',
-          Country:       opts.customer.country ?? 'Türkiye',
-          City:          opts.customer.city ?? '',
-          District:      opts.customer.district ?? '',
-          Neighborhood:  '',
-          Address:       opts.customer.address ?? '',
-        },
-      },
-    }
-
-    console.log('[AdvanceSale] body:', JSON.stringify(body, null, 2))
+    logAdvanceSaleBody(body)
     const data = await pavoRequest(
       `${pavoBaseUrl(settings)}/AdvanceSale`,
       body,

@@ -28,6 +28,8 @@ export interface CommandHandlers {
   onRestart:            () => void
   onLock:               (reason?: string) => void
   onUpdateApp:          (payload: Record<string, unknown>, ctx: UpdateAppContext) => Promise<CommandAckResult | void>
+  onDayEndRun:          (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
+  onDayEndRelease:      (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
 }
 
 const ACK_OUTBOX_KEY = 'command_ack_outbox'
@@ -295,6 +297,14 @@ export function useCommandPoller(
 
           case 'lock':
             h.onLock(cmd.payload.reason ? String(cmd.payload.reason) : undefined)
+            break
+
+          case 'day_end_run':
+            outcome = await h.onDayEndRun(cmd.payload ?? {})
+            break
+
+          case 'day_end_release':
+            outcome = await h.onDayEndRelease(cmd.payload ?? {})
             break
 
           case 'update_app':

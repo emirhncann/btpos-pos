@@ -1,5 +1,4 @@
 import { API_URL } from './api'
-import { sendPendingInvoices } from './invoiceSend'
 import { pavoListPendingSales, type PavoSettings } from './pavoService'
 import { processOperationQueue } from '../hooks/useQueueWorker'
 
@@ -150,7 +149,6 @@ async function assertSafeToUpdate(opts: {
     }
     let waiting = await countBlocking()
     if (waiting > 0) {
-      await sendPendingInvoices(companyId, { silent: true }).catch(() => {})
       await processOperationQueue({
         companyId,
         isOnline: true,

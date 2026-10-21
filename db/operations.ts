@@ -18,6 +18,13 @@ import {
 import { eq, gte, lte, and, asc, desc, inArray, or, isNull } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { planCustomerSyncRepair } from '../src/lib/customerSyncRepair'
+import {
+  formatDayEndInvoiceLabel,
+  groupDayEndSales,
+  invoiceDateStamp,
+  parseInvoiceMode,
+  type DayEndScope,
+} from '../src/lib/invoiceMode'
 import type BetterSqlite3 from 'better-sqlite3'
 
 export interface ProductRow {
@@ -144,8 +151,9 @@ export function findByBarcode(barcode: string): ProductRow | null {
 }
 
 export interface SaveSaleResult {
-  saleId:    string
-  receiptNo: string
+  saleId:      string
+  receiptNo:   string
+  invoiceMode: 'z_single' | 'per_sale'
 }
 
 export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDeviceResult): SaveSaleResult {
@@ -153,6 +161,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
   const sqlite = getSqlite()
   const saleId = randomUUID()
   const now = new Date().toISOString()
+  const invoiceMode = parseInvoiceMode(getTerminalSettings().invoiceMode)
   // Pavo belge alanları her zaman yazılır (nakitle kapanan askı satışında da e-belge barkodu için)
   const paymentDeviceData = device ? JSON.stringify({
     authCode:    device.authCode ?? null,
@@ -188,7 +197,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
       customer_id, customer_name, customer_code,
       cashier_id, cashier_name,
       invoice_sent, invoice_id, invoice_error, invoice_at,
-      card_acquirer_id, payment_provider, payment_device_data, is_return
+      card_acquirer_id, payment_provider, payment_device_data, is_return, invoice_mode
     ) VALUES (
       ?,
       (SELECT COALESCE(MAX(receipt_no), 0) + 1 FROM sales),
@@ -199,7 +208,8 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
       ?, ?, ?,
       ?, ?,
       0, NULL, NULL, NULL,
-      ?, ?, ?, ?
+      ?, ?, ?, ?,
+      ?
     )
   `).run(
     saleId,
@@ -221,6 +231,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     device?.provider ?? null,
     paymentDeviceData,
     sale.isReturn ? 1 : 0,
+    invoiceMode,
   )
 
   for (const item of items) {
@@ -263,7 +274,7 @@ export function saveSale(sale: SaleRow, items: SaleItem[], device?: PaymentDevic
     'SELECT receipt_no FROM sales WHERE id = ?',
   ).get(saleId) as { receipt_no: number }
 
-  return { saleId, receiptNo: String(inserted.receipt_no) }
+  return { saleId, receiptNo: String(inserted.receipt_no), invoiceMode }
 }
 
 /** Bekleyen veya hatalı (yeniden denenecek) fatura kayıtları */
@@ -291,18 +302,14 @@ export function getPendingInvoices(onlyAnonymous = false): (typeof sales.$inferS
     .all()
 }
 
-export function markInvoiceSent(saleId: string, invoiceId: string): void {
-  const db = getDB()
-  const at = new Date().toISOString()
-  db.update(sales)
-    .set({
-      invoiceSent:  1,
-      invoiceId,
-      invoiceAt:    at,
-      invoiceError: null,
-    })
-    .where(eq(sales.id, saleId))
-    .run()
+export function markInvoiceSent(saleId: string, invoiceId: string, invoiceNumber?: string | null): void {
+  const number = String(invoiceNumber ?? '').trim()
+  getSqlite().prepare(`
+    UPDATE sales
+    SET invoice_sent = 1, invoice_id = ?, invoice_number = COALESCE(NULLIF(?, ''), invoice_number),
+        invoice_error = NULL, invoice_at = ?
+    WHERE id = ?
+  `).run(invoiceId, number, new Date().toISOString(), saleId)
 }
 
 export function markInvoiceError(saleId: string, error: string): void {
@@ -464,12 +471,13 @@ export function getCardTotalsByBank(
   if (saleIds.length === 0) return {}
   const placeholders = saleIds.map(() => '?').join(',')
   const rows = db.prepare(`
-    SELECT acquirer_id, acquirer_name, SUM(amount) as total
+    SELECT COALESCE(acquirer_id, 'unknown') AS acquirer_id,
+           MAX(acquirer_name) AS acquirer_name,
+           SUM(amount) AS total
     FROM sale_payments
     WHERE sale_id IN (${placeholders})
       AND method = 'card'
-      AND acquirer_id IS NOT NULL
-    GROUP BY acquirer_id
+    GROUP BY COALESCE(acquirer_id, 'unknown')
   `).all(...saleIds) as Array<{ acquirer_id: string; acquirer_name: string | null; total: number }>
 
   const result: Record<string, { amount: number; acquirerName: string }> = {}
@@ -1806,6 +1814,7 @@ export interface OperationQueueRow {
   createdAt:   string
   sentAt:      string | null
   label:       string | null
+  invoiceNumber: string | null
 }
 
 function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
@@ -1831,6 +1840,9 @@ function mapOperationQueueRow(r: Record<string, unknown>): OperationQueueRow {
     createdAt:   String(r.created_at ?? ''),
     sentAt:      r.sent_at != null ? String(r.sent_at) : null,
     label:       r.label != null ? String(r.label) : null,
+    invoiceNumber: r.invoice_number != null && String(r.invoice_number).trim()
+      ? String(r.invoice_number).trim()
+      : null,
   }
 }
 
@@ -1892,13 +1904,15 @@ export type EnqueueDayEndResult = {
 }
 
 /**
- * Carisiz bekleyen satışları tek gün sonu faturasında paketler.
- * Tek SQLite transaction: seç → kuyruk satırı → sales.day_end_queue_id işaretle.
- * İkinci çağrı boş döner (day_end_queue_id dolu satışlar alınmaz).
+ * Carisiz z_single satışları gün sonu faturasında paketler.
+ * scope `z`: o ana kadar tüm paketlenmemiş satışlar, takvim günü başına paket.
+ * scope `previous_days`: yalnızca bugünden (Europe/Istanbul) önceki günler.
+ * Tek SQLite transaction. day_end_queue_id dolu satış ikinci pakete girmez.
  */
 export function enqueueDayEndInvoicePackage(params: {
   companyId: string
   terminalId: string
+  scope?: DayEndScope
 }): EnqueueDayEndResult {
   const db = getSqlite()
   const settings = getTerminalSettings()
@@ -1907,6 +1921,7 @@ export function enqueueDayEndInvoicePackage(params: {
     ? `/integration/invoice-paper/${params.companyId}`
     : `/integration/invoice/${params.companyId}`
   const torbaRef = { type: 'torba' as const }
+  const scope: DayEndScope = params.scope === 'z' ? 'z' : 'previous_days'
 
   type DayEndErpLine = {
     product_code: string
@@ -1923,150 +1938,180 @@ export function enqueueDayEndInvoicePackage(params: {
 
   const run = db.transaction(() => {
     const rows = db.prepare(`
-      SELECT id, card_amount
+      SELECT id, created_at
       FROM sales
       WHERE invoice_sent = 0
         AND day_end_queue_id IS NULL
         AND (customer_id IS NULL OR customer_id = '')
         AND (is_return IS NULL OR is_return = 0)
+        AND (invoice_mode IS NULL OR invoice_mode = 'z_single')
       ORDER BY created_at ASC
-      LIMIT 200
-    `).all() as Array<{ id: string; card_amount: number | null }>
+    `).all() as Array<{ id: string; created_at: string }>
 
-    if (rows.length === 0) {
+    const packages = groupDayEndSales(
+      rows.map(r => ({ id: r.id, createdAt: r.created_at })),
+      scope,
+      new Date().toISOString(),
+    )
+    if (packages.length === 0) {
       return { queued: false, queueId: null, saleCount: 0, fail: 0 } satisfies EnqueueDayEndResult
     }
 
-    const groupMap = new Map<string, DayEndErpLine>()
-    let expectedTotal = 0
-    const badSaleIds: string[] = []
+    const markErr = db.prepare(`
+      UPDATE sales SET invoice_sent = 2, invoice_error = ?, invoice_at = ?
+      WHERE id = ?
+    `)
+    const mark = db.prepare(`UPDATE sales SET day_end_queue_id = ? WHERE id = ?`)
+    const insert = db.prepare(`
+      INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
+      VALUES (?, ?, 'day_end_invoice', ?, 'pending', 0, ?, ?)
+    `)
+    const usedSaleIds = new Set(
+      (db.prepare(`
+        SELECT json_extract(payload, '$.sale_id') AS sid
+        FROM operation_queue
+        WHERE type = 'day_end_invoice'
+          AND json_extract(payload, '$.sale_id') IS NOT NULL
+      `).all() as Array<{ sid: string | null }>)
+        .map(r => String(r.sid ?? ''))
+        .filter(Boolean),
+    )
 
-    for (const sale of rows) {
-      const items = getSaleItems(sale.id)
-      const saleBad = items.some(
-        i => !String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
-      )
-      if (saleBad) {
-        badSaleIds.push(sale.id)
-        continue
-      }
-      for (const i of items) {
-        const qty = Math.abs(Number(i.quantity) || 0)
-        const unitPriceGross = Number(i.unitPriceGross ?? i.price)
-        const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
-        const discountAmount = Number(i.discountAmount ?? 0)
-        const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
-        expectedTotal = Math.round((expectedTotal + netAmount) * 100) / 100
-        const key = `${i.productCode}|${unitPriceGross}|${i.vatRate}`
-        const existing = groupMap.get(key)
-        if (existing) {
-          existing.quantity = Math.round((existing.quantity + qty) * 1000) / 1000
-          existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
-          existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
-          existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
-          if (existing.product_id === 0 && i.productId) {
-            existing.product_id = Number.parseInt(i.productId, 10) || 0
+    let saleCount = 0
+    let fail = 0
+    let lastQueueId: string | null = null
+    let error: string | undefined
+
+    for (const pack of packages) {
+      const groupMap = new Map<string, DayEndErpLine>()
+      let expectedTotal = 0
+      const goodIds: string[] = []
+      const badSaleIds: string[] = []
+      const badNames: string[] = []
+
+      for (const sale of pack.sales) {
+        const items = getSaleItems(sale.id)
+        const saleBad = items.some(
+          i => !String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate)),
+        )
+        if (saleBad) {
+          badSaleIds.push(sale.id)
+          for (const i of items) {
+            if (!String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate))) {
+              badNames.push(i.productName ?? '?')
+            }
           }
-        } else {
-          groupMap.set(key, {
-            product_code: i.productCode,
-            name:         i.productName ?? i.productCode,
-            quantity:     qty,
-            vatRate:      i.vatRate,
-            unit:         i.unit ?? 'Adet',
-            product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
-            unit_price_gross: unitPriceGross,
-            gross_amount: grossAmount,
-            discount_amount: discountAmount,
-            net_amount: netAmount,
-          })
+          continue
+        }
+        goodIds.push(sale.id)
+        for (const i of items) {
+          const qty = Math.abs(Number(i.quantity) || 0)
+          const unitPriceGross = Number(i.unitPriceGross ?? i.price)
+          const grossAmount = Number(i.grossAmount ?? (unitPriceGross * qty).toFixed(2))
+          const discountAmount = Number(i.discountAmount ?? 0)
+          const netAmount = Number(i.netAmount ?? (grossAmount - discountAmount).toFixed(2))
+          expectedTotal = Math.round((expectedTotal + netAmount) * 100) / 100
+          const key = `${i.productCode}|${unitPriceGross}|${i.vatRate}`
+          const existing = groupMap.get(key)
+          if (existing) {
+            existing.quantity = Math.round((existing.quantity + qty) * 1000) / 1000
+            existing.gross_amount = Math.round((existing.gross_amount + grossAmount) * 100) / 100
+            existing.discount_amount = Math.round((existing.discount_amount + discountAmount) * 100) / 100
+            existing.net_amount = Math.round((existing.net_amount + netAmount) * 100) / 100
+            if (existing.product_id === 0 && i.productId) {
+              existing.product_id = Number.parseInt(i.productId, 10) || 0
+            }
+          } else {
+            groupMap.set(key, {
+              product_code: i.productCode,
+              name:         i.productName ?? i.productCode,
+              quantity:     qty,
+              vatRate:      i.vatRate,
+              unit:         i.unit ?? 'Adet',
+              product_id:   i.productId ? Number.parseInt(i.productId, 10) || 0 : 0,
+              unit_price_gross: unitPriceGross,
+              gross_amount: grossAmount,
+              discount_amount: discountAmount,
+              net_amount: netAmount,
+            })
+          }
         }
       }
+
+      if (badSaleIds.length > 0) {
+        const msg = `Ürün kodu/KDV eksik: ${badNames.join(', ') || 'satır yok'}`
+        const at = new Date().toISOString()
+        for (const sid of badSaleIds) markErr.run(msg, at, sid)
+        fail += badSaleIds.length
+        error = msg
+      }
+      if (goodIds.length === 0 || groupMap.size === 0) continue
+
+      const lastId = goodIds[goodIds.length - 1]
+      const last = pack.sales.find(s => s.id === lastId) ?? pack.sales[pack.sales.length - 1]
+      const invoiceDate = invoiceDateStamp(last.createdAt)
+      const label = formatDayEndInvoiceLabel(pack.day, goodIds.length)
+      let daySaleId = `gunsonu-${pack.day}`
+      if (usedSaleIds.has(daySaleId)) {
+        let n = 2
+        while (usedSaleIds.has(`gunsonu-${pack.day}-${n}`)) n += 1
+        daySaleId = `gunsonu-${pack.day}-${n}`
+      }
+      usedSaleIds.add(daySaleId)
+
+      const cardByBank = getCardTotalsByBank(db, goodIds)
+      const cashTotal = getCashTotal(db, goodIds)
+      const cardAmount = Object.values(cardByBank).reduce((sum, row) => sum + Number(row.amount ?? 0), 0)
+      const paymentAccounts = matchPaymentAccounts(db, {
+        cashAmount: cashTotal,
+        cardAmount,
+        cardAcquirerId: null,
+        cardByBank,
+      })
+      const queueId = randomUUID()
+      const payload = {
+        sale_id:          daySaleId,
+        day_end_sale_ids: goodIds,
+        customer_ref:     torbaRef,
+        items:            Array.from(groupMap.values()),
+        expected_total:   expectedTotal,
+        invoice_date:     invoiceDate,
+        description:      label,
+        endpoint,
+        cash_amount:      cashTotal,
+        card_amount:      cardAmount,
+        card_acquirer_id: null as string | null,
+        card_by_bank:     cardByBank,
+        terminal_id:      params.terminalId,
+        payment_accounts: paymentAccounts,
+      }
+      insert.run(
+        queueId,
+        params.companyId,
+        JSON.stringify(payload),
+        new Date().toISOString(),
+        label,
+      )
+      for (const id of goodIds) mark.run(queueId, id)
+      saleCount += goodIds.length
+      lastQueueId = queueId
     }
 
-    if (badSaleIds.length > 0) {
-      const badNames: string[] = []
-      for (const sid of badSaleIds) {
-        for (const i of getSaleItems(sid)) {
-          if (!String(i.productCode ?? '').trim() || !Number.isFinite(Number(i.vatRate))) {
-            badNames.push(i.productName ?? '?')
-          }
-        }
-      }
-      const msg = `Ürün kodu/KDV eksik: ${badNames.join(', ')}`
-      const at = new Date().toISOString()
-      const markErr = db.prepare(`
-        UPDATE sales SET invoice_sent = 2, invoice_error = ?, invoice_at = ?
-        WHERE id = ?
-      `)
-      for (const sid of badSaleIds) markErr.run(msg, at, sid)
+    if (!lastQueueId) {
       return {
         queued: false,
         queueId: null,
         saleCount: 0,
-        fail: rows.length,
-        error: msg,
+        fail,
+        error,
       } satisfies EnqueueDayEndResult
     }
-
-    if (groupMap.size === 0) {
-      return { queued: false, queueId: null, saleCount: 0, fail: 0 } satisfies EnqueueDayEndResult
-    }
-
-    const now = new Date()
-    const saatStr = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
-    const tarihStr = now.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const description = `Gün Sonu — ${tarihStr} ${saatStr} (${rows.length} fiş)`
-    const invoiceDate = now.toISOString().replace('T', ' ').slice(0, 19)
-    const daySaleId = 'gunsonu-' + now.toISOString().slice(0, 10)
-    const pendingSaleIds = rows.map(s => s.id)
-    const cardByBank = getCardTotalsByBank(db, pendingSaleIds)
-    const cashTotal = getCashTotal(db, pendingSaleIds)
-    const cardAmount = rows.reduce((sum, s) => sum + Number(s.card_amount ?? 0), 0)
-    const paymentAccounts = matchPaymentAccounts(db, {
-      cashAmount: cashTotal,
-      cardAmount,
-      cardAcquirerId: null,
-      cardByBank,
-    })
-
-    const queueId = randomUUID()
-    const payload = {
-      sale_id:          daySaleId,
-      day_end_sale_ids: pendingSaleIds,
-      customer_ref:     torbaRef,
-      items:            Array.from(groupMap.values()),
-      expected_total:   expectedTotal,
-      invoice_date:     invoiceDate,
-      description,
-      endpoint,
-      cash_amount:      cashTotal,
-      card_amount:      cardAmount,
-      card_acquirer_id: null as string | null,
-      card_by_bank:     cardByBank,
-      terminal_id:      params.terminalId,
-      payment_accounts: paymentAccounts,
-    }
-
-    db.prepare(`
-      INSERT INTO operation_queue (id, company_id, type, payload, status, attempts, created_at, label)
-      VALUES (?, ?, 'day_end_invoice', ?, 'pending', 0, ?, ?)
-    `).run(
-      queueId,
-      params.companyId,
-      JSON.stringify(payload),
-      now.toISOString(),
-      `Gün Sonu ${tarihStr} (${invoiceType === 'paper' ? 'Kağıt' : 'E-Arşiv'})`,
-    )
-
-    const mark = db.prepare(`UPDATE sales SET day_end_queue_id = ? WHERE id = ?`)
-    for (const r of rows) mark.run(queueId, r.id)
-
     return {
       queued: true,
-      queueId,
-      saleCount: rows.length,
-      fail: 0,
+      queueId: lastQueueId,
+      saleCount,
+      fail,
+      error,
     } satisfies EnqueueDayEndResult
   })
 
@@ -2270,7 +2315,9 @@ export interface SalesReportRow {
   createdAt:    string
   invoiceSent:  number
   invoiceId:    string | null
+  invoiceNumber: string | null
   invoiceError: string | null
+  dayEndRunId:  string | null
   isReturn:     number
   payments: Array<{
     method:       string
@@ -2289,7 +2336,7 @@ export function getSalesReport(opts: {
     SELECT
       s.id, s.receipt_no, s.order_no, s.net_amount, s.cash_amount, s.card_amount,
       s.customer_name, s.cashier_name, s.created_at,
-      s.invoice_sent, s.invoice_id, s.invoice_error, s.is_return
+      s.invoice_sent, s.invoice_id, s.invoice_number, s.invoice_error, s.day_end_run_id, s.is_return
     FROM sales s
     WHERE date(s.created_at) >= ? AND date(s.created_at) <= ?
     ORDER BY s.created_at DESC
@@ -2320,7 +2367,9 @@ export function getSalesReport(opts: {
       createdAt:    String(s.created_at),
       invoiceSent:  Number(s.invoice_sent ?? 0),
       invoiceId:    s.invoice_id    ? String(s.invoice_id)    : null,
+      invoiceNumber: s.invoice_number ? String(s.invoice_number) : null,
       invoiceError: s.invoice_error ? String(s.invoice_error) : null,
+      dayEndRunId:  s.day_end_run_id ? String(s.day_end_run_id) : null,
       isReturn:     Number(s.is_return ?? 0),
       payments: payments.map(p => ({
         method:       p.method,

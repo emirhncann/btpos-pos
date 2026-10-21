@@ -1,341 +1,441 @@
-import { useCallback, useEffect, useState } from 'react'
-import { C } from '../theme/colors'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { DateRangePicker } from '../components/DateRangePicker'
+import { formatSentInvoice } from '../lib/invoiceMode'
+import { isEditableField } from '../lib/keyboardInput'
+import {
+  dayHeading,
+  dayShift,
+  formatDayRange,
+  inDayBounds,
+  istanbulClock,
+  istanbulDay,
+  presetBounds,
+  type DayPreset,
+} from '../lib/commandView'
 
-interface PaymentRow {
-  method:       string
-  amount:       number
-  acquirerName: string | null
+type DocFilter = 'all' | 'sale' | 'return' | 'cancel' | 'tahsilat' | 'odeme' | 'held'
+type PayFilter = 'all' | 'cash' | 'card' | 'split' | 'other'
+type ErpFilter = 'all' | 'sent' | 'waiting' | 'failed' | 'unsent'
+
+const PRESETS: Array<{ id: DayPreset; label: string }> = [
+  { id: 'today', label: 'Bugün' },
+  { id: 'yesterday', label: 'Dün' },
+  { id: '7', label: '7 gün' },
+]
+
+const money = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' })
+
+function payText(sale: SalesReportRow): string {
+  const methods = new Set(sale.payments.map(p => p.method))
+  const split = methods.size > 1 || (sale.cashAmount > 0 && sale.cardAmount > 0)
+  if (split) return 'Parçalı'
+  if (methods.has('card') || sale.cardAmount > 0) {
+    const bank = sale.payments.find(p => p.acquirerName)?.acquirerName
+    return bank ? `Kart · ${bank}` : 'Kart'
+  }
+  if (methods.has('meal_card')) return 'Yemek kartı'
+  if (methods.has('other')) return 'Diğer'
+  return 'Nakit'
 }
 
-interface SalesReportRow {
-  id:           string
-  receiptNo:    string
-  orderNo:      string | null
-  type:         'sale' | 'return' | 'payment'
-  netAmount:    number
-  cashAmount:   number
-  cardAmount:   number
-  customerName: string | null
-  cashierName:  string | null
-  createdAt:    string
-  invoiceSent:  number
-  invoiceId:    string | null
-  invoiceError: string | null
-  isReturn:     number
-  payments:     PaymentRow[]
+function payKind(sale: SalesReportRow): PayFilter {
+  const text = payText(sale)
+  if (text === 'Parçalı') return 'split'
+  if (text.startsWith('Kart')) return 'card'
+  if (text === 'Nakit') return 'cash'
+  return 'other'
 }
 
-interface CariPaymentRow {
-  id:            string
-  type:          'tahsilat' | 'odeme'
-  amount:        number
-  customer_name: string | null
-  customer_code: string | null
-  cashier_name:  string | null
-  description:   string | null
-  created_at:    string
+function erpView(sale: SalesReportRow): { text: string; color: string; kind: 'sent' | 'waiting' | 'failed' } {
+  if (sale.invoiceSent === 1) return { text: formatSentInvoice(sale.invoiceNumber), color: 'var(--pos-success)', kind: 'sent' }
+  if (sale.invoiceSent === 2 || sale.invoiceError) return { text: 'ERP ⚠ hata', color: 'var(--pos-danger)', kind: 'failed' }
+  if (sale.dayEndRunId) return { text: 'Gün sonu: gönderiliyor', color: 'var(--pos-primary)', kind: 'waiting' }
+  if (sale.invoiceSent === 0) return { text: 'Gün sonu bekliyor', color: 'var(--pos-text-muted)', kind: 'waiting' }
+  return { text: 'Gün sonu bekliyor', color: 'var(--pos-text-muted)', kind: 'waiting' }
 }
 
-const METHOD_LABEL: Record<string, string> = {
-  cash:      '💵 Nakit',
-  card:      '💳 Kart',
-  meal_card: '🍽️ Yemek Kartı',
+function amountHit(amount: number, q: string): boolean {
+  const norm = q.replace(/\s/g, '').replace(',', '.')
+  if (/^\d+(\.\d+)?$/.test(norm) && Math.abs(amount - Number(norm)) < 0.001) return true
+  const shown = Math.abs(amount).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return shown.replace(/\./g, '').includes(q.replace(/\./g, '').replace(/\s/g, ''))
 }
 
-const INVOICE_STATUS = (sent: number, error: string | null) => {
-  if (sent === 1) return { label: '✓ Gönderildi', color: '#FFFFFF', bg: C.success }
-  if (sent === 2 || error) return { label: '✗ Hata', color: '#FFFFFF', bg: C.danger }
-  return { label: '⏳ Bekliyor', color: '#FFFFFF', bg: C.warning }
-}
+export function SalesReportScreen({
+  companyId,
+  onClose,
+  onOpenHeld,
+}: {
+  companyId: string
+  onClose: () => void
+  onOpenHeld: () => void
+}) {
+  const [sales, setSales] = useState<SalesReportRow[]>([])
+  const [payments, setPayments] = useState<CariPaymentReportRow[]>([])
+  const [held, setHeld] = useState<HeldDocRow[]>([])
+  const [preset, setPreset] = useState<DayPreset>('today')
+  const [custom, setCustom] = useState<{ from: string; to: string } | null>(null)
+  const [picker, setPicker] = useState(false)
+  const [docFilter, setDocFilter] = useState<DocFilter>('all')
+  const [payFilter, setPayFilter] = useState<PayFilter>('all')
+  const [erpFilter, setErpFilter] = useState<ErpFilter>('all')
+  const [query, setQuery] = useState('')
+  const [q, setQ] = useState('')
+  const [limit, setLimit] = useState(200)
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [focus, setFocus] = useState(0)
+  const [items, setItems] = useState<Record<string, SaleItemRow[]>>({})
+  const [barcodeHits, setBarcodeHits] = useState<Set<string>>(new Set())
 
-function todayStr() { return new Date().toISOString().slice(0, 10) }
-function fmt(n: number) {
-  return n.toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺'
-}
+  const bounds = custom ?? presetBounds(preset)
 
-export function SalesReportScreen({ companyId }: { companyId: string }) {
-  const [sales,      setSales]      = useState<SalesReportRow[]>([])
-  const [payments,   setPayments]   = useState<CariPaymentRow[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [dateFrom,   setDateFrom]   = useState(todayStr())
-  const [dateTo,     setDateTo]     = useState(todayStr())
-  const [expanded,   setExpanded]   = useState<Set<string>>(new Set())
-  const [typeFilter, setTypeFilter] = useState<'all' | 'sale' | 'return'>('all')
+  useEffect(() => {
+    const t = setTimeout(() => setQ(query.trim().toLocaleLowerCase('tr-TR')), 250)
+    return () => clearTimeout(t)
+  }, [query])
 
-  const reload = useCallback(async () => {
-    setLoading(true)
-    try {
-      const [s, p] = await Promise.all([
-        window.electron.db.getSalesReport({ dateFrom, dateTo }),
-        window.electron.db.getCariPayments({ dateFrom, dateTo, companyId }),
-      ])
-      setSales(s as SalesReportRow[])
-      setPayments(p as CariPaymentRow[])
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    let stop = false
+    const from = dayShift(bounds.from, -1)
+    const to = dayShift(bounds.to, 1)
+    Promise.all([
+      window.electron.db.getSalesReport({ dateFrom: from, dateTo: to }),
+      window.electron.db.getCariPayments({ dateFrom: from, dateTo: to, companyId }),
+      window.electron.db.getHeldDocuments(companyId),
+    ]).then(([s, p, h]) => {
+      if (stop) return
+      setSales(s.filter(row => inDayBounds(row.createdAt, bounds.from, bounds.to)))
+      setPayments(p.filter(row => inDayBounds(row.created_at, bounds.from, bounds.to)))
+      setHeld(h.filter(row => inDayBounds(row.createdAt, bounds.from, bounds.to)))
+    }).catch(() => {})
+    return () => { stop = true }
+  }, [bounds.from, bounds.to, companyId])
+
+  useEffect(() => {
+    if (q.length < 4) {
+      setBarcodeHits(new Set())
+      return
     }
-  }, [dateFrom, dateTo, companyId])
+    let stop = false
+    void (async () => {
+      const products = await window.electron.db.getProducts().catch(() => [])
+      const codes = new Set(
+        products
+          .filter(p => (p.barcode ?? '').toLocaleLowerCase('tr-TR').includes(q) || (p.code ?? '').toLocaleLowerCase('tr-TR').includes(q))
+          .map(p => p.code ?? '')
+          .filter(Boolean),
+      )
+      const hits = new Set<string>()
+      for (const sale of sales) {
+        if (stop) return
+        const lines = items[sale.id] ?? await window.electron.db.getSaleItems(sale.id).catch(() => [])
+        if (lines.some(line =>
+          codes.has(line.productCode)
+          || line.productCode.toLocaleLowerCase('tr-TR').includes(q)
+        )) hits.add(sale.id)
+      }
+      if (!stop) setBarcodeHits(hits)
+    })()
+    return () => { stop = true }
+  }, [q, sales, items])
 
-  useEffect(() => { void reload() }, [reload])
+  const counts = useMemo(() => ({
+    sale: sales.filter(s => !s.isReturn).length,
+    ret: sales.filter(s => s.isReturn).length,
+    cancel: 0,
+    held: held.length,
+    erp: sales.filter(s => erpView(s).kind !== 'sent').length,
+  }), [sales, held])
 
-  const toggleExpand = (id: string) => {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const listed = useMemo(() => {
+    type Row = { id: string; at: string; sale?: SalesReportRow; pay?: CariPaymentReportRow; held?: HeldDocRow }
+    const rows: Row[] = []
+    for (const sale of sales) {
+      const erp = erpView(sale)
+      if (docFilter === 'sale' && sale.isReturn) continue
+      if (docFilter === 'return' && !sale.isReturn) continue
+      if (docFilter === 'cancel' || docFilter === 'tahsilat' || docFilter === 'odeme' || docFilter === 'held') continue
+      if (payFilter !== 'all' && payKind(sale) !== payFilter) continue
+      if (erpFilter === 'sent' && erp.kind !== 'sent') continue
+      if (erpFilter === 'waiting' && erp.kind !== 'waiting') continue
+      if (erpFilter === 'failed' && erp.kind !== 'failed') continue
+      if (erpFilter === 'unsent' && erp.kind === 'sent') continue
+      if (q) {
+        const receipt = String(sale.receiptNo ?? '').toLocaleLowerCase('tr-TR')
+        const order = (sale.orderNo ?? '').toLocaleLowerCase('tr-TR')
+        const customer = (sale.customerName ?? '').toLocaleLowerCase('tr-TR')
+        const textHit = receipt.includes(q) || order.includes(q) || customer.includes(q) || amountHit(sale.netAmount, q)
+        if (!textHit && !barcodeHits.has(sale.id)) continue
+      }
+      rows.push({ id: sale.id, at: sale.createdAt, sale })
+    }
+    if ((docFilter === 'all' || docFilter === 'tahsilat' || docFilter === 'odeme') && payFilter === 'all' && (erpFilter === 'all')) {
+      for (const pay of payments) {
+        if (docFilter === 'tahsilat' && pay.type !== 'tahsilat') continue
+        if (docFilter === 'odeme' && pay.type !== 'odeme') continue
+        if (q) {
+          const name = (pay.customer_name ?? '').toLocaleLowerCase('tr-TR')
+          if (!name.includes(q) && !amountHit(pay.amount, q)) continue
+        }
+        rows.push({ id: pay.id, at: pay.created_at, pay })
+      }
+    }
+    if ((docFilter === 'all' || docFilter === 'held') && payFilter === 'all' && erpFilter === 'all') {
+      for (const doc of held) {
+        if (q) {
+          const label = `${doc.label ?? ''} ${doc.receiptNo ?? ''} ${doc.customerName ?? ''}`.toLocaleLowerCase('tr-TR')
+          if (!label.includes(q) && !amountHit(doc.totalAmount, q)) continue
+        }
+        rows.push({ id: doc.id, at: doc.createdAt, held: doc })
+      }
+    }
+    rows.sort((a, b) => (a.at < b.at ? 1 : -1))
+    return rows
+  }, [sales, payments, held, docFilter, payFilter, erpFilter, q, barcodeHits])
+
+  const page = listed.slice(0, limit)
+  const groups = new Map<string, typeof page>()
+  for (const row of page) {
+    const day = istanbulDay(row.at) ?? 'tarihsiz'
+    const bucket = groups.get(day) ?? []
+    bucket.push(row)
+    groups.set(day, bucket)
   }
 
-  const filtered = sales.filter(s =>
-    typeFilter === 'all' ? true :
-    typeFilter === 'return' ? s.isReturn === 1 :
-    s.isReturn === 0,
-  )
+  useEffect(() => {
+    if (!openId || items[openId]) return
+    void window.electron.db.getSaleItems(openId).then(lines => {
+      setItems(prev => ({ ...prev, [openId]: lines }))
+    }).catch(() => {})
+  }, [openId, items])
 
-  const totalSales    = filtered.filter(s => !s.isReturn).reduce((a, s) => a + s.netAmount, 0)
-  const totalReturns  = filtered.filter(s =>  s.isReturn).reduce((a, s) => a + s.netAmount, 0)
-  const totalCash     = filtered.reduce((a, s) => a + s.cashAmount, 0)
-  const totalCard     = filtered.reduce((a, s) => a + s.cardAmount, 0)
-  const totalTahsilat = payments.filter(p => p.type === 'tahsilat').reduce((a, p) => a + p.amount, 0)
-  const totalOdeme    = payments.filter(p => p.type === 'odeme').reduce((a, p) => a + p.amount, 0)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault()
+        return
+      }
+      if (e.key === 'Escape') {
+        if (picker) return
+        e.preventDefault()
+        onClose()
+        return
+      }
+      if (isEditableField(e.target) || picker || page.length === 0) return
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocus(i => Math.min(page.length - 1, i + 1))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocus(i => Math.max(0, i - 1))
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        const row = page[Math.min(focus, page.length - 1)]
+        if (!row) return
+        if (row.held) onOpenHeld()
+        else setOpenId(id => id === row.id ? null : row.id)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focus, page, onClose, onOpenHeld, picker])
 
   return (
-    <div style={{ padding: 20, maxWidth: 860, margin: '0 auto' }}>
-
-      <div style={{ display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Belge Raporu</h2>
-          <p style={{ fontSize: 12, color: '#6B7280', margin: '4px 0 0' }}>
-            Satışlar, iadeler ve tahsilat/ödeme
-          </p>
+    <div data-home-overlay="" style={{
+      position: 'fixed', inset: 0, zIndex: 10000,
+      background: 'var(--pos-screen-bg)', color: 'var(--pos-text)',
+      display: 'flex', flexDirection: 'column', fontVariantNumeric: 'tabular-nums',
+    }}>
+      <header style={head}>
+        <button type="button" onClick={onClose} style={btn(false)}>← Ana Ekran</button>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>Belge Raporu</div>
+          <div style={{ fontSize: 13, opacity: 0.85 }}>Bu kasada kesilen fiş, iade ve iptaller</div>
         </div>
-        <button type="button" onClick={() => void reload()}
-          style={{ background: '#F3F4F6', border: '1px solid #E5E7EB',
-            borderRadius: 8, padding: '7px 14px', fontSize: 12,
-            cursor: 'pointer', color: '#374151' }}>
-          ↺ Yenile
-        </button>
-      </div>
+      </header>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+          <CountCard label="Satış" value={counts.sale} active={docFilter === 'sale'} onClick={() => setDocFilter('sale')} />
+          <CountCard label="İade" value={counts.ret} active={docFilter === 'return'} onClick={() => setDocFilter('return')} />
+          <CountCard label="İptal" value={counts.cancel} active={docFilter === 'cancel'} onClick={() => setDocFilter('cancel')} />
+          <CountCard label="Beklemede" value={counts.held} tone={counts.held > 0 ? 'var(--pos-warning)' : undefined} active={docFilter === 'held'} onClick={() => setDocFilter('held')} />
+          <CountCard label="ERP'ye gitmedi" value={counts.erp} tone={counts.erp > 0 ? 'var(--pos-danger)' : undefined} active={erpFilter === 'unsent'} onClick={() => { setDocFilter('all'); setErpFilter('unsent') }} />
+        </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14,
-        alignItems: 'center', flexWrap: 'wrap' }}>
-        <input type="date" value={dateFrom}
-          onChange={e => setDateFrom(e.target.value)}
-          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
-            border: '1px solid #E5E7EB' }} />
-        <span style={{ color: '#9CA3AF', fontSize: 12 }}>—</span>
-        <input type="date" value={dateTo}
-          onChange={e => setDateTo(e.target.value)}
-          style={{ fontSize: 12, padding: '5px 8px', borderRadius: 6,
-            border: '1px solid #E5E7EB' }} />
-        <button type="button"
-          onClick={() => { setDateFrom(todayStr()); setDateTo(todayStr()) }}
-          style={{ fontSize: 11, padding: '5px 10px', borderRadius: 6,
-            border: '1px solid #E5E7EB', background: 'white',
-            color: '#6B7280', cursor: 'pointer' }}>
-          Bugün
-        </button>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 8 }}>
-          {([['all','Tümü'],['sale','Satış'],['return','İade']] as const).map(([k,l]) => (
-            <button key={k} type="button" onClick={() => setTypeFilter(k)}
-              style={{ padding: '5px 10px', borderRadius: 16, fontSize: 11,
-                border: '1px solid', cursor: 'pointer',
-                background: typeFilter === k ? '#374151' : 'white',
-                color:      typeFilter === k ? 'white'   : '#374151',
-                borderColor:typeFilter === k ? '#374151' : '#E5E7EB' }}>
-              {l}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {([
+            ['all', 'Tümü'], ['sale', 'Satış'], ['return', 'İade'], ['cancel', 'İptal'],
+            ['tahsilat', 'Cari tahsilat'], ['odeme', 'Cari ödeme'],
+          ] as Array<[DocFilter, string]>).map(([id, label]) => (
+            <button key={id} type="button" style={btn(docFilter === id)} onClick={() => { setDocFilter(id); if (id !== 'all') setErpFilter('all') }}>{label}</button>
+          ))}
+          {PRESETS.map(item => (
+            <button key={item.id} type="button" style={btn(!custom && preset === item.id)} onClick={() => { setCustom(null); setPreset(item.id) }}>{item.label}</button>
+          ))}
+          {custom ? (
+            <button type="button" style={btn(true)} onClick={() => setPicker(true)}>
+              📅 {formatDayRange(custom.from, custom.to)}
+              <span style={{ marginLeft: 8 }} onClick={ev => { ev.stopPropagation(); setCustom(null); setPreset('today') }}>✕</span>
             </button>
+          ) : (
+            <button type="button" style={btn(false)} onClick={() => setPicker(true)}>📅 Tarih seç</button>
+          )}
+          <input data-kb="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="Fiş no / tutar / müşteri / barkod" style={search} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ alignSelf: 'center', color: 'var(--pos-text-muted)', fontSize: 13 }}>Ödeme</span>
+          {([
+            ['all', 'Tümü'], ['cash', 'Nakit'], ['card', 'Kart'], ['split', 'Parçalı'], ['other', 'Diğer'],
+          ] as Array<[PayFilter, string]>).map(([id, label]) => (
+            <button key={id} type="button" style={btn(payFilter === id)} onClick={() => setPayFilter(id)}>{label}</button>
+          ))}
+          <span style={{ alignSelf: 'center', color: 'var(--pos-text-muted)', fontSize: 13 }}>ERP</span>
+          {([
+            ['all', 'Tümü'], ['sent', 'Gönderildi'], ['waiting', 'Bekliyor'], ['failed', 'Hatalı'],
+          ] as Array<[ErpFilter, string]>).map(([id, label]) => (
+            <button key={id} type="button" style={btn(erpFilter === id)} onClick={() => setErpFilter(id)}>{label}</button>
           ))}
         </div>
-      </div>
 
-      <div style={{ display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-        gap: 8, marginBottom: 16 }}>
-        {[
-          { label: 'Toplam Satış',  value: fmt(totalSales),    color: C.primary },
-          { label: 'Toplam İade',   value: fmt(totalReturns),  color: C.danger },
-          { label: 'Nakit',         value: fmt(totalCash),     color: C.success },
-          { label: 'Kart',          value: fmt(totalCard),     color: C.online },
-          { label: 'Tahsilat',      value: fmt(totalTahsilat), color: C.success },
-          { label: 'Ödeme',         value: fmt(totalOdeme),    color: C.danger },
-        ].map(c => (
-          <div key={c.label} style={{ background: C.surface, border: `1px solid ${C.border}`, borderTop: `4px solid ${c.color}`, borderRadius: 10,
-            padding: '10px 14px', textAlign: 'center' }}>
-            <div style={{ fontSize: 11, color: c.color, marginBottom: 4 }}>{c.label}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: c.color }}>{c.value}</div>
+        {picker && (
+          <DateRangePicker
+            from={bounds.from}
+            to={bounds.to}
+            onClose={() => setPicker(false)}
+            onApply={(from, to) => { setCustom({ from, to }); setPicker(false) }}
+          />
+        )}
+
+        {page.length === 0 ? (
+          <div style={{ ...card, textAlign: 'center', color: 'var(--pos-text-muted)', padding: 28 }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>🧾</div>
+            Bu aralıkta belge yok
           </div>
+        ) : [...groups.entries()].map(([day, rows]) => (
+          <section key={day}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--pos-text-muted)', margin: '8px 0' }}>{dayHeading(day)}</div>
+            {rows.map(row => {
+              const index = page.indexOf(row)
+              const open = openId === row.id
+              if (row.held) {
+                return (
+                  <button key={row.id} type="button" onClick={onOpenHeld} style={{ ...card, ...rowBtn, width: '100%', marginBottom: 8, outline: focus === index ? '3px solid var(--pos-primary)' : 'none' }}>
+                    <span>⏸</span>
+                    <span style={{ flex: 1, textAlign: 'left', fontWeight: 700 }}>Beklemede {row.held.label || row.held.receiptNo || ''}</span>
+                    <span>{istanbulClock(row.at)}</span>
+                    <span>{money.format(row.held.totalAmount)}</span>
+                    <span style={{ color: 'var(--pos-text-muted)' }}>Belge getir →</span>
+                  </button>
+                )
+              }
+              if (row.pay) {
+                const sign = row.pay.type === 'odeme' ? -1 : 1
+                return (
+                  <div key={row.id} style={{ ...card, marginBottom: 8, outline: focus === index ? '3px solid var(--pos-primary)' : 'none' }}>
+                    <button type="button" style={rowBtn} onClick={() => setOpenId(open ? null : row.id)}>
+                      <span>{row.pay.type === 'tahsilat' ? '💰' : '💸'}</span>
+                      <span style={{ flex: 1, textAlign: 'left', fontWeight: 700 }}>{row.pay.type === 'tahsilat' ? 'Cari tahsilat' : 'Cari ödeme'} {row.pay.customer_name ?? ''}</span>
+                      <span>{istanbulClock(row.at)}</span>
+                      <span>{money.format(sign * row.pay.amount)}</span>
+                      <span>{open ? '▾' : '▸'}</span>
+                    </button>
+                    {open && (
+                      <div style={{ padding: '4px 12px 12px', fontSize: 13, color: 'var(--pos-text-muted)' }}>
+                        Kasiyer: {row.pay.cashier_name || '—'} · {row.pay.description || 'Açıklama yok'}
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              const sale = row.sale!
+              const erp = erpView(sale)
+              const lines = items[sale.id] ?? []
+              return (
+                <div key={row.id} style={{ ...card, marginBottom: 8, outline: focus === index ? '3px solid var(--pos-primary)' : 'none' }}>
+                  <button type="button" style={rowBtn} onClick={() => { setFocus(index); setOpenId(open ? null : row.id) }}>
+                    <span>{sale.isReturn ? '↩' : '🧾'}</span>
+                    <span style={{ fontWeight: 700, minWidth: 110, textAlign: 'left' }}>{sale.isReturn ? 'İade' : 'Satış'} {sale.receiptNo}</span>
+                    <span>{istanbulClock(sale.createdAt)}</span>
+                    <span style={{ flex: 1, textAlign: 'left' }}>{payText(sale)}</span>
+                    <span style={{ color: 'var(--pos-text-muted)' }}>{open && lines.length ? `${lines.length} kalem` : ''}</span>
+                    <span>{money.format((sale.isReturn ? -1 : 1) * sale.netAmount)}</span>
+                    <span style={{ color: erp.color, fontWeight: 700 }}>{erp.text}</span>
+                    <span>{open ? '▾' : '▸'}</span>
+                  </button>
+                  {open && (
+                    <div style={{ padding: '4px 12px 12px', fontSize: 13 }}>
+                      <div>Kalemler: {lines.length === 0 ? '…' : lines.map(line => `${line.productName} ×${line.quantity} ${money.format(line.netAmount || line.price)} · KDV %${line.vatRate}`).join(' · ')}</div>
+                      <div style={{ marginTop: 6 }}>
+                        Ödemeler: {sale.payments.length
+                          ? sale.payments.map(p => `${p.method === 'cash' ? 'Nakit' : p.method === 'card' ? 'Kart' : p.method}${p.acquirerName ? ` ${p.acquirerName}` : ''} ${money.format(p.amount)}`).join(' · ')
+                          : `${sale.cashAmount ? `Nakit ${money.format(sale.cashAmount)}` : ''} ${sale.cardAmount ? `Kart ${money.format(sale.cardAmount)}` : ''}`}
+                      </div>
+                      <div style={{ marginTop: 6 }}>Pavo: {sale.orderNo ? `OrderNo ${sale.orderNo}` : 'OrderNo yok'} · {istanbulClock(sale.createdAt, true)}</div>
+                      <div style={{ marginTop: 6 }}>Kasiyer: {sale.cashierName || '—'} · Müşteri: {sale.customerName || '—'}</div>
+                      <div style={{ marginTop: 6 }}>
+                        {sale.invoiceSent === 1 ? (
+                          <span style={{ fontSize: 12, color: 'var(--pos-text-muted)' }}>
+                            İşbaşı kimliği: {sale.invoiceId || '—'}
+                          </span>
+                        ) : (
+                          <>ERP: {erp.text}</>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </section>
         ))}
+        {listed.length > limit && (
+          <button type="button" style={{ ...btn(false), alignSelf: 'center' }} onClick={() => setLimit(n => n + 200)}>Daha eski kayıtlar</button>
+        )}
       </div>
-
-      {payments.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-            💰 Cari Tahsilat / Ödeme
-          </div>
-          {payments.map(p => (
-            <div key={p.id} style={{ display: 'flex', alignItems: 'center',
-              gap: 10, padding: '10px 14px', borderRadius: 8,
-              background: 'white', border: '1px solid #E5E7EB', marginBottom: 4 }}>
-              <div style={{ fontSize: 18 }}>
-                {p.type === 'tahsilat' ? '💰' : '💸'}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>
-                  {p.type === 'tahsilat' ? 'Tahsilat' : 'Ödeme'}
-                  {p.customer_name && ` — ${p.customer_name}`}
-                </div>
-                <div style={{ fontSize: 11, color: '#9CA3AF' }}>
-                  {new Date(p.created_at).toLocaleString('tr-TR')}
-                  {p.cashier_name && ` · ${p.cashier_name}`}
-                  {p.description && ` · ${p.description}`}
-                </div>
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 700,
-                color: p.type === 'tahsilat' ? '#2E7D32' : '#C62828' }}>
-                {p.type === 'tahsilat' ? '+' : '−'}{fmt(p.amount)}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF' }}>
-          Yükleniyor...
-        </div>
-      ) : filtered.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 13 }}>
-          Bu tarihte işlem bulunamadı
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {filtered.map(sale => {
-            const isExpanded = expanded.has(sale.id)
-            const inv = INVOICE_STATUS(sale.invoiceSent, sale.invoiceError)
-
-            return (
-              <div key={sale.id} style={{ background: 'white',
-                border: `1px solid ${sale.isReturn ? '#FECACA' : '#E5E7EB'}`,
-                borderRadius: 10, overflow: 'hidden' }}>
-
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => toggleExpand(sale.id)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') toggleExpand(sale.id) }}
-                  style={{ padding: '12px 16px', display: 'flex',
-                    alignItems: 'center', gap: 10, cursor: 'pointer',
-                    background: sale.isReturn ? '#FFF5F5' : 'white' }}>
-
-                  <div style={{ fontSize: 18 }}>
-                    {sale.isReturn ? '↩️' : '🧾'}
-                  </div>
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700,
-                        color: sale.isReturn ? '#DC2626' : '#111827',
-                        fontFamily: 'monospace' }}>
-                        {sale.orderNo || `#${sale.receiptNo}`}
-                      </span>
-                      {sale.customerName && (
-                        <span style={{ fontSize: 11, color: '#6B7280' }}>
-                          · {sale.customerName}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>
-                      {new Date(sale.createdAt).toLocaleString('tr-TR')}
-                      {sale.cashierName && ` · ${sale.cashierName}`}
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700,
-                      color: sale.isReturn ? '#DC2626' : '#111827' }}>
-                      {sale.isReturn ? '−' : ''}{fmt(sale.netAmount)}
-                    </div>
-                  </div>
-
-                  <div style={{ background: inv.bg, color: inv.color,
-                    borderRadius: 6, padding: '3px 8px',
-                    fontSize: 10, fontWeight: 600, flexShrink: 0 }}>
-                    {inv.label}
-                  </div>
-
-                  <div style={{ color: '#9CA3AF', fontSize: 12, flexShrink: 0 }}>
-                    {isExpanded ? '▲' : '▼'}
-                  </div>
-                </div>
-
-                {isExpanded && (
-                  <div style={{ borderTop: '1px solid #F3F4F6',
-                    padding: '8px 16px 12px', background: '#FAFAFA' }}>
-                    {sale.payments.length > 0 ? (
-                      sale.payments.map((p, i) => (
-                        <div key={i} style={{ display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center', padding: '5px 0',
-                          borderBottom: i < sale.payments.length - 1
-                            ? '1px solid #F3F4F6' : 'none' }}>
-                          <span style={{ fontSize: 12, color: '#374151' }}>
-                            {METHOD_LABEL[p.method] ?? p.method}
-                            {p.acquirerName && (
-                              <span style={{ color: '#9CA3AF', marginLeft: 6 }}>
-                                {p.acquirerName}
-                              </span>
-                            )}
-                          </span>
-                          <span style={{ fontSize: 13, fontWeight: 600,
-                            color: '#111827' }}>
-                            {fmt(p.amount)}
-                          </span>
-                        </div>
-                      ))
-                    ) : (
-                      <>
-                        {sale.cashAmount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between',
-                            padding: '5px 0' }}>
-                            <span style={{ fontSize: 12 }}>💵 Nakit</span>
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>
-                              {fmt(sale.cashAmount)}
-                            </span>
-                          </div>
-                        )}
-                        {sale.cardAmount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between',
-                            padding: '5px 0' }}>
-                            <span style={{ fontSize: 12 }}>💳 Kart</span>
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>
-                              {fmt(sale.cardAmount)}
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {sale.invoiceError && (
-                      <div style={{ marginTop: 6, fontSize: 11, color: '#C62828',
-                        background: '#FEF2F2', padding: '4px 8px', borderRadius: 4 }}>
-                        ✕ {sale.invoiceError}
-                      </div>
-                    )}
-                    {sale.invoiceId && (
-                      <div style={{ marginTop: 4, fontSize: 11, color: '#2E7D32' }}>
-                        Fatura No: {sale.invoiceId}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
+}
+
+function CountCard({ label, value, tone, active, onClick }: { label: string; value: number; tone?: string; active?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} style={{ ...card, textAlign: 'left', cursor: 'pointer', minHeight: 72, borderColor: tone ?? 'var(--pos-border)', outline: active ? '3px solid var(--pos-primary)' : 'none' }}>
+      <div style={{ fontSize: 13, color: 'var(--pos-text-muted)' }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: tone ?? 'var(--pos-text)' }}>{value}</div>
+    </button>
+  )
+}
+
+const card: CSSProperties = {
+  background: 'var(--pos-surface)',
+  color: 'var(--pos-text)',
+  border: '1px solid var(--pos-border)',
+  borderRadius: 12,
+  padding: 12,
+}
+
+const head: CSSProperties = {
+  flexShrink: 0, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px',
+  background: 'var(--pos-header-bg)', color: 'var(--pos-header-text)', borderBottom: '1px solid var(--pos-border)',
+}
+
+const rowBtn: CSSProperties = {
+  width: '100%', minHeight: 56, display: 'flex', alignItems: 'center', gap: 10,
+  background: 'transparent', color: 'inherit', border: 'none', cursor: 'pointer', font: 'inherit',
+  fontVariantNumeric: 'tabular-nums',
+}
+
+const search: CSSProperties = {
+  minHeight: 48, minWidth: 220, flex: '1 1 220px', borderRadius: 8,
+  border: '1px solid var(--pos-border)', background: 'var(--pos-surface)', color: 'var(--pos-text)',
+  padding: '0 12px', font: 'inherit',
+}
+
+function btn(on: boolean): CSSProperties {
+  return {
+    minHeight: 48, padding: '0 12px', borderRadius: 8,
+    border: '1px solid var(--pos-border)',
+    background: on ? 'var(--pos-primary)' : 'var(--pos-surface)',
+    color: on ? 'var(--pos-primary-text)' : 'var(--pos-text)',
+    cursor: 'pointer', fontWeight: 700,
+  }
 }

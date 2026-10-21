@@ -9,7 +9,6 @@ import SplashScreen       from './screens/SplashScreen'
 import { useCommandPoller } from './hooks/useCommandPoller'
 import { useConnectionStatus } from './hooks/useConnectionStatus'
 import { buildMerkezCommandHandlers, noopCommandHandlers } from './hooks/merkezCommandHandlers'
-import { sendPendingInvoices } from './lib/invoiceSend'
 import { useQueueWorker, scheduleProcessQueue } from './hooks/useQueueWorker'
 import { useGlobalClickSound } from './hooks/useGlobalClickSound'
 import RestoreScreen from './screens/RestoreScreen'
@@ -21,6 +20,9 @@ import { reloadSettings, setActiveCashierId, useSettings } from './hooks/useSett
 import { applyPosTheme, DEFAULT_THEME } from './theme/themes'
 import { SaleCompletedDialog } from './components/SaleCompletedDialog'
 import './lib/pavoRecovery'
+import { watchCommandProgress } from './lib/commandLive'
+
+watchCommandProgress()
 
 type AppState = 'loading' | 'activation' | 'restore' | 'initial_sync' | 'cashier_login' | 'dashboard' | 'pos'
 
@@ -190,15 +192,14 @@ export default function App() {
 
   useEffect(() => {
     if (!isOnline || !companyId) return
-    window.electron.db.getPendingInvoices(true)
-      .then(async pending => {
-        if (pending.length > 0) {
-          await sendPendingInvoices(companyId, { silent: true })
-          scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
-        }
-      })
-      .catch(() => {})
+    scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })
   }, [isOnline, companyId, processQueue])
+
+  useEffect(() => {
+    const onQueue = () => scheduleProcessQueue(processQueue, 300, { includeDayEnd: true })
+    window.addEventListener('btpos-process-queue', onQueue)
+    return () => window.removeEventListener('btpos-process-queue', onQueue)
+  }, [processQueue])
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 5000)

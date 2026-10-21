@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 13
+export const SCHEMA_VERSION = 16
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -103,13 +103,16 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
       cashier_name TEXT,
       invoice_sent INTEGER NOT NULL DEFAULT 0,
       invoice_id TEXT,
+      invoice_number TEXT,
       invoice_error TEXT,
       invoice_at TEXT,
       card_acquirer_id TEXT,
       payment_provider TEXT,
       payment_device_data TEXT,
       is_return INTEGER DEFAULT 0,
-      day_end_queue_id TEXT
+      day_end_queue_id TEXT,
+      invoice_mode TEXT,
+      day_end_run_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS sale_items (
@@ -507,6 +510,7 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   addColumnIfMissing(sqlite, 'sales', 'customer_code', 'customer_code TEXT')
   addColumnIfMissing(sqlite, 'sales', 'invoice_sent', 'invoice_sent INTEGER NOT NULL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'invoice_id', 'invoice_id TEXT')
+  addColumnIfMissing(sqlite, 'sales', 'invoice_number', 'invoice_number TEXT')
   addColumnIfMissing(sqlite, 'sales', 'invoice_error', 'invoice_error TEXT')
   addColumnIfMissing(sqlite, 'sales', 'invoice_at', 'invoice_at TEXT')
 
@@ -517,6 +521,8 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
   if (!salesCols.includes('payment_device_data')) sqlite.exec('ALTER TABLE sales ADD COLUMN payment_device_data TEXT')
   if (!salesCols.includes('is_return')) sqlite.exec('ALTER TABLE sales ADD COLUMN is_return INTEGER DEFAULT 0')
   if (!salesCols.includes('day_end_queue_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN day_end_queue_id TEXT')
+  if (!salesCols.includes('invoice_mode')) sqlite.exec('ALTER TABLE sales ADD COLUMN invoice_mode TEXT')
+  if (!salesCols.includes('day_end_run_id')) sqlite.exec('ALTER TABLE sales ADD COLUMN day_end_run_id TEXT')
 
   addColumnIfMissing(sqlite, 'sales', 'discount_rate', 'discount_rate REAL DEFAULT 0')
   addColumnIfMissing(sqlite, 'sales', 'discount_amount', 'discount_amount REAL DEFAULT 0')
@@ -623,7 +629,57 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       error        TEXT,
       created_at   TEXT NOT NULL,
       sent_at      TEXT,
-      label        TEXT
+      label        TEXT,
+      day_end_run_id TEXT,
+      doc_key      TEXT,
+      invoice_number TEXT
+    )
+  `)
+  addColumnIfMissing(sqlite, 'operation_queue', 'day_end_run_id', 'day_end_run_id TEXT')
+  addColumnIfMissing(sqlite, 'operation_queue', 'doc_key', 'doc_key TEXT')
+  addColumnIfMissing(sqlite, 'operation_queue', 'invoice_number', 'invoice_number TEXT')
+  sqlite.exec(`
+    UPDATE operation_queue
+    SET invoice_number = NULLIF(TRIM(json_extract(payload, '$.invoice_number')), '')
+    WHERE invoice_number IS NULL OR TRIM(invoice_number) = '';
+
+    UPDATE operation_queue
+    SET invoice_number = (
+      SELECT NULLIF(TRIM(json_extract(p.payload, '$.invoice_number')), '')
+      FROM operation_queue p
+      WHERE p.type = 'payment'
+        AND json_extract(p.payload, '$.invoice_id') = json_extract(operation_queue.payload, '$.erp_invoice_id')
+        AND NULLIF(TRIM(json_extract(p.payload, '$.invoice_number')), '') IS NOT NULL
+      LIMIT 1
+    )
+    WHERE type IN ('invoice', 'return_invoice', 'day_end_invoice')
+      AND (invoice_number IS NULL OR TRIM(invoice_number) = '')
+      AND json_extract(payload, '$.erp_invoice_id') IS NOT NULL;
+
+    UPDATE sales
+    SET invoice_number = (
+      SELECT q.invoice_number
+      FROM operation_queue q
+      WHERE q.invoice_number IS NOT NULL AND TRIM(q.invoice_number) != ''
+        AND (
+          json_extract(q.payload, '$.erp_invoice_id') = sales.invoice_id
+          OR json_extract(q.payload, '$.invoice_id') = sales.invoice_id
+        )
+      LIMIT 1
+    )
+    WHERE invoice_sent = 1
+      AND invoice_id IS NOT NULL
+      AND (invoice_number IS NULL OR TRIM(invoice_number) = '');
+  `)
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS operation_queue_run_doc_uniq
+      ON operation_queue (day_end_run_id, doc_key) WHERE day_end_run_id IS NOT NULL
+  `)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS day_end_runs (
+      run_id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,
+      reported_at TEXT
     )
   `)
 

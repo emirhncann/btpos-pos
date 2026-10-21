@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { sendInvoiceForSale, sendReturnInvoice, tryResolveTorbaCustomer } from '../lib/invoiceSend'
+import { tryResolveTorbaCustomer } from '../lib/invoiceSend'
 import { CustomerFormModal } from '../components/CustomerFormModal'
 import {
   pavoCompleteSale,
@@ -11,6 +11,7 @@ import {
   pavoCheckPendingSale,
   pavoAbandonSuspendedSale,
   pavoGetSaleResult,
+  buildPavoAdvanceSale,
   pavoAdvanceSale,
   pavoCompleteUncompletedSale,
   pavoListPendingSales,
@@ -32,6 +33,7 @@ import ConnectionDot from '../components/ConnectionDot'
 import { CmdProgressChip } from '../components/CmdProgressChip'
 import { PosUndefinedBadge } from '../components/PosUndefinedBadge'
 import { isPosDefined, POS_UNDEFINED_MESSAGE } from '../services/pos/posReadiness'
+import { takePosBoot } from '../lib/posBoot'
 import { getPosSnapshot, isPosReady, refreshPosReady, subscribePosReady, usePosReady } from '../store/posReady'
 import { PavoLockOverlay } from '../components/PavoLockOverlay'
 import { getRecoveryInfo, isRecoveryActive, isRecoveryInFlight, paymentTotals, primeStaleWaiting, setRecoveryRuntime, summarizeProbe, type PendingLookup, type RecoveryProbe } from '../lib/pavoRecovery'
@@ -1093,7 +1095,7 @@ export default function POSScreen({
     void loadCustomersForModal(customerQ)
   }, [customerQ, showCustomer, companyId, loadCustomersForModal])
 
-  /** Klavye onConfirm veya normal input — sonuçlar dropdown'da; tek eşleşmede otomatik seç */
+  /** Sonuçlar listede kalır; cari yalnızca tıklanınca seçilir */
   const searchCariPayment = useCallback(async (v: string) => {
     setCariPaymentQ(v)
     if (v.length < 2) {
@@ -1103,13 +1105,7 @@ export default function POSScreen({
     setCariPaymentSearching(true)
     try {
       const all = await window.electron.db.getCustomers(companyId)
-      const results = rankCustomers(all, v)
-      setCariPaymentResults(results)
-      if (results.length === 1) {
-        setCariPaymentCust(results[0])
-        setCariPaymentResults([])
-        setCariPaymentQ('')
-      }
+      setCariPaymentResults(rankCustomers(all, v))
     } catch {
       setCariPaymentResults([])
     } finally {
@@ -2337,6 +2333,14 @@ export default function POSScreen({
     void loadPendingSales()
   }
 
+  useEffect(() => {
+    const boot = takePosBoot()
+    if (!boot) return
+    if (boot.barcode) setSearchQ(boot.barcode)
+    if (boot.menu === 'islemler') setMenuOpen('islemler')
+    if (boot.held) openHeldModal()
+  }, [])
+
   async function saveHeldLabel() {
     if (!heldEdit) return
     const note = heldEdit.label.trim().slice(0, 60)
@@ -2540,41 +2544,38 @@ export default function POSScreen({
           return
         }
         if (settings.terminal.cariPaymentUsePavo && pavoSettings) {
-          const seq = await window.electron.db.nextPavoSequence()
-          const nameParts = (cariPaymentCust.name ?? '').split(' ')
-
-          const pavoRes = await pavoAdvanceSale(pavoSettings, seq, {
+          const mediator = cariPaymentMethod === 'cash' ? 1 : cariPaymentMethod === 'card' ? 2 : 0
+          const appVersion = await window.electron.update.getVersion().catch(() => '')
+          const draft = buildPavoAdvanceSale({
+            settings: pavoSettings,
+            seq: 0,
             orderNo,
+            appVersion,
             amount,
-            reason: cariPaymentDesc.trim() || reason,
-            mediator: cariPaymentMethod === 'cash' ? 1
-                    : cariPaymentMethod === 'card' ? 2
-                    : undefined,
-            customer: {
-              isPerson:    cariPaymentCust.isPerson ?? true,
-              firstName:   cariPaymentCust.isPerson
-                ? (cariPaymentCust.firstName || nameParts[0] || '')
-                : '',
-              lastName:    cariPaymentCust.isPerson
-                ? (cariPaymentCust.lastName || nameParts.slice(1).join(' '))
-                : '',
-              companyName: !cariPaymentCust.isPerson ? cariPaymentCust.name : undefined,
-              taxNo:       cariPaymentCust.taxNo ?? '',
-              phone:       cariPaymentCust.phone ?? '',
-              email:       cariPaymentCust.email ?? '',
-              country:     'Türkiye',
-              city:        cariPaymentCust.city ?? '',
-              district:    cariPaymentCust.district ?? '',
-              address:     cariPaymentCust.address ?? '',
-            },
-            notify: {
-              sendSms:  Boolean(smsPhone),
-              phone:    smsPhone,
-              sendMail: Boolean(mailAddr),
-              mail:     mailAddr,
-            },
+            mediator,
+            customer: cariPaymentCust,
+            workplaceCity: settings.terminal.terminalInfo.workplace?.city,
           })
-
+          if (!draft.ok) {
+            setCariPaymentResult({ ok: false, msg: draft.message })
+            return
+          }
+          const seq = await window.electron.db.nextPavoSequence()
+          const built = buildPavoAdvanceSale({
+            settings: pavoSettings,
+            seq,
+            orderNo,
+            appVersion,
+            amount,
+            mediator,
+            customer: cariPaymentCust,
+            workplaceCity: settings.terminal.terminalInfo.workplace?.city,
+          })
+          if (!built.ok) {
+            setCariPaymentResult({ ok: false, msg: built.message })
+            return
+          }
+          const pavoRes = await pavoAdvanceSale(pavoSettings, built.body)
           if (!pavoRes.success) {
             setCariPaymentResult({ ok: false, msg: pavoRes.message ?? 'Pavo tahsilat başarısız' })
             return
@@ -3354,15 +3355,6 @@ export default function POSScreen({
       }
     })
     await window.electron.db.saveSalePayments(paymentRows)
-
-    if (!skipErp && selectedCustomer && saleId && companyId) {
-      void sendInvoiceForSale(companyId, saleId, selectedCustomer, invoiceType, {
-        cashAmount: cashAmt,
-        cardAmount: cardAmt,
-        cardAcquirerId,
-        cardByBank,
-      }, printOrderNo)
-    }
 
     const terminalId = await window.electron.store.get('terminal_id') as string | null
     const paymentLabel =
@@ -4600,13 +4592,13 @@ export default function POSScreen({
 
       const items = sale.Items
         .filter((item: ReturnableSaleItem) => (selected[item.Id] ?? 0) > 0)
-        .map((item: ReturnableSaleItem) => {
+        .map((item: ReturnableSaleItem, index: number) => {
           const qty = selected[item.Id] ?? 0
           // Pavo iade: müşteriye ödenen (indirimli) tutar
           const unitNet = Number(item.UnitPrice) || 0
           const lineTotal = Math.round(qty * unitNet * 100) / 100
           return {
-            productCode:    '',
+            productCode:    logoItems[index]?.productCode ?? '',
             productName:    item.ProductName,
             quantity:       -qty,
             unitPrice:      unitNet,
@@ -4622,29 +4614,7 @@ export default function POSScreen({
           }
         })
 
-      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, items, undefined)
-
-      if (companyId) {
-        try {
-          const queueInvoiceType: 'e_archive' | 'paper' =
-            settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive'
-
-          const { enqueueQuickReturnInvoice } = await import('../lib/invoiceSend')
-
-          await enqueueQuickReturnInvoice(companyId, {
-            receiptNo,
-            orderNo,
-            totalReturn,
-            invoiceType: queueInvoiceType,
-            cashAmount:  cashReturn,
-            cardAmount:  cardReturn,
-            items:       logoItems,
-          })
-          console.log('[hızlı iade] Logo iade faturası kuyruğa eklendi')
-        } catch (e) {
-          console.warn('[hızlı iade] Logo kuyruğa eklenemedi:', e)
-        }
-      }
+      await window.electron.db.saveSale(saleRow, items, undefined)
 
       showSuccess(
         'İade Tamamlandı',
@@ -4718,7 +4688,7 @@ export default function POSScreen({
       )
       assertAllocatedTotal(allocated, grandTotal, '[iade/iskonto]')
 
-      const { saleId, receiptNo } = await window.electron.db.saveSale(saleRow, allocated.map(a => {
+      const { receiptNo } = await window.electron.db.saveSale(saleRow, allocated.map(a => {
         const netUnit = a.quantity > 0 ? r2(a.netAmount / a.quantity) : a.unitPriceGross
         return {
           productId: a.source.productId,
@@ -4738,31 +4708,6 @@ export default function POSScreen({
           netAmount: a.netAmount,
         }
       }), undefined)
-
-      if (companyId) {
-        try {
-          const { sendReturnInvoice } = await import('../lib/invoiceSend')
-          const queueInvoiceType: 'e_archive' | 'paper' =
-            settings.terminal.invoiceType === 'paper' ? 'paper' : 'e_archive'
-
-          const customer = selectedCustomer ?? await tryResolveTorbaCustomer(companyId)
-
-          await sendReturnInvoice(
-            companyId,
-            saleId,
-            customer,
-            queueInvoiceType,
-            {
-              cashAmount: cashAmt,
-              cardAmount: cardAmt,
-            },
-            orderNo,
-          )
-          console.log('[normal iade] Logo iade faturası kuyruğa eklendi')
-        } catch (e) {
-          console.warn('[normal iade] Logo iade faturası kuyruğa eklenemedi:', e)
-        }
-      }
 
       const terminalLabelIade = settings.terminal.terminalInfo.terminalName?.trim() || 'Kasa'
       void printIfTemplate('iade', buildSaleReceiptData({
@@ -9665,4 +9610,4 @@ export default function POSScreen({
     </div>
   )
 }
-
+

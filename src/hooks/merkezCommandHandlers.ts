@@ -6,6 +6,7 @@ import { parseSettingsBundle } from '../lib/settingsModel'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 import { refreshPosReady } from '../store/posReady'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
+import { postDayEndStatus } from '../lib/dayEndApi'
 
 async function getWorkplaceId(): Promise<string | null> {
   try {
@@ -32,6 +33,8 @@ export const noopCommandHandlers: CommandHandlers = {
   onRestart:            () => {},
   onLock:               () => {},
   onUpdateApp:          async () => {},
+  onDayEndRun:          async () => {},
+  onDayEndRelease:      async () => {},
 }
 
 export function pluGroupsToCacheRows(
@@ -553,6 +556,54 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       })
       d.onAdminUpdate?.()
       window.dispatchEvent(new Event('btpos-admin-update'))
+    },
+
+    onDayEndRun: async (payload) => {
+      const runId = String(payload.run_id ?? '').trim()
+      if (!runId) throw new Error('Gün sonu komutunda run_id yok')
+      const prior = await window.electron.db.dayEndRunStatus(runId)
+      if (prior === 'completed' || prior === 'released' || prior === 'failed') {
+        return { message: 'Bu gün sonu zaten sonuçlanmış' }
+      }
+      const rangeStart = String(payload.range_start ?? '')
+      const rangeEnd = String(payload.range_end ?? '')
+      if (!rangeStart || !rangeEnd) throw new Error('Gün sonu aralığı yok')
+      const input = {
+        companyId: d.companyId,
+        terminalId: d.terminalId,
+        runId,
+        rangeStart,
+        rangeEnd,
+        rangeLabel: String(payload.range_label ?? ''),
+        invoiceMode: payload.invoice_mode != null ? String(payload.invoice_mode) : undefined,
+        terminalNo: payload.terminal_no != null ? String(payload.terminal_no) : undefined,
+      }
+      const probe = await window.electron.db.applyDayEndRun(input)
+      if (probe.empty) {
+        await postDayEndStatus(runId, { status: 'completed_empty' })
+        await window.electron.db.markDayEndRunStatus(runId, 'completed_empty')
+        return { message: 'Bu aralıkta gönderilecek satış yok' }
+      }
+      await postDayEndStatus(runId, { status: 'processing' })
+      window.dispatchEvent(new Event('btpos-process-queue'))
+      return {
+        count: probe.saleCount + probe.refundCount,
+        message: `${probe.saleCount} satış, ${probe.refundCount} iade kuyruğa alındı`,
+      }
+    },
+
+    onDayEndRelease: async (payload) => {
+      const runId = String(payload.run_id ?? '').trim()
+      if (!runId) throw new Error('Gün sonu iptalinde run_id yok')
+      const started = Date.now()
+      while (Date.now() - started < 60_000) {
+        const busy = await window.electron.db.countDayEndProcessing(runId)
+        if (busy === 0) break
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      await window.electron.db.releaseDayEndRun(runId)
+      await postDayEndStatus(runId, { status: 'released' })
+      return { message: 'Satışlar yeniden gün sonuna alınabilir' }
     },
   }
 }

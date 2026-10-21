@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS terminal_settings_cache (
   touch_keyboard         INTEGER NOT NULL DEFAULT 1,
   customer_display       INTEGER NOT NULL DEFAULT 0,
   invoice_type           TEXT    NOT NULL DEFAULT 'e_archive',
+  invoice_mode           TEXT,
   torba_cari_id          TEXT,
   torba_cari_name        TEXT,
   cari_payment_use_pavo  INTEGER NOT NULL DEFAULT 0,
@@ -123,6 +124,9 @@ export function ensureSettingsTables(sqlite: SqliteLike): void {
   }
   if (!cols.has('devtools_expires_at')) {
     sqlite.exec(`ALTER TABLE terminal_settings_cache ADD COLUMN devtools_expires_at TEXT`)
+  }
+  if (!cols.has('invoice_mode')) {
+    sqlite.exec(`ALTER TABLE terminal_settings_cache ADD COLUMN invoice_mode TEXT`)
   }
 }
 
@@ -269,6 +273,7 @@ function mapTerminalRow(row: Record<string, unknown> | undefined): TerminalSetti
     touch_keyboard: row.touch_keyboard,
     customer_display: row.customer_display,
     invoice_type: row.invoice_type,
+    invoice_mode: row.invoice_mode,
     torba_cari_id: row.torba_cari_id,
     torba_cari_name: row.torba_cari_name,
     cari_payment_use_pavo: row.cari_payment_use_pavo,
@@ -403,11 +408,11 @@ export function matchPaymentAccounts(
 
 const INSERT_TERMINAL = `
   INSERT OR REPLACE INTO terminal_settings_cache (
-    id, touch_keyboard, customer_display, invoice_type,
+    id, touch_keyboard, customer_display, invoice_type, invoice_mode,
     torba_cari_id, torba_cari_name, cari_payment_use_pavo,
     enabled_payment_brands, login_with_code, login_with_card,
     default_template_ids, terminal_info, devtools_enabled, devtools_expires_at, synced_at
-  ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 const INSERT_CASHIER = `
@@ -436,6 +441,7 @@ export function applySettingsBundle(
       t.touchKeyboard ? 1 : 0,
       t.customerDisplay ? 1 : 0,
       t.invoiceType === 'paper' ? 'paper' : 'e_archive',
+      t.invoiceMode === 'per_sale' ? 'per_sale' : 'z_single',
       t.torbaCariId,
       t.torbaCariName,
       t.cariPaymentUsePavo ? 1 : 0,
