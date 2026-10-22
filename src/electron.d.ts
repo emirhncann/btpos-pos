@@ -244,11 +244,50 @@ declare global {
           rangeLabel: string
           invoiceMode?: string
           terminalNo?: string
-        }) => Promise<{ empty: boolean; saleCount: number; refundCount: number; docCount: number }>
+        }) => Promise<{
+          empty: boolean
+          rejected: boolean
+          problems: Array<{ code: string; message: string }>
+          saleCount: number
+          refundCount: number
+          docCount: number
+          docsTotal: number
+        }>
         dayEndRunStatus: (runId: string) => Promise<string | null>
         countDayEndProcessing: (runId: string) => Promise<number>
-        releaseDayEndRun: (runId: string) => Promise<void>
+        releaseDayEndRun: (runId: string) => Promise<{ days: string[] }>
         markDayEndRunStatus: (runId: string, status: string) => Promise<void>
+        dayEndProgress: (runId: string) => Promise<{
+          status: string | null
+          docsTotal: number
+          docsSent: number
+          reportedTotal: number
+          reportedSent: number
+        }>
+        listDayEndProgress: (companyId: string) => Promise<Array<{
+          runId: string
+          status: string | null
+          docsTotal: number
+          docsSent: number
+          reportedTotal: number
+          reportedSent: number
+        }>>
+        markDayEndProgress: (runId: string, docsTotal: number, docsSent: number) => Promise<void>
+        dayEndSummaryDays: (runId: string) => Promise<string[]>
+        buildDailySummary: (dayKey: string) => Promise<{
+          date: string
+          sale_count: number
+          refund_count: number
+          sale_total: number
+          refund_total: number
+          net_total: number
+        } | null>
+        rebuildDayEndRetry: (companyId: string, runId: string) => Promise<{
+          ok: boolean
+          pending: number
+          problems: Array<{ code: string; message: string }>
+        }>
+        prepareDayEndPayment: (queueId: string) => Promise<Record<string, unknown> | null>
         rememberQueueInvoice: (queueId: string, invoiceId: string, invoiceNumber?: string | null) => Promise<void>
         enqueueDayEndPayments: (input: {
           queueId: string
@@ -259,13 +298,6 @@ declare global {
           customerName?: string
         }) => Promise<number>
         settleDayEndRuns: (companyId: string) => Promise<Array<{ runId: string; body: Record<string, unknown> }>>
-        enqueueDayEndInvoicePackage: (companyId: string, scope?: 'z' | 'previous_days') => Promise<{
-          queued: boolean
-          queueId: string | null
-          saleCount: number
-          fail: number
-          error?: string
-        }>
         enqueueOperation:  (params: {
           id: string
           companyId: string
@@ -284,6 +316,17 @@ declare global {
         retryOperation:    (id: string) => Promise<void>
         retryOperationsByErrorPrefix: (companyId: string, prefix: string) => Promise<number>
         updateOperationPayload: (id: string, payload: Record<string, unknown>) => Promise<void>
+        refreshOperationCustomer: (
+          id: string,
+          next: {
+            ref: { type: 'torba' } | { type: 'customer'; id: string }
+            customer: Record<string, unknown>
+            customerErpId: number
+            customerName?: string
+            touchName: boolean
+          },
+          previousCode: string,
+        ) => Promise<boolean>
         markOperationConfigFailed: (id: string, error: string) => Promise<void>
         markOperationManuallySent: (id: string, note: string) => Promise<void>
         deleteOperation:   (id: string) => Promise<void>

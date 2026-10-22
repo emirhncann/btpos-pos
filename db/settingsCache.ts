@@ -406,6 +406,24 @@ export function matchPaymentAccounts(
   }
 }
 
+/** Nakit, kart bankası veya diğer ödeme markası için güncel hesap. Eşleşme yoksa null. */
+export function resolveTenderAccount(
+  sqlite: SqliteLike,
+  tender: { method: string; acquirerId?: string | null },
+): ReturnType<typeof toPayloadAccount> {
+  const rows = readPaymentAccounts(sqlite)
+  const method = tender.method.trim().toLowerCase()
+  const acquirerId = tender.acquirerId ? String(tender.acquirerId) : null
+  if (method === 'cash') return toPayloadAccount(pickAccount(rows, 'cash'))
+  if (method === 'card') return toPayloadAccount(pickAccount(rows, 'card', acquirerId))
+  if (acquirerId) {
+    const byAcquirer = rows.find(row => row.pavoAcquirerId != null && String(row.pavoAcquirerId) === acquirerId)
+    if (byAcquirer) return toPayloadAccount(byAcquirer)
+  }
+  const byType = rows.find(row => row.paymentType.trim().toLowerCase() === method)
+  return toPayloadAccount(byType ?? null)
+}
+
 const INSERT_TERMINAL = `
   INSERT OR REPLACE INTO terminal_settings_cache (
     id, touch_keyboard, customer_display, invoice_type, invoice_mode,

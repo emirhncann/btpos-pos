@@ -413,7 +413,6 @@ export default function DashboardScreen({
               <DocumentQueueScreen
                 companyId={companyId}
                 cashierRole={cashier.role}
-                onAfterEnqueue={() => scheduleProcessQueue(processQueue, 500, { includeDayEnd: true })}
                 onRetryTrigger={() => scheduleProcessQueue(processQueue, 300, { includeDayEnd: true })}
               />
             </div>

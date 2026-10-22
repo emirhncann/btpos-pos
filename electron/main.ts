@@ -1334,7 +1334,7 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('db:releaseDayEndRun', async (_e, runId: string) => {
     const { releaseDayEndRun } = await import('../db/dayEndRunDb')
-    releaseDayEndRun(runId)
+    return releaseDayEndRun(runId)
   })
   ipcMain.handle('db:markDayEndRunStatus', async (_e, runId: string, status: string) => {
     const { markDayEndRunStatus } = await import('../db/dayEndRunDb')
@@ -1352,15 +1352,33 @@ app.whenReady().then(async () => {
     const { settleDayEndRuns } = await import('../db/dayEndRunDb')
     return settleDayEndRuns(companyId)
   })
-
-  ipcMain.handle('db:enqueueDayEndInvoicePackage', async (_e, companyId: string, scope?: string) => {
-    const { enqueueDayEndInvoicePackage } = await import('../db/operations')
-    const terminalId = String(store.get('terminal_id') ?? '')
-    return enqueueDayEndInvoicePackage({
-      companyId,
-      terminalId,
-      scope: scope === 'z' ? 'z' : 'previous_days',
-    })
+  ipcMain.handle('db:dayEndProgress', async (_e, runId: string) => {
+    const { dayEndProgress } = await import('../db/dayEndRunDb')
+    return dayEndProgress(runId)
+  })
+  ipcMain.handle('db:listDayEndProgress', async (_e, companyId: string) => {
+    const { listDayEndProgress } = await import('../db/dayEndRunDb')
+    return listDayEndProgress(companyId)
+  })
+  ipcMain.handle('db:markDayEndProgress', async (_e, runId: string, docsTotal: number, docsSent: number) => {
+    const { markDayEndProgress } = await import('../db/dayEndRunDb')
+    markDayEndProgress(runId, docsTotal, docsSent)
+  })
+  ipcMain.handle('db:dayEndSummaryDays', async (_e, runId: string) => {
+    const { dayEndSummaryDays } = await import('../db/dayEndRunDb')
+    return dayEndSummaryDays(runId)
+  })
+  ipcMain.handle('db:buildDailySummary', async (_e, dayKey: string) => {
+    const { buildDailySummary } = await import('../db/dayEndRunDb')
+    return buildDailySummary(dayKey)
+  })
+  ipcMain.handle('db:rebuildDayEndRetry', async (_e, companyId: string, runId: string) => {
+    const { rebuildDayEndRetry } = await import('../db/dayEndRunDb')
+    return rebuildDayEndRetry(companyId, runId)
+  })
+  ipcMain.handle('db:prepareDayEndPayment', async (_e, queueId: string) => {
+    const { prepareDayEndPayment } = await import('../db/dayEndRunDb')
+    return prepareDayEndPayment(queueId)
   })
 
   ipcMain.handle('db:enqueueOperation', async (_e, params: {
@@ -1424,6 +1442,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('db:updateOperationPayload', async (_e, id: string, payload: Record<string, unknown>) => {
     const { updateOperationPayload } = await import('../db/operations')
     updateOperationPayload(id, payload)
+  })
+
+  ipcMain.handle('db:refreshOperationCustomer', async (_e, id: string, next: unknown, previousCode: string) => {
+    const { refreshOperationCustomer } = await import('../db/operations')
+    return refreshOperationCustomer(id, next as {
+      ref: { type: 'torba' } | { type: 'customer'; id: string }
+      customer: Record<string, unknown>
+      customerErpId: number
+      customerName?: string
+      touchName: boolean
+    }, previousCode)
   })
 
   ipcMain.handle('db:markOperationConfigFailed', async (_e, id: string, error: string) => {

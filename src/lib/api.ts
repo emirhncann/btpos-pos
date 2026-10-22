@@ -1,6 +1,32 @@
+import pkg from '../../package.json'
 import { parseSettingsBundle, type SettingsBundle } from './settingsModel'
 
 export const API_URL = 'https://api.btpos.com.tr'
+
+let appVersion = String(pkg.version ?? '').trim()
+
+export function noteAppVersion(version: string): void {
+  const next = version.trim()
+  if (next) appVersion = next
+}
+
+const nativeFetch = globalThis.fetch.bind(globalThis)
+globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const url = typeof input === 'string'
+    ? input
+    : input instanceof URL
+      ? input.toString()
+      : input.url
+  if (!appVersion || !url.startsWith(API_URL)) return nativeFetch(input, init)
+  const headers = new Headers(input instanceof Request ? input.headers : undefined)
+  if (init?.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value))
+  if (!headers.has('X-App-Version')) headers.set('X-App-Version', appVersion)
+  return nativeFetch(input, { ...init, headers })
+}
+
+if (typeof window !== 'undefined') {
+  void window.electron?.update?.getVersion?.().then(version => noteAppVersion(String(version ?? ''))).catch(() => {})
+}
 
 export const api = {
 

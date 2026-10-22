@@ -6,7 +6,9 @@ import {
   queueCustomerErrorMessage,
 } from '../lib/queueCustomer'
 import { formatDayEndPaymentLabel, formatTrDay, invoiceStampToIso, istanbulDayKey } from '../lib/invoiceMode'
+import { refreshDayEndCustomer } from '../lib/dayEndCustomer'
 import { postDayEndStatus } from '../lib/dayEndApi'
+import { enqueueRunStatus, holdDayEndProgress, scheduleDayEndProgress } from '../lib/dayEndProgressReport'
 
 const POLL_INTERVAL = 15_000
 
@@ -97,7 +99,10 @@ export async function processOperationQueue({
             || op.type === 'return_invoice'
           ) {
             try {
-              sendPayload = await applyCustomerToInvoicePayload(companyId, payload)
+              sendPayload = payload.day_end_run_id
+                ? await refreshDayEndCustomer(companyId, payload)
+                : await applyCustomerToInvoicePayload(companyId, payload)
+              if (payload.day_end_run_id) await window.electron.db.updateOperationPayload(op.id, sendPayload)
             } catch (e) {
               const { message } = queueCustomerErrorMessage(e)
               await window.electron.db.markOperationConfigFailed(op.id, message)
@@ -394,10 +399,15 @@ export async function processOperationQueue({
             error = data.message ?? null
           } else if (op.type === 'payment') {
             console.log('[worker] processing payment op:', op.id)
+            let paymentBody = payload
+            if (payload.day_end_run_id) {
+              const refreshed = await window.electron.db.prepareDayEndPayment(op.id)
+              if (refreshed) paymentBody = refreshed
+            }
             const res = await fetch(`${API_URL}/integration/payment/${companyId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
+              body: JSON.stringify(paymentBody),
             })
             const data = await res.json() as { success?: boolean; message?: string }
             console.log('[worker] payment result:', JSON.stringify(data))
@@ -436,6 +446,7 @@ export async function processOperationQueue({
 
           if (success) {
             await window.electron.db.markOperationSuccess(op.id)
+            if (payload.day_end_run_id) scheduleDayEndProgress(String(payload.day_end_run_id))
             if (op.type !== 'app_report') {
               onToast({ id: op.id, type: op.type, label: op.label, status: 'success' })
             }
@@ -454,8 +465,20 @@ export async function processOperationQueue({
     try {
       const actions = await window.electron.db.settleDayEndRuns(companyId)
       for (const action of actions) {
-        await postDayEndStatus(action.runId, action.body)
-        await window.electron.db.markDayEndRunStatus(action.runId, String(action.body.status ?? ''))
+        const status = String(action.body.status ?? '')
+        if (status === 'completed' || status === 'failed' || status === 'released') holdDayEndProgress(action.runId)
+        await enqueueRunStatus(action.runId, async () => {
+          await postDayEndStatus(action.runId, action.body)
+          if (status === 'processing') {
+            await window.electron.db.markDayEndProgress(
+              action.runId,
+              Number(action.body.docs_total ?? 0),
+              Number(action.body.docs_sent ?? 0),
+            )
+          } else {
+            await window.electron.db.markDayEndRunStatus(action.runId, status)
+          }
+        })
       }
     } catch (e) {
       console.warn('[worker] gün sonu kapanışı:', e)

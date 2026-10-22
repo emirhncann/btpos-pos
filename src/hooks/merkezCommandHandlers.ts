@@ -6,7 +6,7 @@ import { parseSettingsBundle } from '../lib/settingsModel'
 import { enqueuePaymentDeviceBackup } from '../lib/localSettings'
 import { refreshPosReady } from '../store/posReady'
 import type { CommandHandlers, SyncMode } from './useCommandPoller'
-import { postDayEndStatus } from '../lib/dayEndApi'
+import { postDailySummary, postDayEndStatus } from '../lib/dayEndApi'
 
 async function getWorkplaceId(): Promise<string | null> {
   try {
@@ -34,6 +34,7 @@ export const noopCommandHandlers: CommandHandlers = {
   onLock:               () => {},
   onUpdateApp:          async () => {},
   onDayEndRun:          async () => {},
+  onDayEndRetry:        async () => {},
   onDayEndRelease:      async () => {},
 }
 
@@ -277,6 +278,14 @@ async function syncSettings(
   await refreshPosReady()
 
   return { success: true, inserted: 1, updated: 0, deleted: 0 }
+}
+
+async function sendReleasedSummaries(companyId: string, terminalId: string, days: string[]): Promise<void> {
+  for (const day of days) {
+    const summary = await window.electron.db.buildDailySummary(day)
+    if (!summary) continue
+    await postDailySummary({ ...summary, company_id: companyId, terminal_id: terminalId })
+  }
 }
 
 export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): CommandHandlers {
@@ -579,12 +588,22 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
         terminalNo: payload.terminal_no != null ? String(payload.terminal_no) : undefined,
       }
       const probe = await window.electron.db.applyDayEndRun(input)
+      if (probe.rejected) {
+        await postDayEndStatus(runId, { status: 'rejected', problems: probe.problems })
+        await window.electron.db.markDayEndRunStatus(runId, 'rejected')
+        return {
+          message: 'Gönderilmedi',
+          historyStatus: 'rejected',
+          problems: probe.problems,
+        }
+      }
       if (probe.empty) {
         await postDayEndStatus(runId, { status: 'completed_empty' })
         await window.electron.db.markDayEndRunStatus(runId, 'completed_empty')
         return { message: 'Bu aralıkta gönderilecek satış yok' }
       }
-      await postDayEndStatus(runId, { status: 'processing' })
+      await postDayEndStatus(runId, { status: 'processing', docs_total: probe.docsTotal, docs_sent: 0 })
+      await window.electron.db.markDayEndProgress(runId, probe.docsTotal, 0)
       window.dispatchEvent(new Event('btpos-process-queue'))
       return {
         count: probe.saleCount + probe.refundCount,
@@ -592,17 +611,50 @@ export function buildMerkezCommandHandlers(d: MerkezCommandHandlerDeps): Command
       }
     },
 
+    onDayEndRetry: async (payload) => {
+      const runId = String(payload.run_id ?? '').trim()
+      if (!runId) throw new Error('Gün sonu yeniden denemesinde run_id yok')
+      const result = await window.electron.db.rebuildDayEndRetry(d.companyId, runId)
+      if (!result.ok) {
+        const error = result.problems.map(problem => problem.message).join('\n')
+        await postDayEndStatus(runId, { status: 'failed', error, problems: result.problems })
+        await window.electron.db.markDayEndRunStatus(runId, 'failed')
+        return { message: error || 'Gün sonu yeniden kurulamadı' }
+      }
+      if (result.pending === 0) {
+        window.dispatchEvent(new Event('btpos-process-queue'))
+        return { message: 'Yeniden denenecek satır yok' }
+      }
+      const snap = await window.electron.db.dayEndProgress(runId)
+      await postDayEndStatus(runId, {
+        status: 'processing',
+        docs_total: snap.docsTotal,
+        docs_sent: snap.docsSent,
+      })
+      await window.electron.db.markDayEndProgress(runId, snap.docsTotal, snap.docsSent)
+      window.dispatchEvent(new Event('btpos-process-queue'))
+      return { message: 'Gün sonu yeniden kuyruğa alındı', count: result.pending }
+    },
+
     onDayEndRelease: async (payload) => {
       const runId = String(payload.run_id ?? '').trim()
       if (!runId) throw new Error('Gün sonu iptalinde run_id yok')
+      const prior = await window.electron.db.dayEndRunStatus(runId)
+      if (prior === 'released') {
+        await sendReleasedSummaries(d.companyId, d.terminalId, await window.electron.db.dayEndSummaryDays(runId))
+        return { message: 'Satışlar zaten serbest' }
+      }
       const started = Date.now()
       while (Date.now() - started < 60_000) {
         const busy = await window.electron.db.countDayEndProcessing(runId)
         if (busy === 0) break
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
-      await window.electron.db.releaseDayEndRun(runId)
+      const busy = await window.electron.db.countDayEndProcessing(runId)
+      if (busy > 0) throw new Error('Gün sonu belgesi hâlâ gönderiliyor')
+      const released = await window.electron.db.releaseDayEndRun(runId)
       await postDayEndStatus(runId, { status: 'released' })
+      await sendReleasedSummaries(d.companyId, d.terminalId, released.days)
       return { message: 'Satışlar yeniden gün sonuna alınabilir' }
     },
   }

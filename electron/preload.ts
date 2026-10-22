@@ -183,11 +183,18 @@ contextBridge.exposeInMainWorld('electron', {
     countDayEndProcessing: (runId: string) => ipcRenderer.invoke('db:countDayEndProcessing', runId),
     releaseDayEndRun: (runId: string) => ipcRenderer.invoke('db:releaseDayEndRun', runId),
     markDayEndRunStatus: (runId: string, status: string) => ipcRenderer.invoke('db:markDayEndRunStatus', runId, status),
+    dayEndProgress: (runId: string) => ipcRenderer.invoke('db:dayEndProgress', runId),
+    listDayEndProgress: (companyId: string) => ipcRenderer.invoke('db:listDayEndProgress', companyId),
+    markDayEndProgress: (runId: string, docsTotal: number, docsSent: number) =>
+      ipcRenderer.invoke('db:markDayEndProgress', runId, docsTotal, docsSent),
+    dayEndSummaryDays: (runId: string) => ipcRenderer.invoke('db:dayEndSummaryDays', runId),
+    buildDailySummary: (dayKey: string) => ipcRenderer.invoke('db:buildDailySummary', dayKey),
+    rebuildDayEndRetry: (companyId: string, runId: string) =>
+      ipcRenderer.invoke('db:rebuildDayEndRetry', companyId, runId),
+    prepareDayEndPayment: (queueId: string) => ipcRenderer.invoke('db:prepareDayEndPayment', queueId),
     rememberQueueInvoice: (queueId: string, invoiceId: string, invoiceNumber?: string | null) => ipcRenderer.invoke('db:rememberQueueInvoice', queueId, invoiceId, invoiceNumber ?? null),
     enqueueDayEndPayments: (input: unknown) => ipcRenderer.invoke('db:enqueueDayEndPayments', input),
     settleDayEndRuns: (companyId: string) => ipcRenderer.invoke('db:settleDayEndRuns', companyId),
-    enqueueDayEndInvoicePackage: (companyId: string, scope?: 'z' | 'previous_days') =>
-      ipcRenderer.invoke('db:enqueueDayEndInvoicePackage', companyId, scope),
     enqueueOperation:  (params: unknown) => ipcRenderer.invoke('db:enqueueOperation', params),
     getPendingReturnInvoices: (companyId: string) =>
       ipcRenderer.invoke('db:getPendingReturnInvoices', companyId),
@@ -208,6 +215,8 @@ contextBridge.exposeInMainWorld('electron', {
       ipcRenderer.invoke('db:retryOperationsByErrorPrefix', companyId, prefix),
     updateOperationPayload: (id: string, payload: Record<string, unknown>) =>
       ipcRenderer.invoke('db:updateOperationPayload', id, payload),
+    refreshOperationCustomer: (id: string, next: unknown, previousCode: string) =>
+      ipcRenderer.invoke('db:refreshOperationCustomer', id, next, previousCode) as Promise<boolean>,
     markOperationConfigFailed: (id: string, error: string) =>
       ipcRenderer.invoke('db:markOperationConfigFailed', id, error),
     markOperationManuallySent: (id: string, note: string) =>

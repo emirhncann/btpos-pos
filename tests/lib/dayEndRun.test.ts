@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { paymentDocKey, planDayEndDocs, type DayEndSale } from '../../src/lib/dayEndRun'
+import { nextDayEndReport, paymentDocKey, planDayEndDocs, type DayEndSale } from '../../src/lib/dayEndRun'
 
 function sale(partial: Partial<DayEndSale> & Pick<DayEndSale, 'id'>): DayEndSale {
   return {
@@ -44,6 +44,14 @@ describe('admin gün sonu planı', () => {
     expect(docs.map(d => d.docKey)).toEqual(['retail:1', 'retail:2'])
     expect(docs[0].sales).toHaveLength(200)
     expect(docs[1].sales).toHaveLength(1)
+  })
+
+  it('failed run yeniden pending olunca processing, hepsi success olunca completed bildirir', () => {
+    expect(nextDayEndReport('failed', ['success', 'pending'])).toBe('processing')
+    expect(nextDayEndReport('processing', ['success', 'pending'])).toBeNull()
+    expect(nextDayEndReport('processing', ['success', 'success'])).toBe('completed')
+    expect(nextDayEndReport('failed', ['failed', 'success'])).toBeNull()
+    expect(nextDayEndReport('completed', ['success'])).toBeNull()
   })
 
   it('tahsilat anahtarını yöntem ve bankaya göre kurar', () => {

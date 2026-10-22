@@ -2,6 +2,8 @@
 export interface CommandAckResult {
   count?: number
   message: string
+  historyStatus?: string
+  problems?: Array<{ code?: string; message?: string }>
 }
 
 export function trCount(n: number): string {

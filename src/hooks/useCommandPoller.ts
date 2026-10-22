@@ -29,6 +29,7 @@ export interface CommandHandlers {
   onLock:               (reason?: string) => void
   onUpdateApp:          (payload: Record<string, unknown>, ctx: UpdateAppContext) => Promise<CommandAckResult | void>
   onDayEndRun:          (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
+  onDayEndRetry:        (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
   onDayEndRelease:      (payload: Record<string, unknown>) => Promise<CommandAckResult | void>
 }
 
@@ -303,6 +304,10 @@ export function useCommandPoller(
             outcome = await h.onDayEndRun(cmd.payload ?? {})
             break
 
+          case 'day_end_retry':
+            outcome = await h.onDayEndRetry(cmd.payload ?? {})
+            break
+
           case 'day_end_release':
             outcome = await h.onDayEndRelease(cmd.payload ?? {})
             break
@@ -326,18 +331,27 @@ export function useCommandPoller(
             console.warn('Bilinmeyen komut:', cmd.command)
         }
 
+        const history = outcome && typeof outcome === 'object'
+          ? outcome as { historyStatus?: string; problems?: Array<{ message?: string }> }
+          : null
+        const rejected = history?.historyStatus === 'rejected'
+        const problemLines = rejected
+          ? (history?.problems ?? []).map(problem => String(problem.message ?? '')).filter(Boolean)
+          : []
         await window.electron.db.saveCommandHistory({
           id:         cmd.target_id,
           command:    kind || cmd.command,
-          payload:    cmd.payload ?? {},
-          status:     'done',
+          payload:    rejected ? { ...(cmd.payload ?? {}), problems: problemLines } : (cmd.payload ?? {}),
+          status:     rejected ? 'rejected' : 'done',
           receivedAt: cmd.created_at,
           doneAt:     new Date().toISOString(),
         }).catch(() => {})
 
         onPersistedRef.current?.()
 
-        const result = isCommandAckResult(outcome) ? outcome : undefined
+        const result = isCommandAckResult(outcome)
+          ? { message: outcome.message, ...(outcome.count != null ? { count: outcome.count } : {}) }
+          : undefined
         await sendAck(cmd.target_id, 'done', undefined, result)
         try { cmdProgress.done(progressId) } catch { /* sayaç komut akışını bozmasın */ }
 

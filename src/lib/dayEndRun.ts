@@ -91,6 +91,19 @@ export function dayEndPaymentLabel(rangeLabel: string, methodLabel: string): str
   return `Gün sonu ${rangeLabel} · Tahsilat · ${methodLabel}`
 }
 
+/** Son bildirilen durumla aynı sonucu tekrar üretmez. Failed run, satır pending olunca processing'e döner. */
+export function nextDayEndReport(
+  reported: string | null,
+  statuses: string[],
+): 'processing' | 'failed' | 'completed' | null {
+  if (statuses.length === 0) return null
+  const open = statuses.some(status => status === 'pending' || status === 'processing' || status === 'pending_dayend')
+  if (open) return reported === 'failed' ? 'processing' : null
+  if (statuses.some(status => status === 'failed')) return reported === 'failed' ? null : 'failed'
+  if (statuses.every(status => status === 'success')) return reported === 'completed' ? null : 'completed'
+  return null
+}
+
 export function paymentDocKey(parentDocKey: string, method: string, acquirerId?: string | null): string {
   if (method === 'cash') return `pay:${parentDocKey}:cash`
   if (method === 'card') return `pay:${parentDocKey}:card:${acquirerId || 'unknown'}`

@@ -10,7 +10,7 @@ import { getDefaultDbDir } from '../electron/paths'
 let db: ReturnType<typeof drizzle> | undefined
 let rawSqlite: Database.Database | null = null
 
-export const SCHEMA_VERSION = 16
+export const SCHEMA_VERSION = 17
 
 export function getSqlite(): Database.Database {
   if (!rawSqlite) throw new Error('DB henüz başlatılmadı')
@@ -307,6 +307,18 @@ export function initDatabase(dbFile: string): ReturnType<typeof drizzle> {
   `)
 
   migrateLegacySettings(sqlite)
+  if (userVersion < 17) {
+    sqlite.exec(`
+      UPDATE operation_queue
+         SET status = 'cancelled',
+             error  = 'Eski akış kapatıldı — gün sonu ile gönderilir'
+       WHERE day_end_run_id IS NULL
+         AND (
+               status = 'pending_dayend'
+            OR (type IN ('day_end_invoice', 'return_invoice', 'invoice') AND status IN ('pending', 'failed', 'processing'))
+         );
+    `)
+  }
   sqlite.pragma(`user_version = ${SCHEMA_VERSION}`)
 
   return db
@@ -682,6 +694,9 @@ function migratePosDiscountAndSettings(sqlite: Database.Database) {
       reported_at TEXT
     )
   `)
+  addColumnIfMissing(sqlite, 'day_end_runs', 'docs_total', 'docs_total INTEGER')
+  addColumnIfMissing(sqlite, 'day_end_runs', 'docs_sent', 'docs_sent INTEGER')
+  addColumnIfMissing(sqlite, 'day_end_runs', 'summary_days', 'summary_days TEXT')
 
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS payment_device_settings (

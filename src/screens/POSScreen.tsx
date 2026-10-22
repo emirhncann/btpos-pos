@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ReactNode, type CSSProperties } from 'react'
 import { useLicenseCheck } from '../hooks/useLicenseCheck'
 import { useConnectionStatus } from '../hooks/useConnectionStatus'
-import { tryResolveTorbaCustomer } from '../lib/invoiceSend'
+import { tryResolveTorbaCustomer } from '../lib/queueCustomer'
 import { CustomerFormModal } from '../components/CustomerFormModal'
 import {
   pavoCompleteSale,

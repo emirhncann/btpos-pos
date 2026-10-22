@@ -18,6 +18,7 @@ export const COMMAND_LABELS: Record<string, { label: string; icon: string }> = {
   lock:                { label: 'Kasayı kilitle',               icon: 'lock' },
   update_app:          { label: 'Program güncellemesi',         icon: 'download' },
   day_end_run:         { label: 'Gün sonu (ERP) gönder',        icon: 'file' },
+  day_end_retry:       { label: 'Gün sonu yeniden dene',        icon: 'restart' },
   day_end_release:     { label: 'Gün sonu iptali — satışlar serbest', icon: 'restart' },
 }
 
@@ -31,6 +32,7 @@ export function commandTitle(command: string, payload?: Record<string, unknown> 
     const label = String(payload?.range_label ?? '').trim()
     return label ? `Gün sonu (ERP) gönder · ${label}` : 'Gün sonu (ERP) gönder'
   }
+  if (command === 'day_end_retry') return 'Gün sonu yeniden dene'
   if (command === 'day_end_release') return 'Gün sonu iptali — satışlar serbest'
   return commandMeta(command).label
 }

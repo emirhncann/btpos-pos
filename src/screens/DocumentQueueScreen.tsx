@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import { C, solidBtn } from '../theme/colors'
 import AlertDialog from '../components/AlertDialog'
+import { QueueActionMenu } from '../components/QueueActionMenu'
 import { useAlertDialog } from '../hooks/useAlertDialog'
-import { formatIstanbulDateTime, istanbulDay, istanbulToday } from '../lib/commandView'
+import { formatIstanbulDateTime, istanbulClock, istanbulDay, istanbulToday } from '../lib/commandView'
+import { postDayEndProcessingIfFailed } from '../lib/dayEndApi'
+import { dayEndProgressCaption } from '../lib/dayEndPrecheck'
 import { formatSentInvoice } from '../lib/invoiceMode'
+import { payloadSummary } from '../lib/queueCustomer'
 import {
-  customerRefFromCustomerRow,
-  customerRefTorba,
-  payloadSummary,
-  TORBA_CARI_YOK,
-} from '../lib/queueCustomer'
+  customerErpNumber,
+  customerUnchanged,
+  customerUpdatedAt,
+  editableQueueStatus,
+  formatCariLine,
+  invoiceCustomerBody,
+  isDayEndQueueDoc,
+  isTorbaCariError,
+  isbasiIdOf,
+  payloadCustomerCode,
+  queueCustomerKind,
+  sameTorba,
+} from '../lib/queueCustomerPatch'
 
-type OpStatus = 'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done'
+type OpStatus = 'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done' | 'cancelled'
 
 interface OpRow {
   id:          string
@@ -50,12 +62,21 @@ const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }>
   success:        { bg: C.success, color: '#FFFFFF', label: 'Gönderildi' },
   failed:         { bg: C.danger, color: '#FFFFFF', label: 'Hata' },
   done:           { bg: '#F3F4F6', color: '#6B7280', label: 'Tamamlandı' },
+  cancelled:      { bg: '#F3F4F6', color: '#6B7280', label: 'İptal edildi' },
 }
 
 type TypeFilter = 'all' | 'invoice' | 'return_invoice' | 'customer' | 'day_end_invoice' | 'payment'
 
 function todayStr() {
   return istanbulToday()
+}
+
+function dayEndRunId(raw: string): string {
+  return String(readPayload(raw).day_end_run_id ?? '').trim()
+}
+
+function readPayload(raw: string): Record<string, unknown> {
+  try { return JSON.parse(raw || '{}') as Record<string, unknown> } catch { return {} }
 }
 
 function erpIdentity(payload: string): string {
@@ -77,35 +98,37 @@ const INVOICE_TYPES = new Set(['invoice', 'day_end_invoice', 'return_invoice'])
 
 export function DocumentQueueScreen({
   companyId,
-  cashierRole = 'cashier',
-  onAfterEnqueue,
   onRetryTrigger,
 }: {
   companyId: string
   cashierRole?: string
-  onAfterEnqueue?: () => void
   onRetryTrigger?: () => void
 }) {
   const [ops,          setOps]          = useState<OpRow[]>([])
+  const [runProgress, setRunProgress] = useState<Record<string, { docsSent: number; docsTotal: number }>>({})
   const [loading,      setLoading]      = useState(true)
   const [statusFilter, setStatusFilter] = useState<'waiting' | 'failed' | 'sent' | 'all'>('waiting')
   const [typeFilter,   setTypeFilter]   = useState<TypeFilter>('all')
   const [dateFrom,     setDateFrom]     = useState(todayStr())
   const [dateTo,       setDateTo]       = useState(todayStr())
   const [retrying,     setRetrying]     = useState<string | null>(null)
-  const [sending,      setSending]      = useState(false)
   const [detailOp,     setDetailOp]     = useState<OpRow | null>(null)
-  const [changeOp,     setChangeOp]     = useState<OpRow | null>(null)
-  const [customerQuery, setCustomerQuery] = useState('')
-  const [customerHits,  setCustomerHits]  = useState<CustomerRow[]>([])
-  const { dialogProps, showError, showSuccess, confirm } = useAlertDialog()
-  const isManager = cashierRole === 'manager'
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [menu, setMenu] = useState<{
+    id: string
+    upward: boolean
+    anchor: { top: number; left: number; bottom: number; right: number }
+  } | null>(null)
+  const [menuIndex, setMenuIndex] = useState(0)
+  const { dialogProps, showError, showInfo, confirm } = useAlertDialog()
 
   const reload = useCallback(async () => {
     setLoading(true)
     try {
       const all = await window.electron.db.getAllOperations(companyId, 500)
       setOps(all as OpRow[])
+      const snaps = await window.electron.db.listDayEndProgress(companyId)
+      setRunProgress(Object.fromEntries(snaps.map(snap => [snap.runId, { docsSent: snap.docsSent, docsTotal: snap.docsTotal }])))
     } finally {
       setLoading(false)
     }
@@ -150,14 +173,12 @@ export function DocumentQueueScreen({
     sent:    dateTypeFiltered.filter(o => o.status === 'success' || o.status === 'done').length,
   }
 
-  const pendingReturns = ops.filter(o =>
-    o.type === 'return_invoice' && o.status === 'pending_dayend',
-  )
-
   const handleRetry = async (id: string) => {
     setRetrying(id)
     try {
+      const op = ops.find(row => row.id === id)
       await window.electron.db.retryOperation(id)
+      await postDayEndProcessingIfFailed([op ? dayEndRunId(op.payload) : ''])
       await reload()
       onRetryTrigger?.()
     } finally {
@@ -165,91 +186,186 @@ export function DocumentQueueScreen({
     }
   }
 
-  const handleRetryAll = async () => {
-    const failed = ops.filter(o => o.status === 'failed')
-    for (const op of failed) await window.electron.db.retryOperation(op.id)
-    await reload()
-    onRetryTrigger?.()
+  const torbaErrorRows = dateTypeFiltered.filter(op => {
+    const payload = readPayload(op.payload)
+    return op.status === 'failed'
+      && queueCustomerKind(op.type, payload) === 'torba'
+      && isTorbaCariError(op.error)
+  })
+
+  async function currentTorba(): Promise<CustomerRow | null> {
+    const settings = await window.electron.db.getTerminalSettings()
+    const code = settings.torbaCariId?.trim()
+    if (!code) return null
+    const row = await window.electron.db.getCustomerByCode(companyId, code)
+    if (!row || !isbasiIdOf(row)) return null
+    return row
   }
 
-  const torbaFailed = ops.filter(
-    o => o.status === 'failed' && (o.error ?? '').includes(TORBA_CARI_YOK),
-  )
-
-  const handleRetryTorbaAll = async () => {
-    await window.electron.db.retryOperationsByErrorPrefix(companyId, TORBA_CARI_YOK)
-    await reload()
-    onRetryTrigger?.()
+  async function applyTorba(op: OpRow, row: CustomerRow): Promise<'updated' | 'same' | 'skip'> {
+    const payload = readPayload(op.payload)
+    if (queueCustomerKind(op.type, payload) !== 'torba' || !editableQueueStatus(op.status)) return 'skip'
+    const erpId = customerErpNumber(row)
+    if (sameTorba(payload, { code: row.code, erpId })) return 'same'
+    const previous = payloadCustomerCode(payload)
+    const ok = await window.electron.db.refreshOperationCustomer(op.id, {
+      ref: { type: 'torba' },
+      customer: invoiceCustomerBody(row),
+      customerErpId: erpId,
+      touchName: false,
+    }, previous)
+    if (ok) {
+      console.log(`[belge-aktarim] torba cari güncellendi row=${op.id} eski=${previous || '—'} yeni=${row.code}`)
+    }
+    return ok ? 'updated' : 'skip'
   }
 
-  async function searchCustomers(q: string) {
-    setCustomerQuery(q)
-    if (!q.trim()) {
-      setCustomerHits([])
+  async function handleTorbaUpdate(targets: OpRow[]) {
+    const row = await currentTorba()
+    const label = row ? `${row.name} · ${row.code}` : ''
+    if (!row) {
+      showInfo('Torba cari', 'Kasada tanımlı torba cari yok. Yönetim panelinden torba cariyi seçip ayarları kasaya gönderin.')
       return
     }
-    const list = await window.electron.db.getCustomers(companyId, q.trim())
-    setCustomerHits(list.slice(0, 20))
-  }
-
-  async function applyCustomerRef(
-    op: OpRow,
-    ref: { type: 'customer'; id: string } | { type: 'torba' },
-  ) {
-    const raw = JSON.parse(op.payload || '{}') as Record<string, unknown>
-    raw.customer_ref = ref
-    delete raw.customer
-    delete raw.customer_erp_id
-    await window.electron.db.updateOperationPayload(op.id, raw)
-    await window.electron.db.retryOperation(op.id)
-    setChangeOp(null)
-    setCustomerQuery('')
-    setCustomerHits([])
+    const eligible = targets.filter(op => {
+      const payload = readPayload(op.payload)
+      return queueCustomerKind(op.type, payload) === 'torba' && editableQueueStatus(op.status)
+    })
+    if (eligible.length === 0) {
+      showInfo('Torba cari', 'Güncellenecek carisiz belge yok.')
+      return
+    }
+    if (eligible.length === 1) {
+      const payload = readPayload(eligible[0].payload)
+      if (sameTorba(payload, { code: row.code, erpId: customerErpNumber(row) })) {
+        showInfo(
+          'Torba cari',
+          `Bu belge zaten güncel torba cariyi kullanıyor (${label}). Torba cari yönetim panelinde değiştiyse önce ayarları kasaya gönderin.`,
+        )
+        return
+      }
+      const ok = await confirm({
+        title: 'Torba cari güncellensin mi?',
+        message: `Eski: ${formatCariLine(payload) || 'gövdede cari yok'}\nYeni: ${label}\nBelge yeni cariyle yeniden gönderilecek.`,
+        confirmLabel: 'Güncelle ve Gönder',
+        cancelLabel: 'Vazgeç',
+      })
+      if (!ok) return
+    } else {
+      const ok = await confirm({
+        title: 'Torba cari güncellensin mi?',
+        message: `${eligible.length} belgenin torba carisi ${label} olarak güncellenecek.`,
+        confirmLabel: 'Güncelle ve Gönder',
+        cancelLabel: 'Vazgeç',
+      })
+      if (!ok) return
+    }
+    let updated = 0
+    let same = 0
+    const runIds: string[] = []
+    for (const op of eligible) {
+      const result = await applyTorba(op, row)
+      if (result === 'updated') {
+        updated += 1
+        runIds.push(dayEndRunId(op.payload))
+      }
+      if (result === 'same') same += 1
+    }
+    await postDayEndProcessingIfFailed(runIds)
     await reload()
     onRetryTrigger?.()
-  }
-
-  async function handleManualSent(op: OpRow) {
-    const ok = await confirm({
-      title: 'Gönderildi İşaretle',
-      message:
-        'Bu belge ERP\'ye elle girildiyse kuyruktan düşürülür. Emin misiniz?',
-      confirmLabel: 'Evet, işaretle',
-      cancelLabel:  'Vazgeç',
-    })
-    if (!ok) return
-    const note = `Manuel — ${cashierRole} — ${new Date().toISOString()}`
-    await window.electron.db.markOperationManuallySent(op.id, note)
-    await reload()
-    showSuccess('Tamam', 'Kayıt gönderildi olarak işaretlendi.')
-  }
-
-  const handleDelete = async (id: string) => {
-    const ok = await confirm({
-      title:   'Kayıt Sil',
-      message: 'Bu kaydı silmek istediğinize emin misiniz?',
-      confirmLabel: 'Evet, Sil',
-      cancelLabel:  'Vazgeç',
-    })
-    if (!ok) return
-    await window.electron.db.deleteOperation(id)
-    await reload()
-  }
-
-  async function handleSendBatchReturn() {
-    setSending(true)
-    try {
-      const { sendBatchReturnInvoice } = await import('../lib/invoiceSend')
-      await sendBatchReturnInvoice(companyId)
-      onAfterEnqueue?.()
-      await reload()
-      showSuccess('Başarılı', 'Toplu iade faturası oluşturuldu ve kuyruğa eklendi.')
-    } catch (e) {
-      showError('Hata', String(e))
-    } finally {
-      setSending(false)
+    if (eligible.length > 1) {
+      showInfo('Torba cari', `${updated} güncellendi, ${same} atlandı (zaten güncel).`)
     }
   }
+
+  async function localCari(payload: Record<string, unknown>): Promise<CustomerRow | null> {
+    const ref = payload.customer_ref as { type?: string; id?: string } | undefined
+    if (ref?.type === 'customer' && ref.id) {
+      const byId = await window.electron.db.getCustomerById(companyId, ref.id)
+      if (byId) return byId
+    }
+    const code = payloadCustomerCode(payload)
+    if (!code) return null
+    return window.electron.db.getCustomerByCode(companyId, code)
+  }
+
+  async function handleRefreshCari(op: OpRow) {
+    const payload = readPayload(op.payload)
+    const row = await localCari(payload)
+    if (!row) {
+      showInfo('Cari', 'Bu cari kasada bulunamadı. Müşteri listesini yönetim panelinden kasaya gönderin.')
+      return
+    }
+    if (customerUnchanged(payload, row)) {
+      showInfo('Cari', `Bu belgedeki cari bilgisi zaten güncel (${row.name} · ${row.code}).`)
+      return
+    }
+    const ok = await confirm({
+      title: 'Cari bilgisi yenilensin mi?',
+      message: `Eski: ${formatCariLine(payload) || 'gövdede cari yok'}\nYeni: ${row.name} · ${row.code}\nBelge yeni cariyle yeniden gönderilecek.`,
+      confirmLabel: 'Güncelle ve Gönder',
+      cancelLabel: 'Vazgeç',
+    })
+    if (!ok) return
+    const previous = payloadCustomerCode(payload)
+    const changed = await window.electron.db.refreshOperationCustomer(op.id, {
+      ref: { type: 'customer', id: row.id },
+      customer: invoiceCustomerBody(row),
+      customerErpId: customerErpNumber(row),
+      customerName: row.name,
+      touchName: true,
+    }, previous)
+    if (changed) {
+      console.log(`[belge-aktarim] cari yenilendi row=${op.id} eski=${previous || '—'} yeni=${row.code}`)
+      await postDayEndProcessingIfFailed([dayEndRunId(op.payload)])
+      await reload()
+      onRetryTrigger?.()
+    }
+  }
+
+  const handleDelete = async (op: OpRow) => {
+    const payload = readPayload(op.payload)
+    const dayEnd = isDayEndQueueDoc(op.type, payload)
+    const ok = await confirm({
+      title: 'Kayıt Sil',
+      message: dayEnd
+        ? 'Gün sonu belgesi silinirse gün sonu tamamlanmaz. Yönetim panelinden iptal etmeniz önerilir.'
+        : 'Bu kaydı silmek istediğinize emin misiniz?',
+      confirmLabel: 'Sil',
+      cancelLabel: 'Vazgeç',
+    })
+    if (!ok) return
+    await window.electron.db.deleteOperation(op.id)
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.delete(op.id)
+      return next
+    })
+    await reload()
+  }
+
+  async function copyError(op: OpRow) {
+    const text = op.error?.trim()
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      showInfo('Kopyalandı', 'Hata metni panoya alındı.')
+    } catch {
+      showError('Kopyalanamadı', text)
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectedRows = filtered.filter(op => selected.has(op.id))
 
   return (
     <div style={{ padding: 20, maxWidth: 860, margin: '0 auto' }}>
@@ -334,63 +450,52 @@ export function DocumentQueueScreen({
         ))}
       </div>
 
-      {pendingReturns.length > 0 && (
+      {torbaErrorRows.length > 0 && (
         <div style={{
-          padding: '12px 16px', borderRadius: 10,
-          background: C.online, border: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 12,
+          marginBottom: 12, padding: '12px 14px', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--pos-warning) 18%, var(--pos-surface))',
+          border: '1px solid var(--pos-warning)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
         }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#FFFFFF' }}>
-              Bekleyen İadeler
-            </div>
-            <div style={{ fontSize: 12, color: '#FFFFFF' }}>
-              {pendingReturns.length} iade — toplu fatura olarak gönderilecek
-            </div>
-          </div>
-          <button type="button"
-            onClick={() => void handleSendBatchReturn()}
-            disabled={sending}
-            style={{
-              ...solidBtn(C.surface, sending),
-              color: sending ? C.disabledFg : C.online,
-              padding: '8px 16px', borderRadius: 8, fontSize: 13,
-              cursor: sending ? 'default' : 'pointer',
-            }}>
-            {sending ? 'Gönderiliyor...' : 'Toplu İade Gönder'}
-          </button>
-        </div>
-      )}
-
-      {torbaFailed.length > 0 && (
-        <div style={{
-          marginBottom: 12, padding: '10px 14px', background: C.danger,
-          border: 'none', borderRadius: 8,
-        }}>
-          <div style={{ fontSize: 13, color: '#FFFFFF', fontWeight: 700, marginBottom: 8 }}>
-            {torbaFailed.length} belge torba cari tanımlı olmadığı için gönderilemedi.
-            Torba cari tanımlandıktan sonra &quot;Tümünü Yeniden Dene&quot; ile tekrar deneyin.
-          </div>
-          <button type="button" onClick={() => void handleRetryTorbaAll()}
-            style={{ ...solidBtn(C.surface), color: C.danger,
-              borderRadius: 7, padding: '6px 14px', fontSize: 12 }}>
-            Tümünü Yeniden Dene
-          </button>
-        </div>
-      )}
-
-      {counts.failed > 0 && (
-        <div style={{ marginBottom: 12, padding: '10px 14px', background: C.warning,
-          border: 'none', borderRadius: 8,
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 13, color: '#FFFFFF', fontWeight: 700 }}>
-            ⚠️ {counts.failed} hatalı işlem var
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--pos-text)' }}>
+            {torbaErrorRows.length} belge torba cari hatası veriyor.
           </span>
-          <button type="button" onClick={() => void handleRetryAll()}
-            style={{ ...solidBtn(C.surface), color: C.warning,
-              borderRadius: 7, padding: '6px 14px', fontSize: 12 }}>
-            Tümünü Yeniden Dene
+          <button type="button" onClick={() => void handleTorbaUpdate(torbaErrorRows)}
+            style={{ ...solidBtn(C.warning), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+            Hepsinin torba carisini güncelle
+          </button>
+        </div>
+      )}
+
+      {selectedRows.length > 0 && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 8,
+          background: 'var(--pos-surface)', border: '1px solid var(--pos-border)',
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        }}>
+          <span style={{ fontWeight: 700, color: 'var(--pos-text)' }}>{selectedRows.length} belge seçili</span>
+          <button type="button" onClick={() => {
+            void (async () => {
+              const runIds: string[] = []
+              for (const op of selectedRows) {
+                if (!editableQueueStatus(op.status)) continue
+                await window.electron.db.retryOperation(op.id)
+                runIds.push(dayEndRunId(op.payload))
+              }
+              await postDayEndProcessingIfFailed(runIds)
+              await reload()
+              onRetryTrigger?.()
+            })()
+          }} style={{ ...solidBtn(C.primary), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+            ↻ Tekrar dene
+          </button>
+          <button type="button" onClick={() => void handleTorbaUpdate(selectedRows)}
+            style={{ ...solidBtn(C.online), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+            👤 Torba cariyi güncelle
+          </button>
+          <button type="button" onClick={() => setSelected(new Set())}
+            style={{ ...solidBtn(C.neutral), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
+            Seçimi kaldır
           </button>
         </div>
       )}
@@ -418,11 +523,43 @@ export function DocumentQueueScreen({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {filtered.map(op => {
             const ss = STATUS_STYLE[op.status] ?? STATUS_STYLE.pending
+            const payload = readPayload(op.payload)
+            const runId = dayEndRunId(op.payload)
+            const snap = runId ? runProgress[runId] : undefined
+            const progressText = snap
+              ? dayEndProgressCaption(String(payload.range_label ?? op.label ?? ''), snap.docsSent, snap.docsTotal)
+              : ''
+            const cariLine = formatCariLine(payload)
+            const updatedAt = customerUpdatedAt(payload)
+            const menuItems = (() => {
+              const kind = queueCustomerKind(op.type, payload)
+              const editable = editableQueueStatus(op.status)
+              const items: Array<{ id: string; label: string; danger?: boolean; separator?: boolean }> = []
+              if (editable) items.push({ id: 'retry', label: '↻ Tekrar dene' })
+              if (editable && kind === 'torba') items.push({ id: 'torba', label: '👤 Torba cariyi güncelle' })
+              if (editable && kind === 'cari') items.push({ id: 'cari', label: '👤 Cari bilgisini yenile' })
+              items.push({ id: 'detail', label: '📄 Belge ayrıntısı' })
+              if (op.error?.trim()) items.push({ id: 'copy', label: '📋 Hatayı kopyala' })
+              if (editable) {
+                items.push({ id: 'sep', label: '', separator: true })
+                items.push({ id: 'delete', label: '🗑 Sil', danger: true })
+              }
+              return items
+            })()
             return (
-              <div key={op.id} style={{ background: 'white',
-                border: '1px solid #E5E7EB', borderRadius: 10,
+              <div key={op.id} style={{ background: 'var(--pos-surface)',
+                border: '1px solid var(--pos-border)', borderRadius: 10,
                 padding: '12px 16px', display: 'flex',
                 alignItems: 'center', gap: 12 }}>
+
+                <label style={{ display: 'flex', alignItems: 'center', minWidth: 28, minHeight: 44 }}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(op.id)}
+                    onChange={() => toggleSelected(op.id)}
+                    style={{ width: 20, height: 20 }}
+                  />
+                </label>
 
                 <div style={{ fontSize: 20, flexShrink: 0 }}>
                   {TYPE_ICON[op.type] ?? '📄'}
@@ -431,14 +568,23 @@ export function DocumentQueueScreen({
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {op.label ?? TYPE_LABEL[op.type] ?? op.type}
+                    {progressText || op.label || TYPE_LABEL[op.type] || op.type}
                   </div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--pos-text-muted)', marginTop: 2 }}>
                     {TYPE_LABEL[op.type] ?? op.type}
                     {' · '}
                     {formatIstanbulDateTime(op.createdAt) || '—'}
+                    {cariLine ? ` · Cari: ${cariLine}` : ''}
+                    {updatedAt ? (
+                      <span style={{
+                        marginLeft: 6, padding: '1px 6px', borderRadius: 8,
+                        background: 'var(--pos-surface-alt)', color: 'var(--pos-text-muted)',
+                      }}>
+                        güncellendi {istanbulClock(updatedAt)}
+                      </span>
+                    ) : null}
                     {op.sentAt && (
-                      <span style={{ color: '#2E7D32' }}>
+                      <span style={{ color: 'var(--pos-success)' }}>
                         {' · ✓ '}{formatIstanbulDateTime(op.sentAt)}
                       </span>
                     )}
@@ -468,46 +614,57 @@ export function DocumentQueueScreen({
                     : ss.label}
                 </div>
 
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
-                  {(op.status === 'failed' || INVOICE_TYPES.has(op.type)) && (
-                    <button type="button" onClick={() => setDetailOp(op)}
-                      style={{ background: '#F3F4F6', border: '1px solid #E5E7EB',
-                        borderRadius: 7, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}>
-                      Detay
-                    </button>
-                  )}
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center' }}>
                   {op.status === 'failed' && (
                     <button type="button"
                       onClick={() => void handleRetry(op.id)}
                       disabled={retrying === op.id}
                       style={{ ...solidBtn(C.primary, retrying === op.id),
-                        borderRadius: 7, padding: '5px 10px', fontSize: 11 }}>
-                      {retrying === op.id ? '...' : 'Yeniden Dene'}
+                        borderRadius: 7, padding: '8px 10px', fontSize: 13, minHeight: 48 }}>
+                      {retrying === op.id ? '...' : '↻ Tekrar dene'}
                     </button>
                   )}
-                  {op.status === 'failed' && INVOICE_TYPES.has(op.type) && (
-                    <button type="button" onClick={() => { setChangeOp(op); setCustomerQuery('') }}
-                      style={{ ...solidBtn(C.online),
-                        borderRadius: 7, padding: '5px 8px', fontSize: 11 }}>
-                      Cariyi Değiştir
-                    </button>
-                  )}
-                  {op.status === 'failed' && isManager && (
-                    <button type="button" onClick={() => void handleManualSent(op)}
-                      style={{ ...solidBtn(C.success),
-                        borderRadius: 7, padding: '5px 8px', fontSize: 11 }}>
-                      Gönderildi İşaretle
-                    </button>
-                  )}
-                  {op.status === 'success' && (
-                    <button type="button" onClick={() => void handleDelete(op.id)}
-                      style={{ background: 'none', border: 'none',
-                        cursor: 'pointer', color: '#D1D5DB',
-                        fontSize: 16, padding: '0 4px' }}>
-                      ✕
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    aria-label="İşlemler"
+                    onClick={event => {
+                      const rect = event.currentTarget.getBoundingClientRect()
+                      const spaceBelow = window.innerHeight - rect.bottom
+                      setMenuIndex(0)
+                      setMenu({
+                        id: op.id,
+                        upward: spaceBelow < 340,
+                        anchor: { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right },
+                      })
+                    }}
+                    style={{
+                      width: 48, height: 48, borderRadius: 8, cursor: 'pointer',
+                      border: '1px solid var(--pos-border)', background: 'var(--pos-surface)',
+                      color: 'var(--pos-text)', fontSize: 22,
+                    }}
+                  >
+                    ⋮
+                  </button>
                 </div>
+                {menu?.id === op.id && (
+                  <QueueActionMenu
+                    items={menuItems}
+                    index={menuIndex}
+                    upward={menu.upward}
+                    anchor={menu.anchor}
+                    onHover={setMenuIndex}
+                    onClose={() => setMenu(null)}
+                    onPick={id => {
+                      setMenu(null)
+                      if (id === 'retry') void handleRetry(op.id)
+                      if (id === 'torba') void handleTorbaUpdate([op])
+                      if (id === 'cari') void handleRefreshCari(op)
+                      if (id === 'detail') setDetailOp(op)
+                      if (id === 'copy') void copyError(op)
+                      if (id === 'delete') void handleDelete(op)
+                    }}
+                  />
+                )}
               </div>
             )
           })}
@@ -519,35 +676,38 @@ export function DocumentQueueScreen({
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
         }}>
           <div style={{
-            background: 'white', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%',
+            background: 'var(--pos-surface)', color: 'var(--pos-text)',
+            border: '1px solid var(--pos-border)',
+            borderRadius: 12, padding: 20, maxWidth: 520, width: '100%',
             maxHeight: '80vh', overflow: 'auto',
+            boxShadow: '0 16px 48px rgba(0,0,0,0.28)',
           }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Kayıt detayı</h3>
+            <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Belge ayrıntısı</h3>
             {(() => {
-              const full = ops.find(o => o.id === detailOp.id)
-              let summary = { saleId: '—', expectedTotal: null as number | null, customerHint: '—', invoiceDate: '—' }
-              try {
-                if (full?.payload) {
-                  summary = payloadSummary(JSON.parse(full.payload) as Record<string, unknown>)
-                }
-              } catch { /* parse hatası */ }
+              const payload = readPayload(detailOp.payload)
+              const summary = payloadSummary(payload)
+              const lines = Array.isArray(payload.items) ? payload.items as Array<{ name?: string; quantity?: number; net_amount?: number }> : []
               return (
-                <div style={{ fontSize: 13, lineHeight: 1.6, color: '#374151' }}>
+                <div style={{ fontSize: 14, lineHeight: 1.6 }}>
                   <div><strong>Tür:</strong> {TYPE_LABEL[detailOp.type] ?? detailOp.type}</div>
                   <div><strong>Fiş / satış:</strong> {summary.saleId}</div>
-                  <div><strong>Cari:</strong> {summary.customerHint}</div>
+                  <div><strong>Cari:</strong> {formatCariLine(payload) || summary.customerHint}</div>
                   <div><strong>Tutar:</strong> {summary.expectedTotal != null
                     ? `${summary.expectedTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
                     : '—'}</div>
                   <div><strong>Tarih:</strong> {summary.invoiceDate}</div>
-                  {INVOICE_TYPES.has(detailOp.type) && (detailOp.status === 'success' || detailOp.status === 'done') && (
-                    <div style={{ marginTop: 8, fontSize: 12, color: '#9CA3AF' }}>
-                      İşbaşı kimliği: {erpIdentity(full?.payload ?? detailOp.payload) || '—'}
+                  <div><strong>Kalem:</strong> {lines.length === 0 ? '—' : lines.map(line => `${line.name ?? 'Kalem'} ×${line.quantity ?? ''} ${line.net_amount ?? ''}`).join(' · ')}</div>
+                  {payload.day_end_run_id ? (
+                    <div><strong>Gün sonu:</strong> {String(payload.doc_key ?? '')} · {String(payload.range_label ?? payload.day_end_run_id)}</div>
+                  ) : null}
+                  {(detailOp.status === 'success' || detailOp.status === 'done') && (
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--pos-text-muted)' }}>
+                      İşbaşı kimliği: {erpIdentity(detailOp.payload) || '—'}
                     </div>
                   )}
                   {detailOp.error && (
-                    <div style={{ marginTop: 10, color: '#C62828', fontSize: 12,
-                      background: '#FEF2F2', padding: 8, borderRadius: 6 }}>
+                    <div style={{ marginTop: 10, color: 'var(--pos-danger)', fontSize: 13,
+                      background: 'var(--pos-surface-alt)', padding: 8, borderRadius: 6, whiteSpace: 'pre-wrap' }}>
                       {detailOp.error}
                     </div>
                   )}
@@ -556,54 +716,9 @@ export function DocumentQueueScreen({
             })()}
             <button type="button" onClick={() => setDetailOp(null)}
               style={{ marginTop: 16, padding: '8px 16px', borderRadius: 8,
-                border: '1px solid #E5E7EB', background: '#F9FAFB', cursor: 'pointer' }}>
+                border: '1px solid var(--pos-border)', background: 'var(--pos-surface-alt)',
+                color: 'var(--pos-text)', cursor: 'pointer' }}>
               Kapat
-            </button>
-          </div>
-        </div>
-      )}
-
-      {changeOp && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.4)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
-        }}>
-          <div style={{
-            background: 'white', borderRadius: 12, padding: 20, maxWidth: 420, width: '100%',
-          }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Cariyi değiştir</h3>
-            <input
-              value={customerQuery}
-              onChange={e => void searchCustomers(e.target.value)}
-              placeholder="Cari ara (ad, kod, vergi no…)"
-              style={{ width: '100%', padding: '8px 10px', borderRadius: 8,
-                border: '1px solid #E5E7EB', marginBottom: 8, boxSizing: 'border-box' }}
-            />
-            <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 10 }}>
-              {customerHits.map(c => (
-                <button key={c.id} type="button"
-                  onClick={() => void applyCustomerRef(changeOp, customerRefFromCustomerRow(c))}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
-                    border: 'none', borderBottom: '1px solid #F3F4F6', background: 'white',
-                    cursor: 'pointer', fontSize: 13,
-                  }}>
-                  {c.name} <span style={{ color: '#9CA3AF' }}>({c.code})</span>
-                </button>
-              ))}
-            </div>
-            <button type="button"
-              onClick={() => void applyCustomerRef(changeOp, customerRefTorba())}
-              style={{
-                ...solidBtn(C.online),
-                width: '100%', padding: '10px', borderRadius: 8, marginBottom: 8, fontSize: 14,
-              }}>
-              Torba cari kullan (gönderimde ayarlardan çözülür)
-            </button>
-            <button type="button" onClick={() => setChangeOp(null)}
-              style={{ width: '100%', padding: '8px', borderRadius: 8,
-                border: '1px solid #E5E7EB', background: '#F9FAFB', cursor: 'pointer' }}>
-              Vazgeç
             </button>
           </div>
         </div>

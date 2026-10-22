@@ -1,14 +1,23 @@
 import { randomUUID } from 'crypto'
 import { getSqlite } from './index'
-import { matchPaymentAccounts, readTerminalSettings } from './settingsCache'
+import { matchPaymentAccounts, readTerminalSettings, resolveTenderAccount } from './settingsCache'
 import { getSaleItems } from './operations'
 import { formatIstanbulRange } from '../src/lib/commandView'
-import { invoiceDateStamp } from '../src/lib/invoiceMode'
+import { invoiceDateStamp, istanbulDayKey } from '../src/lib/invoiceMode'
+import {
+  cariMissingProblem,
+  collectDayEndProblems,
+  hasIsbasiId,
+  torbaMissingProblem,
+  type DayEndProblem,
+} from '../src/lib/dayEndPrecheck'
+import { customerErpNumber, invoiceCustomerBody } from '../src/lib/queueCustomerPatch'
 import {
   dayEndDocLabel,
   dayEndPaymentLabel,
   parseDayEndMode,
   paymentDocKey,
+  nextDayEndReport,
   planDayEndDocs,
   type DayEndSale,
 } from '../src/lib/dayEndRun'
@@ -26,9 +35,12 @@ export interface ApplyDayEndRunInput {
 
 export interface ApplyDayEndRunResult {
   empty: boolean
+  rejected: boolean
+  problems: DayEndProblem[]
   saleCount: number
   refundCount: number
   docCount: number
+  docsTotal: number
 }
 
 interface Tender {
@@ -79,6 +91,13 @@ function methodLabel(tender: Tender): string {
 
 export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult {
   const db = getSqlite()
+  const bound = db.prepare(`SELECT COUNT(*) AS c FROM sales WHERE day_end_run_id = ?`).get(input.runId) as { c: number }
+  if (Number(bound?.c ?? 0) === 0) {
+    const problems = problemsForUnboundRange(db, input)
+    if (problems.length > 0) {
+      return { empty: false, rejected: true, problems, saleCount: 0, refundCount: 0, docCount: 0, docsTotal: 0 }
+    }
+  }
   const settings = readTerminalSettings(db)
   const invoiceType = settings.invoiceType === 'paper' ? 'paper' : 'e_archive'
   const endpointBase = invoiceType === 'paper' ? 'invoice-paper' : 'invoice'
@@ -105,7 +124,7 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
         ORDER BY julianday(created_at) ASC
       `).all(input.rangeStart, input.rangeEnd) as Array<Record<string, unknown>>
       if (source.length === 0) {
-        return { empty: true, saleCount: 0, refundCount: 0, docCount: 0 }
+        return { empty: true, rejected: false, problems: [], saleCount: 0, refundCount: 0, docCount: 0, docsTotal: 0 }
       }
       const stamp = db.prepare(`UPDATE sales SET day_end_run_id = ? WHERE id = ? AND day_end_run_id IS NULL`)
       for (const row of source) stamp.run(input.runId, String(row.id))
@@ -129,6 +148,7 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
     `)
     const now = new Date().toISOString()
     let inserted = 0
+    let expectedPayments = 0
     for (const plan of plans) {
       const saleIds = plan.sales.map(s => s.id)
       const lines = new Map<string, Record<string, unknown>>()
@@ -166,6 +186,7 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
         }
       }
       const tenders = loadTenders(saleIds)
+      expectedPayments += tenders.length
       const cashAmount = round2(tenders.filter(t => t.method === 'cash').reduce((s, t) => s + t.amount, 0))
       const cardTenders = tenders.filter(t => t.method === 'card')
       const cardByBank: Record<string, { amount: number; acquirerName: string }> = {}
@@ -214,6 +235,7 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
         terminal_amount: expected,
         sale_count: plan.sales.length,
         customer_name: customerName,
+        receipt_no: plan.sales[0]?.receiptNo ?? '',
         range_label: rangeLabel,
         terminal_no: input.terminalNo ?? '',
       }
@@ -231,7 +253,17 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
     }
     const saleCount = briefs.filter(s => !s.isReturn).length
     const refundCount = briefs.filter(s => s.isReturn).length
-    return { empty: false, saleCount, refundCount, docCount: inserted }
+    const docsTotal = inserted + expectedPayments
+    if (docsTotal > 0) {
+      db.prepare(`
+        INSERT INTO day_end_runs (run_id, status, reported_at, docs_total, docs_sent)
+        VALUES (?, 'processing', NULL, ?, 0)
+        ON CONFLICT(run_id) DO UPDATE SET
+          docs_total = CASE WHEN excluded.docs_total > COALESCE(day_end_runs.docs_total, 0)
+            THEN excluded.docs_total ELSE day_end_runs.docs_total END
+      `).run(input.runId, docsTotal)
+    }
+    return { empty: false, rejected: false, problems: [], saleCount, refundCount, docCount: inserted, docsTotal }
   })
   return run()
 }
@@ -249,8 +281,17 @@ export function countDayEndProcessing(runId: string): number {
   return Number(row?.c ?? 0)
 }
 
-export function releaseDayEndRun(runId: string): void {
+export function releaseDayEndRun(runId: string): { days: string[] } {
   const db = getSqlite()
+  const existing = db.prepare(`SELECT status, summary_days FROM day_end_runs WHERE run_id = ?`).get(runId) as {
+    status?: string
+    summary_days?: string | null
+  } | undefined
+  if (existing?.status === 'released') {
+    return { days: parseSummaryDays(existing.summary_days) }
+  }
+  const stamps = db.prepare(`SELECT created_at FROM sales WHERE day_end_run_id = ?`).all(runId) as Array<{ created_at: string }>
+  const days = [...new Set(stamps.map(row => istanbulDayKey(String(row.created_at ?? ''))).filter(Boolean))].sort()
   const run = db.transaction(() => {
     db.prepare(`
       UPDATE operation_queue
@@ -263,12 +304,16 @@ export function releaseDayEndRun(runId: string): void {
       WHERE day_end_run_id = ?
     `).run(runId)
     db.prepare(`
-      INSERT INTO day_end_runs (run_id, status, reported_at)
-      VALUES (?, 'released', ?)
-      ON CONFLICT(run_id) DO UPDATE SET status = 'released', reported_at = excluded.reported_at
-    `).run(runId, new Date().toISOString())
+      INSERT INTO day_end_runs (run_id, status, reported_at, summary_days)
+      VALUES (?, 'released', ?, ?)
+      ON CONFLICT(run_id) DO UPDATE SET
+        status = 'released',
+        reported_at = excluded.reported_at,
+        summary_days = excluded.summary_days
+    `).run(runId, new Date().toISOString(), JSON.stringify(days))
   })
   run()
+  return { days }
 }
 
 export function markDayEndRunStatus(runId: string, status: string): void {
@@ -362,6 +407,7 @@ export function enqueueDayEndPayments(input: {
         doc_key: docKey,
         parent_doc_key: row.doc_key,
         payment_label: labelName,
+        range_label: rangeLabel,
         terminal_amount: tender.amount,
       }
       const result = insert.run(
@@ -389,15 +435,13 @@ export interface DayEndStatusAction {
 export function settleDayEndRuns(companyId: string): DayEndStatusAction[] {
   const db = getSqlite()
   const runs = db.prepare(`
-    SELECT DISTINCT day_end_run_id AS run_id
-    FROM operation_queue
-    WHERE company_id = ?
-      AND day_end_run_id IS NOT NULL
-      AND day_end_run_id NOT IN (
-        SELECT run_id FROM day_end_runs
-        WHERE status IN ('completed', 'failed', 'released', 'completed_empty')
-      )
-  `).all(companyId) as Array<{ run_id: string }>
+    SELECT DISTINCT q.day_end_run_id AS run_id, r.status AS reported
+    FROM operation_queue q
+    LEFT JOIN day_end_runs r ON r.run_id = q.day_end_run_id
+    WHERE q.company_id = ?
+      AND q.day_end_run_id IS NOT NULL
+      AND (r.status IS NULL OR r.status NOT IN ('completed', 'released', 'completed_empty'))
+  `).all(companyId) as Array<{ run_id: string; reported: string | null }>
 
   const actions: DayEndStatusAction[] = []
   for (const run of runs) {
@@ -414,17 +458,25 @@ export function settleDayEndRuns(companyId: string): DayEndStatusAction[] {
       payload: string
     }>
     if (rows.length === 0) continue
-    if (rows.some(row => row.status === 'pending' || row.status === 'processing' || row.status === 'pending_dayend')) continue
-    const failed = rows.find(row => row.status === 'failed')
-    if (failed) {
-      const name = failed.label || failed.type
+    const decision = nextDayEndReport(run.reported, rows.map(row => row.status))
+    if (decision === 'processing') {
+      const progress = dayEndProgress(run.run_id)
       actions.push({
         runId: run.run_id,
-        body: { status: 'failed', error: `${name}: ${failed.error ?? 'Hata'}` },
+        body: { status: 'processing', docs_total: progress.docsTotal, docs_sent: progress.docsSent },
       })
       continue
     }
-    if (!rows.every(row => row.status === 'success')) continue
+    if (decision === null) continue
+    if (decision === 'failed') {
+      const failed = rows.find(row => row.status === 'failed')
+      const name = failed?.label || failed?.type || 'belge'
+      actions.push({
+        runId: run.run_id,
+        body: { status: 'failed', error: `${name}: ${failed?.error ?? 'Hata'}` },
+      })
+      continue
+    }
 
     let saleCount = 0
     let refundCount = 0
@@ -479,4 +531,364 @@ export function settleDayEndRuns(companyId: string): DayEndStatusAction[] {
     })
   }
   return actions
+}
+
+interface CustomerHit {
+  id: string
+  code: string
+  name: string
+  erpId: string
+}
+
+function customerHit(row: { id: string; code: string | null; name: string | null; erp_id: string | null } | undefined): CustomerHit | null {
+  if (!row) return null
+  return {
+    id: String(row.id),
+    code: String(row.code ?? ''),
+    name: String(row.name ?? ''),
+    erpId: String(row.erp_id ?? ''),
+  }
+}
+
+function customerById(companyId: string, id: string): CustomerHit | null {
+  const row = getSqlite().prepare(`
+    SELECT id, code, name, erp_id FROM customers WHERE company_id = ? AND id = ?
+  `).get(companyId, id) as { id: string; code: string | null; name: string | null; erp_id: string | null } | undefined
+  return customerHit(row)
+}
+
+function customerByCode(companyId: string, code: string): CustomerHit | null {
+  const row = getSqlite().prepare(`
+    SELECT id, code, name, erp_id FROM customers WHERE company_id = ? AND code = ?
+  `).get(companyId, code) as { id: string; code: string | null; name: string | null; erp_id: string | null } | undefined
+  return customerHit(row)
+}
+
+function problemsForUnboundRange(db: ReturnType<typeof getSqlite>, input: ApplyDayEndRunInput): DayEndProblem[] {
+  const sales = db.prepare(`
+    SELECT id, customer_id, customer_name, receipt_no
+    FROM sales
+    WHERE julianday(created_at) >= julianday(?)
+      AND julianday(created_at) <= julianday(?)
+      AND invoice_sent = 0
+      AND day_end_run_id IS NULL
+  `).all(input.rangeStart, input.rangeEnd) as Array<{
+    id: string
+    customer_id: string | null
+    customer_name: string | null
+    receipt_no: string | number | null
+  }>
+  if (sales.length === 0) return []
+  const settings = readTerminalSettings(db)
+  const torbaCode = String(settings.torbaCariId ?? '').trim()
+  const torba = torbaCode ? customerByCode(input.companyId, torbaCode) : null
+  const needsTorba = sales.some(sale => !sale.customer_id)
+  const briefs = sales.map(sale => {
+    const hit = sale.customer_id ? customerById(input.companyId, String(sale.customer_id)) : null
+    return {
+      receiptNo: String(sale.receipt_no ?? ''),
+      customerName: String(sale.customer_name ?? hit?.name ?? ''),
+      customerId: sale.customer_id ? String(sale.customer_id) : null,
+      hasErp: hasIsbasiId(hit),
+    }
+  })
+  const ids = sales.map(sale => String(sale.id))
+  const tenders = loadTenders(ids).map(tender => ({
+    method: tender.method,
+    acquirerId: tender.acquirerId,
+    acquirerName: tender.acquirerName || methodLabel(tender),
+    accountMatched: resolveTenderAccount(db, tender) != null,
+  }))
+  const placeholders = ids.map(() => '?').join(',')
+  const lines = db.prepare(`
+    SELECT s.receipt_no AS receipt_no, si.product_name AS product_name, si.vat_rate AS vat_rate,
+           p.code AS product_code, p.unit AS unit
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id
+    LEFT JOIN products p ON p.id = si.product_id
+    WHERE si.sale_id IN (${placeholders})
+  `).all(...ids) as Array<{
+    receipt_no: string | number | null
+    product_name: string | null
+    vat_rate: number | null
+    product_code: string | null
+    unit: string | null
+  }>
+  return collectDayEndProblems({
+    needsTorba,
+    torbaCode,
+    torbaReady: hasIsbasiId(torba),
+    sales: briefs,
+    tenders,
+    lines: lines.map(line => ({
+      receiptNo: String(line.receipt_no ?? ''),
+      name: String(line.product_name ?? ''),
+      productCode: String(line.product_code ?? ''),
+      unit: String(line.unit ?? ''),
+      vatRate: line.vat_rate == null ? null : Number(line.vat_rate),
+    })),
+  })
+}
+
+export interface DayEndProgressSnap {
+  status: string | null
+  docsTotal: number
+  docsSent: number
+  reportedTotal: number
+  reportedSent: number
+}
+
+export function dayEndProgress(runId: string): DayEndProgressSnap {
+  const db = getSqlite()
+  const run = db.prepare(`SELECT status, docs_total, docs_sent FROM day_end_runs WHERE run_id = ?`).get(runId) as {
+    status?: string
+    docs_total?: number | null
+    docs_sent?: number | null
+  } | undefined
+  const counts = db.prepare(`
+    SELECT COUNT(*) AS total,
+           SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS sent
+    FROM operation_queue
+    WHERE day_end_run_id = ?
+  `).get(runId) as { total: number; sent: number | null }
+  const storedTotal = Number(run?.docs_total ?? 0)
+  const liveTotal = Number(counts?.total ?? 0)
+  return {
+    status: run?.status ?? null,
+    docsTotal: storedTotal > 0 ? storedTotal : liveTotal,
+    docsSent: Number(counts?.sent ?? 0),
+    reportedTotal: storedTotal,
+    reportedSent: Number(run?.docs_sent ?? 0),
+  }
+}
+
+export function listDayEndProgress(companyId: string): Array<DayEndProgressSnap & { runId: string }> {
+  const rows = getSqlite().prepare(`
+    SELECT DISTINCT day_end_run_id AS run_id
+    FROM operation_queue
+    WHERE company_id = ? AND day_end_run_id IS NOT NULL
+  `).all(companyId) as Array<{ run_id: string }>
+  return rows.map(row => ({ runId: String(row.run_id), ...dayEndProgress(String(row.run_id)) }))
+}
+
+export function markDayEndProgress(runId: string, docsTotal: number, docsSent: number): void {
+  getSqlite().prepare(`
+    INSERT INTO day_end_runs (run_id, status, reported_at, docs_total, docs_sent)
+    VALUES (?, 'processing', ?, ?, ?)
+    ON CONFLICT(run_id) DO UPDATE SET
+      status = 'processing',
+      reported_at = excluded.reported_at,
+      docs_total = excluded.docs_total,
+      docs_sent = excluded.docs_sent
+  `).run(runId, new Date().toISOString(), docsTotal, docsSent)
+}
+
+function parseSummaryDays(raw: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(String(raw ?? '[]')) as unknown
+    return Array.isArray(parsed) ? parsed.filter((day): day is string => typeof day === 'string' && day.trim() !== '') : []
+  } catch {
+    return []
+  }
+}
+
+export function dayEndSummaryDays(runId: string): string[] {
+  const row = getSqlite().prepare(`SELECT summary_days FROM day_end_runs WHERE run_id = ?`).get(runId) as {
+    summary_days?: string | null
+  } | undefined
+  return parseSummaryDays(row?.summary_days)
+}
+
+function istanbulDayBounds(dayKey: string): { start: string; end: string } | null {
+  const parts = dayKey.split('-').map(part => Number(part))
+  if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return null
+  const [year, month, day] = parts
+  const start = new Date(Date.UTC(year, month - 1, day, -3, 0, 0))
+  const end = new Date(start.getTime() + 86_400_000)
+  return { start: start.toISOString(), end: end.toISOString() }
+}
+
+export function buildDailySummary(dayKey: string): {
+  date: string
+  sale_count: number
+  refund_count: number
+  sale_total: number
+  refund_total: number
+  net_total: number
+} | null {
+  const bounds = istanbulDayBounds(dayKey)
+  if (!bounds) return null
+  const rows = getSqlite().prepare(`
+    SELECT is_return, net_amount
+    FROM sales
+    WHERE julianday(created_at) >= julianday(?)
+      AND julianday(created_at) < julianday(?)
+  `).all(bounds.start, bounds.end) as Array<{ is_return: number | null; net_amount: number | null }>
+  let saleCount = 0
+  let refundCount = 0
+  let saleTotal = 0
+  let refundTotal = 0
+  for (const row of rows) {
+    const amount = round2(Math.abs(Number(row.net_amount ?? 0)))
+    if (Number(row.is_return ?? 0) === 1) {
+      refundCount += 1
+      refundTotal = round2(refundTotal + amount)
+    } else {
+      saleCount += 1
+      saleTotal = round2(saleTotal + amount)
+    }
+  }
+  return {
+    date: dayKey,
+    sale_count: saleCount,
+    refund_count: refundCount,
+    sale_total: saleTotal,
+    refund_total: refundTotal,
+    net_total: round2(saleTotal - refundTotal),
+  }
+}
+
+export interface DayEndRetryResult {
+  ok: boolean
+  pending: number
+  problems: DayEndProblem[]
+}
+
+function paymentTenderOf(payload: Record<string, unknown>, docKey: string): { method: string; acquirerId: string | null; name: string } {
+  const parent = String(payload.parent_doc_key ?? '')
+  const prefix = parent ? `pay:${parent}:` : ''
+  const rest = prefix && docKey.startsWith(prefix) ? docKey.slice(prefix.length) : ''
+  const [methodRaw, acquirerRaw] = rest.split(':')
+  if (methodRaw) {
+    return { method: methodRaw, acquirerId: acquirerRaw ? acquirerRaw : null, name: String(payload.payment_label ?? methodRaw) }
+  }
+  if (Number(payload.cash_amount ?? 0) > 0) return { method: 'cash', acquirerId: null, name: 'Nakit' }
+  const acquirerId = payload.card_acquirer_id ? String(payload.card_acquirer_id) : null
+  return { method: 'card', acquirerId, name: String(payload.payment_label ?? 'Kart') }
+}
+
+export function rebuildDayEndRetry(companyId: string, runId: string): DayEndRetryResult {
+  const db = getSqlite()
+  const busy = db.prepare(`
+    SELECT COUNT(*) AS c FROM operation_queue WHERE day_end_run_id = ? AND status = 'processing'
+  `).get(runId) as { c: number }
+  if (Number(busy?.c ?? 0) > 0) throw new Error('Gün sonu belgesi hâlâ gönderiliyor')
+  const rows = db.prepare(`
+    SELECT id, type, status, payload, doc_key
+    FROM operation_queue
+    WHERE day_end_run_id = ? AND status != 'success'
+  `).all(runId) as Array<{ id: string; type: string; status: string; payload: string; doc_key: string | null }>
+  if (rows.length === 0) return { ok: true, pending: 0, problems: [] }
+
+  const settings = readTerminalSettings(db)
+  const torbaCode = String(settings.torbaCariId ?? '').trim()
+  const torba = torbaCode ? customerByCode(companyId, torbaCode) : null
+  const problems: DayEndProblem[] = []
+  const seen = new Set<string>()
+  const add = (problem: DayEndProblem) => {
+    if (seen.has(problem.message)) return
+    seen.add(problem.message)
+    problems.push(problem)
+  }
+  const rebuilt = new Map<string, Record<string, unknown>>()
+  const customersByDoc = new Map<string, { id: number; code: string; name: string }>()
+
+  for (const row of rows) {
+    const payload = JSON.parse(row.payload) as Record<string, unknown>
+    if (row.type === 'payment') continue
+    const ref = payload.customer_ref as { type?: string; id?: string } | undefined
+    const isCari = ref?.type === 'customer' || String(payload.doc_kind ?? '').startsWith('customer')
+    let hit: CustomerHit | null = null
+    if (isCari) {
+      hit = ref?.id ? customerById(companyId, ref.id) : null
+      if (!hasIsbasiId(hit)) {
+        add(cariMissingProblem(String(payload.receipt_no ?? ''), String(payload.customer_name ?? hit?.name ?? '')))
+        continue
+      }
+    } else if (!hasIsbasiId(torba)) {
+      add(torbaMissingProblem(torbaCode))
+      continue
+    } else {
+      hit = torba
+    }
+    if (!hit) continue
+    const next: Record<string, unknown> = {
+      ...payload,
+      customer: invoiceCustomerBody(hit),
+      customer_erp_id: customerErpNumber(hit),
+      customer_ref: isCari ? { type: 'customer', id: hit.id } : { type: 'torba' },
+      payment_accounts: matchPaymentAccounts(db, {
+        cashAmount: Number(payload.cash_amount ?? 0),
+        cardAmount: Number(payload.card_amount ?? 0),
+        cardAcquirerId: payload.card_acquirer_id ? String(payload.card_acquirer_id) : null,
+        cardByBank: (payload.card_by_bank ?? {}) as Record<string, { amount?: number; acquirerName?: string }>,
+      }),
+    }
+    if (isCari) next.customer_name = hit.name
+    rebuilt.set(row.id, next)
+    if (row.doc_key) {
+      customersByDoc.set(row.doc_key, {
+        id: customerErpNumber(hit),
+        code: hit.code,
+        name: hit.name,
+      })
+    }
+  }
+
+  for (const row of rows) {
+    if (row.type !== 'payment') continue
+    const payload = JSON.parse(row.payload) as Record<string, unknown>
+    const tender = paymentTenderOf(payload, String(row.doc_key ?? ''))
+    const account = resolveTenderAccount(db, tender)
+    if (!account) {
+      if (tender.method === 'cash') add({ code: 'NAKIT_HESAP_YOK', message: 'Nakit kasa hesabı eşlenmemiş.' })
+      else if (tender.method === 'card') {
+        add({ code: 'BANKA_HESAP_YOK', message: `${tender.name || 'Banka'} (${tender.acquirerId || '—'}) için banka hesabı eşlenmemiş.` })
+      } else {
+        add({ code: 'ODEME_HESAP_YOK', message: `${tender.name || tender.method} için hesap eşlenmemiş.` })
+      }
+      continue
+    }
+    const parent = customersByDoc.get(String(payload.parent_doc_key ?? ''))
+    const accounts = tender.method === 'cash'
+      ? { cash: account, cards: [] }
+      : { cash: null, cards: [{ acquirer_id: tender.acquirerId ?? tender.method, amount: Number(payload.terminal_amount ?? payload.card_amount ?? payload.cash_amount ?? 0), account }] }
+    rebuilt.set(row.id, {
+      ...payload,
+      payment_accounts: accounts,
+      ...(parent ? { customer_id: parent.id, customer_code: parent.code, customer_name: parent.name } : {}),
+    })
+  }
+
+  if (problems.length > 0) return { ok: false, pending: 0, problems }
+
+  const update = db.prepare(`
+    UPDATE operation_queue
+    SET payload = ?, status = 'pending', attempts = 0, error = NULL
+    WHERE id = ? AND day_end_run_id = ?
+  `)
+  const write = db.transaction(() => {
+    for (const [id, payload] of rebuilt) update.run(JSON.stringify(payload), id, runId)
+  })
+  write()
+  return { ok: true, pending: rebuilt.size, problems: [] }
+}
+
+export function prepareDayEndPayment(queueId: string): Record<string, unknown> | null {
+  const db = getSqlite()
+  const row = db.prepare(`SELECT payload, doc_key, day_end_run_id FROM operation_queue WHERE id = ?`).get(queueId) as {
+    payload: string
+    doc_key: string | null
+    day_end_run_id: string | null
+  } | undefined
+  if (!row?.day_end_run_id) return null
+  const payload = JSON.parse(row.payload) as Record<string, unknown>
+  const tender = paymentTenderOf(payload, String(row.doc_key ?? ''))
+  const account = resolveTenderAccount(db, tender)
+  const accounts = tender.method === 'cash'
+    ? { cash: account, cards: [] }
+    : { cash: null, cards: [{ acquirer_id: tender.acquirerId ?? tender.method, amount: Number(payload.terminal_amount ?? payload.card_amount ?? 0), account }] }
+  const next = { ...payload, payment_accounts: accounts }
+  db.prepare(`UPDATE operation_queue SET payload = ? WHERE id = ?`).run(JSON.stringify(next), queueId)
+  return next
 }

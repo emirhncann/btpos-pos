@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { cmdProgress, type CmdProgressState } from '../lib/cmdProgress'
 import { commandExtra } from '../lib/commandLive'
 import { commandGlyph, commandMeta, commandTitle } from '../lib/commandLabels'
+import { dayEndProgressCaption } from '../lib/dayEndPrecheck'
 import { DateRangePicker } from '../components/DateRangePicker'
 import { isEditableField } from '../lib/keyboardInput'
 import {
@@ -42,6 +43,7 @@ const PRESETS: Array<{ id: DayPreset; label: string }> = [
 ]
 
 function badge(status: string): { text: string; color: string } {
+  if (status === 'rejected') return { text: 'Gönderilmedi', color: 'var(--pos-danger)' }
   if (status === 'done') return { text: 'Tamamlandı', color: 'var(--pos-success)' }
   if (status === 'failed') return { text: 'Hata', color: 'var(--pos-danger)' }
   if (status === 'running') return { text: 'İşleniyor', color: 'var(--pos-primary)' }
@@ -76,6 +78,7 @@ export function CommandsScreen({ isOnline, onClose }: { isOnline: boolean; onClo
   const [now, setNow] = useState(() => Date.now())
   const [flash, setFlash] = useState<{ label: string; until: number } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [progress, setProgress] = useState<Record<string, { docsSent: number; docsTotal: number }>>({})
 
   useEffect(() => cmdProgress.subscribe(setLive), [])
 
@@ -93,7 +96,19 @@ export function CommandsScreen({ isOnline, onClose }: { isOnline: boolean; onClo
     let stop = false
     const load = () => {
       window.electron.db.getCommandHistory(limit)
-        .then(list => { if (!stop) setRows(list) })
+        .then(async list => {
+          if (stop) return
+          setRows(list)
+          const ids = [...new Set(list.map(row => {
+            const payload = row.payload && typeof row.payload === 'object' ? row.payload as Record<string, unknown> : {}
+            return String(payload.run_id ?? '').trim()
+          }).filter(Boolean))]
+          const snaps = await Promise.all(ids.map(async id => {
+            const snap = await window.electron.db.dayEndProgress(id)
+            return [id, { docsSent: snap.docsSent, docsTotal: snap.docsTotal }] as const
+          }))
+          if (!stop) setProgress(Object.fromEntries(snaps))
+        })
         .catch(() => {})
     }
     load()
@@ -353,9 +368,17 @@ export function CommandsScreen({ isOnline, onClose }: { isOnline: boolean; onClo
               const lines = detail.split('\n')
               const clipped = fullId === row.id ? detail : lines.slice(0, 12).join('\n')
               const dur = durationLabel(row.startedAt ?? row.receivedAt, row.doneAt)
-              const rangeText = row.command === 'day_end_run'
+              const rangeText = row.command === 'day_end_run' || row.command === 'day_end_retry'
                 ? formatIstanbulRange(String(row.payload.range_start ?? ''), String(row.payload.range_end ?? ''))
                 : ''
+              const runId = String(row.payload.run_id ?? '').trim()
+              const snap = runId ? progress[runId] : undefined
+              const progressText = snap && (row.command === 'day_end_run' || row.command === 'day_end_retry')
+                ? dayEndProgressCaption(String(row.payload.range_label ?? rangeText), snap.docsSent, snap.docsTotal)
+                : ''
+              const problems = Array.isArray(row.payload.problems)
+                ? row.payload.problems.map(item => String(item)).filter(Boolean)
+                : []
               return (
                 <div key={row.id} style={{
                   ...card,
@@ -367,7 +390,7 @@ export function CommandsScreen({ isOnline, onClose }: { isOnline: boolean; onClo
                     <span style={{ color: mark.color, width: 22 }}>{row.status === 'failed' ? '⚠' : row.status === 'done' ? '✓' : '○'}</span>
                     <span style={{ width: 28 }}>{commandGlyph(row.command)}</span>
                     <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                      <span style={{ fontWeight: 700 }}>{commandTitle(row.command, row.payload)}</span>
+                      <span style={{ fontWeight: 700 }}>{progressText || commandTitle(row.command, row.payload)}</span>
                       {summary ? <span style={{ color: 'var(--pos-text-muted)' }}> · {summary}</span> : null}
                     </span>
                     <span style={{ color: 'var(--pos-text-muted)', fontSize: 13 }}>{istanbulClock(row.receivedAt)}</span>
@@ -394,6 +417,12 @@ export function CommandsScreen({ isOnline, onClose }: { isOnline: boolean; onClo
                         {row.doneAt ? ` · Bitti ${istanbulClock(row.doneAt, true)}` : ''}
                       </div>
                       {rangeText ? <div style={{ marginTop: 4 }}>Aralık: {rangeText}</div> : null}
+                      {progressText ? <div style={{ marginTop: 4 }}>{progressText}</div> : null}
+                      {problems.length > 0 && (
+                        <ul style={{ margin: '8px 0 0', paddingLeft: 18, color: 'var(--pos-danger)' }}>
+                          {problems.map(problem => <li key={problem}>{problem}</li>)}
+                        </ul>
+                      )}
                       {senderOf(row.payload) && <div style={{ marginTop: 4 }}>Gönderen: {senderOf(row.payload)}</div>}
                       <div style={{ marginTop: 4 }}>Durum: {row.status}</div>
                       <pre style={pre}>{clipped}</pre>
