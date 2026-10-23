@@ -1,7 +1,6 @@
 import { isbasiIdOf } from './queueCustomerPatch'
 
 export type DayEndProblemCode =
-  | 'TORBA_CARI_YOK'
   | 'CARI_ERP_EKSIK'
   | 'NAKIT_HESAP_YOK'
   | 'BANKA_HESAP_YOK'
@@ -45,14 +44,6 @@ export function hasIsbasiId(row: { id?: string | null; erpId?: string | null } |
   return isbasiIdOf(row ?? {}) !== ''
 }
 
-export function torbaMissingProblem(code: string): DayEndProblem {
-  const shown = code.trim() || '—'
-  return {
-    code: 'TORBA_CARI_YOK',
-    message: `Torba cari (${shown}) kasada yok. Yönetim panelinden müşteri listesini kasaya gönderin.`,
-  }
-}
-
 export function cariMissingProblem(receiptNo: string, name: string): DayEndProblem {
   const who = name.trim() || 'Cari'
   return {
@@ -84,9 +75,6 @@ export function lineMissingProblem(receiptNo: string, productName: string, kind:
 
 /** Satış bağlanmadan önce toplanan sorunlar. Aynı mesaj bir kez yazılır. */
 export function collectDayEndProblems(input: {
-  needsTorba: boolean
-  torbaCode: string
-  torbaReady: boolean
   sales: PrecheckSale[]
   tenders: PrecheckTender[]
   lines: PrecheckLine[]
@@ -98,8 +86,6 @@ export function collectDayEndProblems(input: {
     seen.add(problem.message)
     problems.push(problem)
   }
-
-  if (input.needsTorba && !input.torbaReady) add(torbaMissingProblem(input.torbaCode))
 
   for (const sale of input.sales) {
     if (!sale.customerId) continue

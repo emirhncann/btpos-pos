@@ -8,10 +8,9 @@ import {
   cariMissingProblem,
   collectDayEndProblems,
   hasIsbasiId,
-  torbaMissingProblem,
   type DayEndProblem,
 } from '../src/lib/dayEndPrecheck'
-import { customerErpNumber, invoiceCustomerBody } from '../src/lib/queueCustomerPatch'
+import { customerErpNumber, invoiceCustomerBody, queueCustomerKind } from '../src/lib/queueCustomerPatch'
 import {
   dayEndDocLabel,
   dayEndPaymentLabel,
@@ -207,7 +206,8 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
       })
       const last = plan.sales[plan.sales.length - 1]
       const customerId = plan.sales.find(s => s.customerId)?.customerId ?? null
-      const customerName = plan.docKind.startsWith('retail')
+      const retail = plan.docKind === 'retail_invoice' || plan.docKind === 'retail_refund'
+      const customerName = retail
         ? (plan.sales.find(s => s.customerName)?.customerName || 'Perakende')
         : (last.customerName || 'Cari')
       const label = dayEndDocLabel(rangeLabel, plan)
@@ -215,7 +215,15 @@ export function applyDayEndRun(input: ApplyDayEndRunInput): ApplyDayEndRunResult
       const payload = {
         sale_id: saleId,
         day_end_sale_ids: saleIds,
-        customer_ref: customerId ? { type: 'customer', id: customerId } : { type: 'torba' },
+        ...(retail
+          ? {
+            customer_ref: { type: 'torba', id: '-1' },
+            customer_erp_id: -1,
+            customer: { erp_id: -1, name: 'TORBA' },
+          }
+          : {
+            customer_ref: customerId ? { type: 'customer', id: customerId } : { type: 'torba' },
+          }),
         items: [...lines.values()],
         expected_total: expected,
         invoice_date: invoiceDateStamp(last.createdAt),
@@ -360,7 +368,10 @@ export function enqueueDayEndPayments(input: {
     range_label?: string
     invoice_date?: string
     terminal_id?: string
+    doc_kind?: string
+    customer_ref?: { type?: string }
   }
+  const torbaDoc = queueCustomerKind('invoice', payload) === 'torba'
   const saleIds = Array.isArray(payload.day_end_sale_ids)
     ? payload.day_end_sale_ids.filter(id => typeof id === 'string' && !id.startsWith('gunsonu-'))
     : []
@@ -389,9 +400,9 @@ export function enqueueDayEndPayments(input: {
         invoice_id: input.invoiceId,
         invoice_number: input.invoiceNumber ?? null,
         invoice_date: payload.invoice_date ?? new Date().toISOString(),
-        customer_id: input.customerId ?? 0,
-        customer_code: input.customerCode ?? '',
-        customer_name: input.customerName ?? '',
+        customer_id: torbaDoc ? -1 : (input.customerId ?? 0),
+        customer_code: torbaDoc ? '' : (input.customerCode ?? ''),
+        customer_name: torbaDoc ? 'TORBA' : (input.customerName ?? ''),
         cash_amount: tender.method === 'cash' ? tender.amount : 0,
         card_amount: tender.method === 'cash' ? 0 : tender.amount,
         card_acquirer_id: tender.method === 'card' ? tender.acquirerId : null,
@@ -557,13 +568,6 @@ function customerById(companyId: string, id: string): CustomerHit | null {
   return customerHit(row)
 }
 
-function customerByCode(companyId: string, code: string): CustomerHit | null {
-  const row = getSqlite().prepare(`
-    SELECT id, code, name, erp_id FROM customers WHERE company_id = ? AND code = ?
-  `).get(companyId, code) as { id: string; code: string | null; name: string | null; erp_id: string | null } | undefined
-  return customerHit(row)
-}
-
 function problemsForUnboundRange(db: ReturnType<typeof getSqlite>, input: ApplyDayEndRunInput): DayEndProblem[] {
   const sales = db.prepare(`
     SELECT id, customer_id, customer_name, receipt_no
@@ -579,10 +583,6 @@ function problemsForUnboundRange(db: ReturnType<typeof getSqlite>, input: ApplyD
     receipt_no: string | number | null
   }>
   if (sales.length === 0) return []
-  const settings = readTerminalSettings(db)
-  const torbaCode = String(settings.torbaCariId ?? '').trim()
-  const torba = torbaCode ? customerByCode(input.companyId, torbaCode) : null
-  const needsTorba = sales.some(sale => !sale.customer_id)
   const briefs = sales.map(sale => {
     const hit = sale.customer_id ? customerById(input.companyId, String(sale.customer_id)) : null
     return {
@@ -615,9 +615,6 @@ function problemsForUnboundRange(db: ReturnType<typeof getSqlite>, input: ApplyD
     unit: string | null
   }>
   return collectDayEndProblems({
-    needsTorba,
-    torbaCode,
-    torbaReady: hasIsbasiId(torba),
     sales: briefs,
     tenders,
     lines: lines.map(line => ({
@@ -780,9 +777,6 @@ export function rebuildDayEndRetry(companyId: string, runId: string): DayEndRetr
   `).all(runId) as Array<{ id: string; type: string; status: string; payload: string; doc_key: string | null }>
   if (rows.length === 0) return { ok: true, pending: 0, problems: [] }
 
-  const settings = readTerminalSettings(db)
-  const torbaCode = String(settings.torbaCariId ?? '').trim()
-  const torba = torbaCode ? customerByCode(companyId, torbaCode) : null
   const problems: DayEndProblem[] = []
   const seen = new Set<string>()
   const add = (problem: DayEndProblem) => {
@@ -799,32 +793,31 @@ export function rebuildDayEndRetry(companyId: string, runId: string): DayEndRetr
     const ref = payload.customer_ref as { type?: string; id?: string } | undefined
     const isCari = ref?.type === 'customer' || String(payload.doc_kind ?? '').startsWith('customer')
     let hit: CustomerHit | null = null
-    if (isCari) {
-      hit = ref?.id ? customerById(companyId, ref.id) : null
-      if (!hasIsbasiId(hit)) {
-        add(cariMissingProblem(String(payload.receipt_no ?? ''), String(payload.customer_name ?? hit?.name ?? '')))
-        continue
-      }
-    } else if (!hasIsbasiId(torba)) {
-      add(torbaMissingProblem(torbaCode))
+    const accounts = matchPaymentAccounts(db, {
+      cashAmount: Number(payload.cash_amount ?? 0),
+      cardAmount: Number(payload.card_amount ?? 0),
+      cardAcquirerId: payload.card_acquirer_id ? String(payload.card_acquirer_id) : null,
+      cardByBank: (payload.card_by_bank ?? {}) as Record<string, { amount?: number; acquirerName?: string }>,
+    })
+    if (!isCari) {
+      rebuilt.set(row.id, { ...payload, payment_accounts: accounts })
+      if (row.doc_key) customersByDoc.set(row.doc_key, { id: -1, code: '', name: 'TORBA' })
       continue
-    } else {
-      hit = torba
+    }
+    hit = ref?.id ? customerById(companyId, ref.id) : null
+    if (!hasIsbasiId(hit)) {
+      add(cariMissingProblem(String(payload.receipt_no ?? ''), String(payload.customer_name ?? hit?.name ?? '')))
+      continue
     }
     if (!hit) continue
     const next: Record<string, unknown> = {
       ...payload,
       customer: invoiceCustomerBody(hit),
       customer_erp_id: customerErpNumber(hit),
-      customer_ref: isCari ? { type: 'customer', id: hit.id } : { type: 'torba' },
-      payment_accounts: matchPaymentAccounts(db, {
-        cashAmount: Number(payload.cash_amount ?? 0),
-        cardAmount: Number(payload.card_amount ?? 0),
-        cardAcquirerId: payload.card_acquirer_id ? String(payload.card_acquirer_id) : null,
-        cardByBank: (payload.card_by_bank ?? {}) as Record<string, { amount?: number; acquirerName?: string }>,
-      }),
+      customer_ref: { type: 'customer', id: hit.id },
+      customer_name: hit.name,
+      payment_accounts: accounts,
     }
-    if (isCari) next.customer_name = hit.name
     rebuilt.set(row.id, next)
     if (row.doc_key) {
       customersByDoc.set(row.doc_key, {
@@ -849,7 +842,21 @@ export function rebuildDayEndRetry(companyId: string, runId: string): DayEndRetr
       }
       continue
     }
-    const parent = customersByDoc.get(String(payload.parent_doc_key ?? ''))
+    const parentKey = String(payload.parent_doc_key ?? '')
+    let parent = customersByDoc.get(parentKey)
+    if (!parent && parentKey) {
+      const stored = db.prepare(`
+        SELECT type, payload FROM operation_queue
+        WHERE day_end_run_id = ? AND doc_key = ?
+        LIMIT 1
+      `).get(runId, parentKey) as { type: string; payload: string } | undefined
+      if (stored) {
+        const parentPayload = JSON.parse(stored.payload) as Record<string, unknown>
+        if (queueCustomerKind(stored.type, parentPayload) === 'torba') {
+          parent = { id: -1, code: '', name: 'TORBA' }
+        }
+      }
+    }
     const accounts = tender.method === 'cash'
       ? { cash: account, cards: [] }
       : { cash: null, cards: [{ acquirer_id: tender.acquirerId ?? tender.method, amount: Number(payload.terminal_amount ?? payload.card_amount ?? payload.cash_amount ?? 0), account }] }

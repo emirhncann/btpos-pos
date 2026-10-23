@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyCustomerPatch,
+  formatCariLine,
   isTorbaCariError,
   queueCustomerKind,
   sameTorba,
@@ -19,6 +20,15 @@ const body = {
 }
 
 describe('kuyruk cari yaması', () => {
+  it('torba belgesinde cariyi merkezden yazar', () => {
+    expect(formatCariLine(body)).toBe('Torba cari (merkezden)')
+    expect(formatCariLine({
+      doc_kind: 'customer_invoice',
+      customer_ref: { type: 'customer', id: '9' },
+      customer: { name: 'Ahmet', code: 'C1' },
+    })).toBe('Ahmet · C1')
+  })
+
   it('perakende ve cari belgelerini ayırır', () => {
     expect(queueCustomerKind('invoice', body)).toBe('torba')
     expect(queueCustomerKind('day_end_invoice', {})).toBe('torba')

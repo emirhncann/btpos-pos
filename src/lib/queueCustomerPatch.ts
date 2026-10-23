@@ -29,12 +29,15 @@ export function payloadCustomerName(payload: Record<string, unknown>): string {
 }
 
 export function formatCariLine(payload: Record<string, unknown>): string {
+  const ref = payload.customer_ref as { type?: string } | undefined
+  const kind = String(payload.doc_kind ?? '')
+  if (ref?.type === 'torba' || kind === 'retail_invoice' || kind === 'retail_refund') {
+    return 'Torba cari (merkezden)'
+  }
   const name = payloadCustomerName(payload)
   const code = payloadCustomerCode(payload)
   if (name && code) return `${name} · ${code}`
   if (name || code) return name || code
-  const ref = payload.customer_ref as { type?: string } | undefined
-  if (ref?.type === 'torba') return 'Torba cari'
   return ''
 }
 

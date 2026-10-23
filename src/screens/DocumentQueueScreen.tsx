@@ -16,11 +16,8 @@ import {
   formatCariLine,
   invoiceCustomerBody,
   isDayEndQueueDoc,
-  isTorbaCariError,
-  isbasiIdOf,
   payloadCustomerCode,
   queueCustomerKind,
-  sameTorba,
 } from '../lib/queueCustomerPatch'
 
 type OpStatus = 'pending' | 'pending_dayend' | 'processing' | 'success' | 'failed' | 'done' | 'cancelled'
@@ -183,99 +180,6 @@ export function DocumentQueueScreen({
       onRetryTrigger?.()
     } finally {
       setRetrying(null)
-    }
-  }
-
-  const torbaErrorRows = dateTypeFiltered.filter(op => {
-    const payload = readPayload(op.payload)
-    return op.status === 'failed'
-      && queueCustomerKind(op.type, payload) === 'torba'
-      && isTorbaCariError(op.error)
-  })
-
-  async function currentTorba(): Promise<CustomerRow | null> {
-    const settings = await window.electron.db.getTerminalSettings()
-    const code = settings.torbaCariId?.trim()
-    if (!code) return null
-    const row = await window.electron.db.getCustomerByCode(companyId, code)
-    if (!row || !isbasiIdOf(row)) return null
-    return row
-  }
-
-  async function applyTorba(op: OpRow, row: CustomerRow): Promise<'updated' | 'same' | 'skip'> {
-    const payload = readPayload(op.payload)
-    if (queueCustomerKind(op.type, payload) !== 'torba' || !editableQueueStatus(op.status)) return 'skip'
-    const erpId = customerErpNumber(row)
-    if (sameTorba(payload, { code: row.code, erpId })) return 'same'
-    const previous = payloadCustomerCode(payload)
-    const ok = await window.electron.db.refreshOperationCustomer(op.id, {
-      ref: { type: 'torba' },
-      customer: invoiceCustomerBody(row),
-      customerErpId: erpId,
-      touchName: false,
-    }, previous)
-    if (ok) {
-      console.log(`[belge-aktarim] torba cari güncellendi row=${op.id} eski=${previous || '—'} yeni=${row.code}`)
-    }
-    return ok ? 'updated' : 'skip'
-  }
-
-  async function handleTorbaUpdate(targets: OpRow[]) {
-    const row = await currentTorba()
-    const label = row ? `${row.name} · ${row.code}` : ''
-    if (!row) {
-      showInfo('Torba cari', 'Kasada tanımlı torba cari yok. Yönetim panelinden torba cariyi seçip ayarları kasaya gönderin.')
-      return
-    }
-    const eligible = targets.filter(op => {
-      const payload = readPayload(op.payload)
-      return queueCustomerKind(op.type, payload) === 'torba' && editableQueueStatus(op.status)
-    })
-    if (eligible.length === 0) {
-      showInfo('Torba cari', 'Güncellenecek carisiz belge yok.')
-      return
-    }
-    if (eligible.length === 1) {
-      const payload = readPayload(eligible[0].payload)
-      if (sameTorba(payload, { code: row.code, erpId: customerErpNumber(row) })) {
-        showInfo(
-          'Torba cari',
-          `Bu belge zaten güncel torba cariyi kullanıyor (${label}). Torba cari yönetim panelinde değiştiyse önce ayarları kasaya gönderin.`,
-        )
-        return
-      }
-      const ok = await confirm({
-        title: 'Torba cari güncellensin mi?',
-        message: `Eski: ${formatCariLine(payload) || 'gövdede cari yok'}\nYeni: ${label}\nBelge yeni cariyle yeniden gönderilecek.`,
-        confirmLabel: 'Güncelle ve Gönder',
-        cancelLabel: 'Vazgeç',
-      })
-      if (!ok) return
-    } else {
-      const ok = await confirm({
-        title: 'Torba cari güncellensin mi?',
-        message: `${eligible.length} belgenin torba carisi ${label} olarak güncellenecek.`,
-        confirmLabel: 'Güncelle ve Gönder',
-        cancelLabel: 'Vazgeç',
-      })
-      if (!ok) return
-    }
-    let updated = 0
-    let same = 0
-    const runIds: string[] = []
-    for (const op of eligible) {
-      const result = await applyTorba(op, row)
-      if (result === 'updated') {
-        updated += 1
-        runIds.push(dayEndRunId(op.payload))
-      }
-      if (result === 'same') same += 1
-    }
-    await postDayEndProcessingIfFailed(runIds)
-    await reload()
-    onRetryTrigger?.()
-    if (eligible.length > 1) {
-      showInfo('Torba cari', `${updated} güncellendi, ${same} atlandı (zaten güncel).`)
     }
   }
 
@@ -450,23 +354,6 @@ export function DocumentQueueScreen({
         ))}
       </div>
 
-      {torbaErrorRows.length > 0 && (
-        <div style={{
-          marginBottom: 12, padding: '12px 14px', borderRadius: 8,
-          background: 'color-mix(in srgb, var(--pos-warning) 18%, var(--pos-surface))',
-          border: '1px solid var(--pos-warning)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--pos-text)' }}>
-            {torbaErrorRows.length} belge torba cari hatası veriyor.
-          </span>
-          <button type="button" onClick={() => void handleTorbaUpdate(torbaErrorRows)}
-            style={{ ...solidBtn(C.warning), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-            Hepsinin torba carisini güncelle
-          </button>
-        </div>
-      )}
-
       {selectedRows.length > 0 && (
         <div style={{
           marginBottom: 12, padding: '10px 14px', borderRadius: 8,
@@ -488,10 +375,6 @@ export function DocumentQueueScreen({
             })()
           }} style={{ ...solidBtn(C.primary), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
             ↻ Tekrar dene
-          </button>
-          <button type="button" onClick={() => void handleTorbaUpdate(selectedRows)}
-            style={{ ...solidBtn(C.online), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
-            👤 Torba cariyi güncelle
           </button>
           <button type="button" onClick={() => setSelected(new Set())}
             style={{ ...solidBtn(C.neutral), borderRadius: 8, padding: '8px 12px', fontSize: 13 }}>
@@ -536,7 +419,6 @@ export function DocumentQueueScreen({
               const editable = editableQueueStatus(op.status)
               const items: Array<{ id: string; label: string; danger?: boolean; separator?: boolean }> = []
               if (editable) items.push({ id: 'retry', label: '↻ Tekrar dene' })
-              if (editable && kind === 'torba') items.push({ id: 'torba', label: '👤 Torba cariyi güncelle' })
               if (editable && kind === 'cari') items.push({ id: 'cari', label: '👤 Cari bilgisini yenile' })
               items.push({ id: 'detail', label: '📄 Belge ayrıntısı' })
               if (op.error?.trim()) items.push({ id: 'copy', label: '📋 Hatayı kopyala' })
@@ -657,7 +539,6 @@ export function DocumentQueueScreen({
                     onPick={id => {
                       setMenu(null)
                       if (id === 'retry') void handleRetry(op.id)
-                      if (id === 'torba') void handleTorbaUpdate([op])
                       if (id === 'cari') void handleRefreshCari(op)
                       if (id === 'detail') setDetailOp(op)
                       if (id === 'copy') void copyError(op)

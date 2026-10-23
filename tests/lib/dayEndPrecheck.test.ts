@@ -2,26 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { collectDayEndProblems, dayEndProgressCaption } from '../../src/lib/dayEndPrecheck'
 
 describe('gün sonu ön kontrol', () => {
-  it('torba cari yoksa satış bağlamadan rejected sorun üretir', () => {
+  it('carisiz satış torba kontrolü üretmez', () => {
     const problems = collectDayEndProblems({
-      needsTorba: true,
-      torbaCode: '0000000000000005',
-      torbaReady: false,
       sales: [{ receiptNo: '7', customerName: 'Perakende', customerId: null, hasErp: false }],
       tenders: [],
       lines: [],
     })
-    expect(problems.map(p => p.code)).toEqual(['TORBA_CARI_YOK'])
-    expect(problems[0].message).toBe(
-      'Torba cari (0000000000000005) kasada yok. Yönetim panelinden müşteri listesini kasaya gönderin.',
-    )
+    expect(problems).toEqual([])
   })
 
   it('cari, banka, diğer ödeme ve kalem sorunlarını birlikte listeler', () => {
     const problems = collectDayEndProblems({
-      needsTorba: false,
-      torbaCode: '',
-      torbaReady: false,
       sales: [{ receiptNo: '42', customerName: 'Ahmet Yılmaz', customerId: 'c1', hasErp: false }],
       tenders: [
         { method: 'card', acquirerId: '62', acquirerName: 'Garanti', accountMatched: false },

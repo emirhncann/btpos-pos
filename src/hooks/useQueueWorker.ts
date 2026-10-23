@@ -12,6 +12,25 @@ import { enqueueRunStatus, holdDayEndProgress, scheduleDayEndProgress } from '..
 
 const POLL_INTERVAL = 15_000
 
+function dayEndPaymentParty(payload: {
+  doc_kind?: unknown
+  customer_ref?: { type?: string }
+  customer_erp_id?: unknown
+  customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
+}): { customerId: number; customerCode: string; customerName: string } {
+  const kind = String(payload.doc_kind ?? '')
+  const torba = payload.customer_ref?.type === 'torba'
+    || kind === 'retail_invoice'
+    || kind === 'retail_refund'
+  if (torba) return { customerId: -1, customerCode: '', customerName: 'TORBA' }
+  const customer = payload.customer ?? {}
+  return {
+    customerId: Number(payload.customer_erp_id ?? customer.erp_id ?? customer.id ?? 0),
+    customerCode: String(customer.code ?? ''),
+    customerName: String(customer.name ?? ''),
+  }
+}
+
 function pickInvoiceNumber(res: Record<string, unknown>): string {
   const doc = res.doc && typeof res.doc === 'object' ? res.doc as Record<string, unknown> : null
   const direct = [
@@ -150,19 +169,20 @@ export async function processOperationQueue({
             const invoiceNumber = pickInvoiceNumber(res as unknown as Record<string, unknown>)
 
             if (success && res.invoice_id && payload.day_end_run_id) {
-              const resolved = sendPayload as {
+              const party = dayEndPaymentParty(sendPayload as {
+                doc_kind?: unknown
+                customer_ref?: { type?: string }
                 customer_erp_id?: unknown
                 customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
-              }
-              const customer = resolved.customer ?? {}
+              })
               await window.electron.db.rememberQueueInvoice(op.id, String(res.invoice_id), invoiceNumber)
               await window.electron.db.enqueueDayEndPayments({
                 queueId: op.id,
                 invoiceId: String(res.invoice_id),
                 invoiceNumber,
-                customerId: Number(resolved.customer_erp_id ?? customer.erp_id ?? customer.id ?? 0),
-                customerCode: String(customer.code ?? ''),
-                customerName: String(customer.name ?? ''),
+                customerId: party.customerId,
+                customerCode: party.customerCode,
+                customerName: party.customerName,
               })
             } else if (success && res.invoice_id) {
               const saleData = sendPayload as {
@@ -365,19 +385,20 @@ export async function processOperationQueue({
             const returnNumber = pickInvoiceNumber(data as unknown as Record<string, unknown>)
 
             if (success && data.invoice_id && payload.day_end_run_id) {
-              const resolved = sendPayload as {
+              const party = dayEndPaymentParty(sendPayload as {
+                doc_kind?: unknown
+                customer_ref?: { type?: string }
                 customer_erp_id?: unknown
                 customer?: { id?: unknown; erp_id?: unknown; code?: unknown; name?: unknown }
-              }
-              const customer = resolved.customer ?? {}
+              })
               await window.electron.db.rememberQueueInvoice(op.id, String(data.invoice_id), returnNumber)
               await window.electron.db.enqueueDayEndPayments({
                 queueId: op.id,
                 invoiceId: String(data.invoice_id),
                 invoiceNumber: returnNumber,
-                customerId: Number(resolved.customer_erp_id ?? customer.erp_id ?? customer.id ?? 0),
-                customerCode: String(customer.code ?? ''),
-                customerName: String(customer.name ?? ''),
+                customerId: party.customerId,
+                customerCode: party.customerCode,
+                customerName: party.customerName,
               })
             }
             const returnSaleId = sendPayload.sale_id
